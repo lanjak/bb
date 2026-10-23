@@ -82,8 +82,10 @@ describe("provider usage footer disclosure", () => {
       strings: { iconTint: null },
       signInHint: "Sign in.",
       expiredHint: "Sign in again.",
+      canUseReset: false,
       usage: {
         status: "ok",
+        resetCredits: null,
         accountEmail: email,
         planLabel: "Pro",
         windows: [
@@ -125,8 +127,10 @@ describe("provider usage footer disclosure", () => {
                       },
                       signInHint: "Sign in to Claude Code.",
                       expiredHint: "Sign in to Claude Code again.",
+                      canUseReset: false,
                       usage: {
                         status: "ok",
+                        resetCredits: null,
                         accountEmail: "claude@example.com",
                         planLabel: "Max",
                         windows: [
@@ -149,8 +153,10 @@ describe("provider usage footer disclosure", () => {
                       strings: { iconTint: null },
                       signInHint: "Sign in to Codex.",
                       expiredHint: "Sign in to Codex again.",
+                      canUseReset: false,
                       usage: {
                         status: "ok",
+                        resetCredits: null,
                         accountEmail: "codex@example.com",
                         planLabel: "Plus",
                         windows: [
@@ -181,8 +187,10 @@ describe("provider usage footer disclosure", () => {
                       strings: { iconTint: null },
                       signInHint: "Sign in to Codex.",
                       expiredHint: "Sign in to Codex again.",
+                      canUseReset: false,
                       usage: {
                         status: "ok",
+                        resetCredits: null,
                         accountEmail: "codex@example.com",
                         planLabel: "Plus",
                         windows: [
@@ -481,6 +489,7 @@ it.each([
       ? { status: state }
       : {
           status: "ok",
+          resetCredits: null,
           accountEmail: "review@example.com",
           planLabel: null,
           windows:
@@ -505,6 +514,7 @@ it.each([
     strings: { iconTint: null },
     signInHint: "Sign in to this account in the source plugin’s settings.",
     expiredHint: "Sign in again in the source plugin’s settings.",
+    canUseReset: false,
     usage,
   };
   vi.stubGlobal(
@@ -561,6 +571,7 @@ it("keeps a measured refresh when an older snapshot response arrives late", asyn
     strings: { iconTint: null },
     signInHint: "Sign in.",
     expiredHint: "Sign in again.",
+    canUseReset: false,
     usage,
   });
   const snapshot = (usage: UsageProvider["usage"]) =>
@@ -587,6 +598,7 @@ it("keeps a measured refresh when an older snapshot response arrives late", asyn
       if (providerIds.length > 0)
         return snapshot({
           status: "ok",
+          resetCredits: null,
           accountEmail: "review@example.com",
           planLabel: null,
           windows: [
@@ -637,5 +649,88 @@ it("keeps a measured refresh when an older snapshot response arrives late", asyn
   );
   expect(slot.queryByText("Usage not reported.")).toBeNull();
   expect(slot.getByText("37%")).toBeTruthy();
+  await mounted.lifecycle.dispose();
+});
+
+it("asks before spending a reset and reports the outcome", async () => {
+  let available = 2;
+  const account = (): UsageProvider => ({
+    id: "provider-codex:host",
+    providerId: "codex",
+    accountLabel: null,
+    displayName: "Codex",
+    logoUrl: null,
+    icon: null,
+    strings: { iconTint: null },
+    signInHint: "Sign in.",
+    expiredHint: "Sign in again.",
+    canUseReset: available > 0,
+    usage: {
+      status: "ok",
+      resetCredits: {
+        available,
+        usableNow: available,
+        nextExpiresAt: null,
+      },
+      accountEmail: "review@example.com",
+      planLabel: "Pro",
+      windows: [
+        { label: "Weekly limit", usedPercent: 100, resetsAt: null, cost: null },
+      ],
+    },
+  });
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).endsWith("/rpc/useReset")) {
+      available -= 1;
+      return Response.json({
+        ok: true,
+        result: { outcome: "reset", message: null },
+      });
+    }
+    return Response.json({
+      ok: true,
+      result: {
+        machines: [
+          {
+            id: "host",
+            displayName: "Machine",
+            status: "connected",
+            providers: [account()],
+            error: null,
+          },
+        ],
+      },
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const app = await loadPluginApp(() => import("./app"));
+  const mounted = await mountPluginContentScripts(app, {
+    pluginId: "bb--provider-usage",
+  });
+  const item = app.experimentalSidebarFooterItems[0];
+  if (item?.kind !== "disclosure") throw new Error("missing disclosure");
+  const slot = renderSlot(
+    item,
+    { dismiss: vi.fn() },
+    { pluginId: "bb--provider-usage" },
+  );
+  fireEvent.click(await slot.findByRole("button", { name: "Use reset…" }));
+  expect(
+    fetchMock.mock.calls.some(([input]) =>
+      String(input).endsWith("/rpc/useReset"),
+    ),
+  ).toBe(false);
+  expect(slot.getByText("Spend 1 of 2? This cannot be undone.")).toBeTruthy();
+  fireEvent.click(slot.getByRole("button", { name: "Use reset" }));
+  await waitFor(() =>
+    expect(slot.getByText("Reset used. Your limits were reset.")).toBeTruthy(),
+  );
+  const resetCall = fetchMock.mock.calls.find(([input]) =>
+    String(input).endsWith("/rpc/useReset"),
+  ) as [RequestInfo | URL, RequestInit] | undefined;
+  expect(JSON.parse(String(resetCall?.[1].body))).toEqual({
+    id: "provider-codex:host",
+  });
+  await waitFor(() => expect(slot.getByText("1 reset")).toBeTruthy());
   await mounted.lifecycle.dispose();
 });

@@ -66,6 +66,18 @@ export const providerUsageWindowSchema = z
 
 export type ProviderUsageWindow = z.infer<typeof providerUsageWindowSchema>;
 
+export const providerUsageResetCreditsSchema = z
+  .object({
+    available: z.number().int().nonnegative(),
+    usableNow: z.number().int().nonnegative(),
+    nextExpiresAt: z.string().min(1).nullable(),
+  })
+  .passthrough();
+
+export type ProviderUsageResetCredits = z.infer<
+  typeof providerUsageResetCreditsSchema
+>;
+
 export const providerUsageSchema = z.discriminatedUnion("status", [
   z
     .object({
@@ -73,6 +85,7 @@ export const providerUsageSchema = z.discriminatedUnion("status", [
       accountEmail: z.string().email().nullable(),
       planLabel: z.string().min(1).nullable(),
       windows: z.array(providerUsageWindowSchema),
+      resetCredits: providerUsageResetCreditsSchema.nullable().optional(),
     })
     .passthrough(),
   z.object({ status: z.literal("not_installed") }).passthrough(),

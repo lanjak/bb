@@ -2,6 +2,7 @@ import {
   normalizeUsageMeasurement,
   selectUsageResources,
 } from "./usage-normalization.js";
+import { randomUUID } from "node:crypto";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod/mini";
 import {
@@ -15,6 +16,9 @@ import {
 import {
   usageListMethod,
   usageFetchMethod,
+  usageConsumeResetMethod,
+  usageConsumeResetOutcomeSchema,
+  usageResetRpcContract,
   type UsageResourceList,
   type UsageMeasurement,
   usageSourceRpcContract,
@@ -40,6 +44,13 @@ export const providerUsageRpcContract = defineRpcContract({
       maxAgeMs: z.number().check(z.int(), z.nonnegative()),
     }),
     output: usageSnapshotSchema,
+  },
+  useReset: {
+    input: z.strictObject({ id: z.string().check(z.minLength(1)) }),
+    output: z.strictObject({
+      outcome: usageConsumeResetOutcomeSchema,
+      message: z.nullable(z.string().check(z.minLength(1))),
+    }),
   },
 });
 
@@ -75,6 +86,16 @@ function normalizedUsage(
           resetsAt: window.resetsAt || null,
           cost: window.cost ?? null,
         })),
+        resetCredits: usage.resetCredits
+          ? {
+              available: usage.resetCredits.available,
+              usableNow: Math.min(
+                usage.resetCredits.usableNow,
+                usage.resetCredits.available,
+              ),
+              nextExpiresAt: usage.resetCredits.nextExpiresAt || null,
+            }
+          : null,
       };
     case "not_installed":
       return { status: "not_installed" };
@@ -118,6 +139,7 @@ function normalizedProvider(
         provider.displayName +
         " session expired. Sign in again, then reload usage.",
     usage: normalizedUsage(usage),
+    canUseReset: false,
   };
 }
 
@@ -126,6 +148,7 @@ function resourceProvider(
   measurement: UsageMeasurement | undefined,
   pluginId: string,
   providers: Provider[],
+  resettable: boolean,
 ): UsageProvider {
   const metadata = providers.find(
     (provider) => provider.id === resource.providerId,
@@ -148,6 +171,10 @@ function resourceProvider(
         }
       : {}),
     id: `${pluginId}:${resource.id}`,
+    canUseReset:
+      resettable &&
+      measurement?.usage.status === "ok" &&
+      (measurement.usage.resetCredits?.available ?? 0) > 0,
     accountLabel:
       resource.scope.kind === "shared"
         ? (measurement?.usage.accountEmail ?? resource.label)
@@ -202,20 +229,25 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
   };
   const readUsage = async (request: UsageRequest): Promise<UsageSnapshot> => {
     const hostId = request.machineIds?.find((id) => !id.startsWith("source:"));
-    const [hosts, sources, providers, config] = await Promise.all([
-      bb.sdk.hosts
-        .list()
-        .then((hosts) => hosts.filter((host) => host.type !== "ephemeral")),
-      bb.sdk.plugins.experimental_discoverRpc({ method: usageListMethod }),
-      bb.sdk.providers
-        .list(
-          hostId === undefined
-            ? { capability: "usage" }
-            : { capability: "usage", hostId },
-        )
-        .catch(() => []),
-      bb.sdk.system.config().catch(() => null),
-    ]);
+    const [hosts, sources, resetSources, providers, config] = await Promise.all(
+      [
+        bb.sdk.hosts
+          .list()
+          .then((hosts) => hosts.filter((host) => host.type !== "ephemeral")),
+        bb.sdk.plugins.experimental_discoverRpc({ method: usageListMethod }),
+        bb.sdk.plugins
+          .experimental_discoverRpc({ method: usageConsumeResetMethod })
+          .catch(() => []),
+        bb.sdk.providers
+          .list(
+            hostId === undefined
+              ? { capability: "usage" }
+              : { capability: "usage", hostId },
+          )
+          .catch(() => []),
+        bb.sdk.system.config().catch(() => null),
+      ],
+    );
     hosts.sort(
       (a, b) =>
         Number(b.id === config?.primaryHostId) -
@@ -355,7 +387,13 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
         const key = keyOf(source.pluginId, resource.id);
         const cached = measurements.get(key);
         machine.providers.push(
-          resourceProvider(resource, cached?.value, source.pluginId, providers),
+          resourceProvider(
+            resource,
+            cached?.value,
+            source.pluginId,
+            providers,
+            resetSources.some((item) => item.pluginId === source.pluginId),
+          ),
         );
         if (source.error !== null || failures.has(key))
           machine.error = "Some usage could not be refreshed.";
@@ -372,7 +410,36 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
       );
     return { machines };
   };
-  bb.rpc.register(providerUsageRpcContract, { getUsage: readUsage });
+  const useReset = async ({
+    id,
+  }: {
+    id: string;
+  }): Promise<{
+    outcome: z.infer<typeof usageConsumeResetOutcomeSchema>;
+    message: string | null;
+  }> => {
+    const match = [...inventories.values()].flatMap((source) =>
+      source.resources
+        .filter((resource) => `${source.pluginId}:${resource.id}` === id)
+        .map((resource) => ({ source, resource })),
+    )[0];
+    if (!match) throw new Error("Usage entry no longer exists. Reload usage.");
+    const result = await bb.sdk.plugins.callRpc({
+      pluginId: match.source.pluginId,
+      method: usageConsumeResetMethod,
+      input: { resourceId: match.resource.id, requestId: randomUUID() },
+      outputSchema: usageResetRpcContract[usageConsumeResetMethod].output,
+      signal: AbortSignal.timeout(90_000),
+    });
+    await fetchResource(match.source.pluginId, match.resource.id, true).catch(
+      () => failures.add(keyOf(match.source.pluginId, match.resource.id)),
+    );
+    return result;
+  };
+  bb.rpc.register(providerUsageRpcContract, {
+    getUsage: readUsage,
+    useReset,
+  });
   const markDirty = () => {
     for (const value of measurements.values()) value.loadedAt = 0;
   };

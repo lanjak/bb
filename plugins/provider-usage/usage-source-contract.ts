@@ -39,11 +39,37 @@ const usageWindowSchema = z.object({
     })
     .nullable(),
 });
+export const usageResetCreditsSchema = z.object({
+  available: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe("Unspent usage-limit resets the account holds."),
+  usableNow: z
+    .number()
+    .int()
+    .nonnegative()
+    .describe(
+      "Resets that would apply to a current window now; 0 when no window is eligible.",
+    ),
+  nextExpiresAt: z
+    .string()
+    .nullable()
+    .describe(
+      "ISO expiry of the earliest unspent reset, or null when unknown or none expire.",
+    ),
+});
 const usageSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("ok"),
     ...accountFields,
     windows: z.array(usageWindowSchema),
+    resetCredits: usageResetCreditsSchema
+      .nullable()
+      .default(null)
+      .describe(
+        "Null when the provider reports no reset program for the account.",
+      ),
   }),
   z.object({ status: z.literal("not_installed"), ...accountFields }),
   z.object({ status: z.literal("unauthenticated"), ...accountFields }),
@@ -111,11 +137,40 @@ export const usageFetchInputSchema = z.object({
     ),
 });
 export type UsageResourceList = z.infer<typeof usageResourceListSchema>;
+export const usageConsumeResetInputSchema = z.object({
+  resourceId: z.string().min(1),
+  requestId: z
+    .string()
+    .regex(/^[A-Za-z0-9_-]{1,64}$/u)
+    .describe(
+      "Idempotency key for one reset attempt. Reuse it only to retry that attempt.",
+    ),
+});
+export const usageConsumeResetOutcomeSchema = z.enum([
+  "reset",
+  "nothing_to_reset",
+  "no_credit",
+  "already_redeemed",
+  "failed",
+]);
+export const usageConsumeResetOutputSchema = z.object({
+  outcome: usageConsumeResetOutcomeSchema,
+  message: z
+    .string()
+    .min(1)
+    .nullable()
+    .describe("Provider explanation when outcome is failed; otherwise null."),
+});
 export type UsageMeasurement = z.infer<typeof usageMeasurementSchema>;
+export type UsageResetCredits = z.infer<typeof usageResetCreditsSchema>;
+export type UsageConsumeResetOutput = z.infer<
+  typeof usageConsumeResetOutputSchema
+>;
 export type UsageResource = z.infer<typeof usageResourceSchema> &
   UsageMeasurement;
 export const usageListMethod = "provider-usage.v1.listResources";
 export const usageFetchMethod = "provider-usage.v1.getResource";
+export const usageConsumeResetMethod = "provider-usage.v1.consumeReset";
 export const usageSourceRpcContract = defineRpcContract({
   [usageListMethod]: {
     input: usageListInputSchema,
@@ -128,5 +183,13 @@ export const usageSourceRpcContract = defineRpcContract({
     output: usageMeasurementSchema,
     experimental_description:
       "Returns actual usage for exactly one listed resource, even when refresh is false. False permits cached observations; true requests a fresh attempt. Never collects other resources as a side effect. A removed resource fails the RPC; consumers relist. Per-account authentication and collection failures are usage states. observedAt is the last successful measurement time.",
+  },
+});
+export const usageResetRpcContract = defineRpcContract({
+  [usageConsumeResetMethod]: {
+    input: usageConsumeResetInputSchema,
+    output: usageConsumeResetOutputSchema,
+    experimental_description:
+      "Optional. Spends one usage-limit reset for exactly one listed resource whose usage reports resetCredits. Irreversible when outcome is reset; nothing_to_reset and no_credit keep the credit. The same requestId never spends twice. Sources without resets do not register it.",
   },
 });

@@ -23,10 +23,25 @@ import {
   experimental_versionFrom as versionFrom,
 } from "@get-bb/plugin-sdk/provider-bridge";
 import { z } from "zod";
+import {
+  CLAUDE_RESET_PROGRAM,
+  CLAUDE_RESET_QUERY,
+  claudeClaimOutcome,
+  nextClaudeGrantId,
+  parseClaudeResetCredits,
+  type ClaudeConsumeResetOutcome,
+} from "./reset-credits.js";
 
 const execFileAsync = experimental_execHostFile;
 const USAGE_FETCH_TIMEOUT_MS = 15_000;
-const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_API_BASE = "https://api.anthropic.com";
+const CLAUDE_USAGE_URL = `${CLAUDE_API_BASE}/api/oauth/usage`;
+const RESET_CONSUME_TIMEOUT_MS = 25_000;
+const CLI_VERSION_TTL_MS = 10 * 60_000;
+const cliVersions = new Map<
+  string,
+  { readAt: number; version: Promise<string | null> }
+>();
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_NPM_PACKAGE = "@anthropic-ai/claude-code";
 const CLAUDE_INSTALL_SCRIPT_URL = "https://claude.ai/install.sh";
@@ -49,6 +64,7 @@ const claudeAccountSchema = z.object({
     .object({
       emailAddress: z.string().email().nullish(),
       accountUuid: z.string().uuid().nullish(),
+      organizationUuid: z.string().uuid().nullish(),
     })
     .nullish(),
 });
@@ -528,14 +544,11 @@ export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
   }
   const known = { planLabel: planLabel(credentials), accountEmail: email };
   try {
-    const response = await fetch(CLAUDE_USAGE_URL, {
-      headers: {
-        Authorization: `Bearer ${credentials.accessToken}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "anthropic-beta": "oauth-2025-04-20",
-        "User-Agent": "claude-code/2.1.0",
-      },
+    const response = await fetch(claudeUsageUrl(), {
+      headers: claudeApiHeaders(
+        credentials.accessToken,
+        await cachedCliVersion(command),
+      ),
       signal: AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS),
     });
     if (response.status === 401) {
@@ -554,10 +567,15 @@ export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
         },
       };
     }
+    const body: unknown = await response.json();
+    const usage = normalizeUsage(body, credentials, email);
     return {
       supported: true,
       usage: {
-        ...normalizeUsage(await response.json(), credentials, email),
+        ...usage,
+        ...(usage.status === "ok"
+          ? { resetCredits: parseClaudeResetCredits(body, Date.now()) }
+          : {}),
         accountKey: account?.accountUuid
           ? `anthropic:account:${account.accountUuid}`
           : null,
@@ -573,6 +591,109 @@ export async function getClaudeProviderUsage(): Promise<ProviderUsageResult> {
       },
     };
   }
+}
+
+export async function consumeClaudeResetCredit(
+  requestId: string,
+): Promise<ClaudeConsumeResetOutcome> {
+  const command = await claudeExecutable();
+  const [credentials, account, version] = await Promise.all([
+    readCredentials(),
+    readAccount(),
+    cachedCliVersion(command),
+  ]);
+  const organization = account?.organizationUuid ?? null;
+  if (
+    !credentials ||
+    organization === null ||
+    (credentials.expiresAt != null && Date.now() >= credentials.expiresAt)
+  )
+    return {
+      outcome: "failed",
+      message: "Sign in to Claude Code on this machine to redeem resets.",
+    };
+  const headers = claudeApiHeaders(credentials.accessToken, version);
+  try {
+    const usage = await fetch(claudeUsageUrl(), {
+      headers,
+      signal: AbortSignal.timeout(USAGE_FETCH_TIMEOUT_MS),
+    });
+    if (!usage.ok) {
+      await usage.body?.cancel();
+      return {
+        outcome: "failed",
+        message: `Claude usage request failed (HTTP ${usage.status}).`,
+      };
+    }
+    const grantId = nextClaudeGrantId(await usage.json(), Date.now());
+    if (grantId === null) return { outcome: "no_credit" };
+    const response = await fetch(
+      `${CLAUDE_API_BASE}/api/organizations/${encodeURIComponent(organization)}/reset_rate_limits`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          program: CLAUDE_RESET_PROGRAM,
+          grant_id: grantId,
+          request_id: requestId,
+        }),
+        signal: AbortSignal.timeout(RESET_CONSUME_TIMEOUT_MS),
+      },
+    );
+    if (response.status === 401 || response.status === 403) {
+      await response.body?.cancel();
+      return {
+        outcome: "failed",
+        message: "Sign in to Claude Code again to redeem resets.",
+      };
+    }
+    if (response.status === 429) {
+      await response.body?.cancel();
+      return {
+        outcome: "failed",
+        message: "Claude is rate limiting resets. Try again soon.",
+      };
+    }
+    if (!response.ok) {
+      await response.body?.cancel();
+      return {
+        outcome: "failed",
+        message: `Claude reset request failed (HTTP ${response.status}).`,
+      };
+    }
+    return claudeClaimOutcome(await response.json().catch(() => null));
+  } catch (error) {
+    return {
+      outcome: "failed",
+      message: `Claude could not be reached to redeem the reset: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function cachedCliVersion(command: string): Promise<string | null> {
+  const cached = cliVersions.get(command);
+  if (cached && Date.now() - cached.readAt < CLI_VERSION_TTL_MS)
+    return cached.version;
+  const version = readCliVersion(command);
+  cliVersions.set(command, { readAt: Date.now(), version });
+  return version;
+}
+
+function claudeUsageUrl(): string {
+  return `${CLAUDE_USAGE_URL}?${new URLSearchParams(CLAUDE_RESET_QUERY)}`;
+}
+
+function claudeApiHeaders(
+  accessToken: string,
+  version: string | null,
+): Record<string, string> {
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "anthropic-beta": "oauth-2025-04-20",
+    "User-Agent": `claude-cli/${version ?? "2.1.0"} (external, cli)`,
+  };
 }
 
 export const __testing = {

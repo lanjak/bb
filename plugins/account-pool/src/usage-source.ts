@@ -169,7 +169,12 @@ export function registerUsageSource(bb: BbPluginApi, hub: AccountPoolHub) {
             observedAt: account.observedAt,
             usage:
               error === null
-                ? { status: "ok", ...accountFields, windows }
+                ? {
+                    status: "ok",
+                    ...accountFields,
+                    windows,
+                    resetCredits: null,
+                  }
                 : { status: "error", ...accountFields, message: error },
           };
         });

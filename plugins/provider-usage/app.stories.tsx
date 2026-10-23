@@ -64,6 +64,7 @@ function provider(
     },
     signInHint: "Sign in to this account in the provider’s settings.",
     expiredHint: "Sign in again in the provider’s settings.",
+    canUseReset: false,
     usage,
   };
 }
@@ -75,6 +76,7 @@ function measured(
 ): ProviderUsage {
   return {
     status: "ok",
+    resetCredits: null,
     accountEmail: email,
     planLabel,
     windows: [
@@ -125,6 +127,7 @@ function twoWindows(
 ): ProviderUsage {
   return {
     status: "ok",
+    resetCredits: null,
     accountEmail: email,
     planLabel,
     windows: [
@@ -197,6 +200,7 @@ function liveAccount(
     strings: { iconTint },
     signInHint: `Sign in to ${displayName} on the machine.`,
     expiredHint: `Your ${displayName} session expired. Sign in again, then reload.`,
+    canUseReset: false,
     usage,
   };
 }
@@ -208,6 +212,7 @@ function liveUsage(
 ): ProviderUsage {
   return {
     status: "ok",
+    resetCredits: null,
     accountEmail: email,
     planLabel,
     windows: windows.map(([label, usedPercent, resetHours]) => ({

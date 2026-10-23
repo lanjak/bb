@@ -1,9 +1,12 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { claudeUsageResetHostContract } from "./usage-reset-host-contract.js";
 import {
   usageSourceRpcContract,
+  usageResetRpcContract,
   usageListMethod,
   usageFetchMethod,
+  usageConsumeResetMethod,
   usageMeasurementSchema,
   usagePlanSchema,
   usageWindowKindSchema,
@@ -171,6 +174,47 @@ export function registerUsageSource(bb: BbPluginApi) {
       experimental_discoverable: true,
       experimental_description:
         "Host-local usage owned by the claude-code provider plugin. Inventory reads metadata only. Independent of display plugins.",
+    },
+  );
+  const host = bb.hosts.experimental_client({
+    contract: claudeUsageResetHostContract,
+  });
+  bb.rpc.register(
+    usageResetRpcContract,
+    {
+      async [usageConsumeResetMethod]({ resourceId, requestId }) {
+        const [hostId, providerId] = locatorSchema.parse(
+          JSON.parse(resourceId),
+        );
+        if (providerId !== "claude-code")
+          throw new Error("Usage resource no longer exists.");
+        const machine = await bb.sdk.hosts.get({ hostId });
+        if (machine.status === "disconnected")
+          return {
+            outcome: "failed" as const,
+            message: "Machine is disconnected.",
+          };
+        try {
+          return await host.call(
+            "claude.usage.consumeReset",
+            { requestId },
+            { hostId, timeoutMs: 60_000 },
+          );
+        } catch {
+          return {
+            outcome: "failed" as const,
+            message:
+              "This machine could not redeem the reset. Update bb on it, then try again.",
+          };
+        } finally {
+          cache.delete(resourceId);
+        }
+      },
+    },
+    {
+      experimental_discoverable: true,
+      experimental_description:
+        "Spends one Claude usage-limit reset for the Claude Code login on the resource's machine.",
     },
   );
 }

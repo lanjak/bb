@@ -13,12 +13,19 @@ export const usageWindowSchema = z.strictObject({
   cost: z.nullable(costSchema),
 });
 
+export const usageResetCreditsSchema = z.strictObject({
+  available: z.number().check(z.int(), z.nonnegative()),
+  usableNow: z.number().check(z.int(), z.nonnegative()),
+  nextExpiresAt: z.nullable(nonemptyStringSchema),
+});
+
 export const providerUsageSchema = z.discriminatedUnion("status", [
   z.strictObject({
     status: z.literal("ok"),
     accountEmail: z.nullable(nonemptyStringSchema),
     planLabel: z.nullable(nonemptyStringSchema),
     windows: z.array(usageWindowSchema),
+    resetCredits: z.nullable(usageResetCreditsSchema),
   }),
   z.strictObject({ status: z.literal("not_installed") }),
   z.strictObject({ status: z.literal("unauthenticated") }),
@@ -45,6 +52,7 @@ export const usageProviderSchema = z.strictObject({
   signInHint: nonemptyStringSchema,
   expiredHint: nonemptyStringSchema,
   usage: z.nullable(providerUsageSchema),
+  canUseReset: z.boolean(),
 });
 
 export const usageMachineSchema = z.strictObject({
@@ -64,8 +72,23 @@ export const usageRpcSuccessSchema = z.strictObject({
   result: usageSnapshotSchema,
 });
 
+export const useResetRpcSuccessSchema = z.strictObject({
+  ok: z.literal(true),
+  result: z.strictObject({
+    outcome: z.enum([
+      "reset",
+      "nothing_to_reset",
+      "no_credit",
+      "already_redeemed",
+      "failed",
+    ]),
+    message: z.nullable(nonemptyStringSchema),
+  }),
+});
+
 export type ProviderUsage = z.infer<typeof providerUsageSchema>;
 export type UsageWindow = z.infer<typeof usageWindowSchema>;
+export type UsageResetCredits = z.infer<typeof usageResetCreditsSchema>;
 export type UsageProvider = z.infer<typeof usageProviderSchema>;
 export type UsageMachine = z.infer<typeof usageMachineSchema>;
 export type UsageSnapshot = z.infer<typeof usageSnapshotSchema>;

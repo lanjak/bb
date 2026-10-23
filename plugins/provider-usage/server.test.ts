@@ -4,7 +4,12 @@ import {
   makeHostResponse,
 } from "@get-bb/plugin-sdk/testing";
 import plugin from "./server.js";
-import { usageListMethod, usageFetchMethod } from "./usage-source-contract.js";
+import { usageSnapshotSchema } from "./usage-schema.js";
+import {
+  usageConsumeResetMethod,
+  usageFetchMethod,
+  usageListMethod,
+} from "./usage-source-contract.js";
 
 it("lists cheaply, fetches only the selected source/provider, preserves failed measurements, and evicts removed resources", async () => {
   let enabled = true;
@@ -353,5 +358,133 @@ it("collapses known account observations per machine, preserves unknown identiti
     expect(JSON.stringify(snapshot)).not.toContain("81");
   } finally {
     await harness.lifecycle.dispose();
+  }
+});
+
+it("offers a reset only where the source can spend one, and refreshes after spending", async () => {
+  let available = 2;
+  const rpc = vi.fn(async ({ pluginId, method, input }) => {
+    if (method === usageListMethod)
+      return {
+        resources: [
+          {
+            id: `${pluginId}-resource`,
+            providerId: pluginId === "codex-source" ? "codex" : "claude-code",
+            label: pluginId,
+            scope: { kind: "host", hostId: "host", hostName: "Machine" },
+          },
+        ],
+      };
+    if (method === usageConsumeResetMethod) {
+      available -= 1;
+      return { outcome: "reset", message: null };
+    }
+    return {
+      observedAt: 123,
+      usage: {
+        status: "ok",
+        accountEmail: null,
+        planLabel: null,
+        windows: [],
+        resetCredits: {
+          available,
+          usableNow: available,
+          nextExpiresAt: "2026-10-29T18:45:52.000Z",
+        },
+      },
+    };
+  });
+  const host = createFakePluginHost({
+    pluginId: "provider-usage",
+    sdk: {
+      system: { config: async () => ({ primaryHostId: null }) },
+      hosts: {
+        list: async () => [
+          makeHostResponse({
+            id: "host",
+            name: "Machine",
+            status: "connected",
+          }),
+        ],
+      },
+      providers: {
+        list: async () => [
+          { id: "codex", displayName: "Codex", logoUrl: null },
+          { id: "claude-code", displayName: "Claude Code", logoUrl: null },
+        ],
+      },
+      plugins: {
+        experimental_discoverRpc: async (args) =>
+          args?.method === usageListMethod
+            ? [
+                {
+                  pluginId: "codex-source",
+                  displayName: "Codex",
+                  method: usageListMethod,
+                },
+                {
+                  pluginId: "claude-source",
+                  displayName: "Claude",
+                  method: usageListMethod,
+                },
+              ]
+            : [
+                {
+                  pluginId: "codex-source",
+                  displayName: "Codex",
+                  method: usageConsumeResetMethod,
+                },
+              ],
+        callRpc: rpc,
+      },
+    },
+  });
+  plugin(host.bb);
+  const request = {
+    force: false,
+    machineIds: ["host"],
+    providerIds: ["codex", "claude-code"],
+    maxAgeMs: 60_000,
+  };
+  try {
+    const before = usageSnapshotSchema.parse(
+      await host.harness.behavior.callRpc("getUsage", request),
+    );
+    const providers = before.machines[0]!.providers;
+    expect(
+      providers.map((provider) => [provider.id, provider.canUseReset]),
+    ).toEqual([
+      ["codex-source:codex-source-resource", true],
+      ["claude-source:claude-source-resource", false],
+    ]);
+    expect(providers[0]!.usage).toMatchObject({
+      resetCredits: { available: 2, usableNow: 2 },
+    });
+
+    await expect(
+      host.harness.behavior.callRpc("useReset", {
+        id: "codex-source:codex-source-resource",
+      }),
+    ).resolves.toEqual({ outcome: "reset", message: null });
+    const consume = rpc.mock.calls.find(
+      ([args]) => args.method === usageConsumeResetMethod,
+    )?.[0];
+    expect(consume).toMatchObject({
+      pluginId: "codex-source",
+      input: { resourceId: "codex-source-resource" },
+    });
+    expect(consume?.input.requestId).toMatch(/^[A-Za-z0-9_-]{1,64}$/u);
+
+    const after = usageSnapshotSchema.parse(
+      await host.harness.behavior.callRpc("getUsage", request),
+    );
+    expect(after.machines[0]!.providers[0]!.usage).toMatchObject({
+      resetCredits: { available: 1 },
+    });
+    await expect(
+      host.harness.behavior.callRpc("useReset", { id: "missing:resource" }),
+    ).rejects.toThrow();
+  } finally {
+    await host.harness.lifecycle.dispose();
   }
 });

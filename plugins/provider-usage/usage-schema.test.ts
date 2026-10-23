@@ -21,8 +21,10 @@ function provider(
     strings: { iconTint: null },
     signInHint: "Sign in.",
     expiredHint: "Sign in again.",
+    canUseReset: false,
     usage: {
       status: "ok",
+      resetCredits: null,
       accountEmail: null,
       planLabel: null,
       windows: [

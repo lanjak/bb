@@ -22,8 +22,10 @@ function account(id: string, providerId = "codex"): UsageProvider {
     strings: { iconTint: null },
     signInHint: "Sign in again.",
     expiredHint: "Session expired.",
+    canUseReset: false,
     usage: {
       status: "ok",
+      resetCredits: null,
       accountEmail: `${id}@example.com`,
       planLabel: "Max (20x)",
       windows: [
@@ -230,6 +232,7 @@ describe("UsageSettingsContent", () => {
     const third = account("unlimited");
     third.usage = {
       status: "ok",
+      resetCredits: null,
       accountEmail: "unlimited@example.com",
       planLabel: null,
       windows: [],

@@ -353,6 +353,7 @@ describe("Codex credential health and usage", () => {
             resetsAt: "2025-06-15T15:06:40.000Z",
           },
         ],
+        resetCredits: null,
       },
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -365,5 +366,88 @@ describe("Codex credential health and usage", () => {
     expect(retryHeaders.get("cookie")).toBe("__cf_bm=cloudflare-cookie");
     expect(retryHeaders.get("authorization")).toBe(`Bearer ${accessToken}`);
     expect(retryHeaders.get("chatgpt-account-id")).toBe("account-123");
+  });
+
+  it("reports reset credits with the earliest live expiry", async () => {
+    await writeChatGptAuth(
+      createAccessToken({
+        accountId: "account-123",
+        email: "codex@example.com",
+        expSeconds: Math.floor(Date.now() / 1000) + 3600,
+      }),
+    );
+    const soon = new Date(Date.now() + 86_400_000).toISOString();
+    const later = new Date(Date.now() + 10 * 86_400_000).toISOString();
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            plan_type: "pro",
+            rate_limit: { primary_window: null },
+            rate_limit_reset_credits: {
+              available_count: 2,
+              applicable_available_count: 0,
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            credits: [
+              { status: "available", expires_at: later },
+              { status: "redeemed", expires_at: "2020-01-01T00:00:00Z" },
+              { status: "available", expires_at: soon },
+            ],
+            available_count: 2,
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getCodexProviderUsage()).resolves.toMatchObject({
+      usage: {
+        status: "ok",
+        resetCredits: { available: 2, usableNow: 0, nextExpiresAt: soon },
+      },
+    });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+    );
+  });
+
+  it("keeps the reset count when the expiry lookup fails", async () => {
+    await writeChatGptAuth(
+      createAccessToken({
+        accountId: "account-123",
+        email: "codex@example.com",
+        expSeconds: Math.floor(Date.now() / 1000) + 3600,
+      }),
+    );
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            plan_type: "pro",
+            rate_limit_reset_credits: {
+              available_count: 1,
+              applicable_available_count: 1,
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response("nope", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getCodexProviderUsage()).resolves.toMatchObject({
+      usage: {
+        resetCredits: { available: 1, usableNow: 1, nextExpiresAt: null },
+      },
+    });
   });
 });

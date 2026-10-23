@@ -39,6 +39,7 @@ import {
   providerUsageTone,
   selectUsageMachine,
   usageRpcSuccessSchema,
+  useResetRpcSuccessSchema,
   type UsageMachine,
   type UsageProvider,
   type UsageSnapshot,
@@ -326,6 +327,140 @@ function UsageWindow({ window }: { window: UsageWindowValue }) {
   );
 }
 
+const RESET_OUTCOME_MESSAGES = {
+  reset: "Reset used. Your limits were reset.",
+  nothing_to_reset: "Nothing to reset right now. Your reset was kept.",
+  no_credit: "No reset was available to use.",
+  already_redeemed: "That reset was already used.",
+} as const;
+
+async function spendResetCredit(pluginId: string, id: string): Promise<string> {
+  const response = await fetch(
+    `/api/v1/plugins/${encodeURIComponent(pluginId)}/rpc/useReset`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+      signal: AbortSignal.timeout(120_000),
+    },
+  );
+  const body: unknown = await response.json().catch(() => null);
+  const parsed = useResetRpcSuccessSchema.safeParse(body);
+  if (!parsed.success)
+    return rpcErrorMessage(body) ?? "The reset could not be used.";
+  const { outcome, message } = parsed.data.result;
+  return outcome === "failed"
+    ? (message ?? "The reset could not be used.")
+    : RESET_OUTCOME_MESSAGES[outcome];
+}
+
+function formatResetExpiry(expiresAt: string | null): string | null {
+  if (expiresAt === null) return null;
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return `next expires ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+function ResetCredits({
+  account,
+  pluginId,
+  onUsed,
+}: {
+  account: UsageProvider;
+  pluginId: string;
+  onUsed: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const credits =
+    account.usage?.status === "ok" ? account.usage.resetCredits : null;
+  if (credits === null || (credits.available === 0 && result === null))
+    return null;
+  const expiry = formatResetExpiry(credits.nextExpiresAt);
+  const summary = [
+    `${credits.available} ${credits.available === 1 ? "reset" : "resets"}`,
+    expiry,
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
+  const usable = account.canUseReset && credits.usableNow > 0;
+  const spend = async () => {
+    setPending(true);
+    try {
+      setResult(await spendResetCredit(pluginId, account.id));
+      onUsed();
+    } catch {
+      setResult("The reset could not be used.");
+    } finally {
+      setPending(false);
+      setConfirming(false);
+    }
+  };
+  return (
+    <div className="col-span-full flex flex-col gap-1 text-2xs text-subtle-foreground">
+      <div className="flex min-h-5 items-center gap-2">
+        <span className="min-w-0 flex-1 truncate" title={summary}>
+          {summary}
+        </span>
+        {account.canUseReset && !confirming ? (
+          <span
+            title={
+              usable ? undefined : "No limit is eligible for a reset right now."
+            }
+          >
+            <Button
+              type="button"
+              size="sm"
+              className="h-5 px-1.5 text-2xs"
+              variant="ghost"
+              disabled={!usable || pending}
+              onClick={() => {
+                setResult(null);
+                setConfirming(true);
+              }}
+            >
+              Use reset…
+            </Button>
+          </span>
+        ) : null}
+      </div>
+      {confirming ? (
+        <div
+          className="flex items-center gap-2"
+          role="group"
+          aria-label="Confirm reset"
+        >
+          <span className="min-w-0 flex-1">
+            Spend 1 of {credits.available}? This cannot be undone.
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            className="h-5 px-1.5 text-2xs"
+            variant="destructive"
+            disabled={pending}
+            onClick={() => void spend()}
+          >
+            {pending ? "Using…" : "Use reset"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-5 px-1.5 text-2xs"
+            variant="ghost"
+            disabled={pending}
+            onClick={() => setConfirming(false)}
+          >
+            Cancel
+          </Button>
+        </div>
+      ) : null}
+      {result === null ? null : <p role="status">{result}</p>}
+    </div>
+  );
+}
+
 function accountStatusMessage(account: UsageProvider): string | null {
   const usage = account.usage;
   switch (usage?.status) {
@@ -351,11 +486,15 @@ function AccountUsage({
   loading,
   unavailable,
   showProvider,
+  pluginId,
+  onResetUsed,
 }: {
   account: UsageProvider;
   loading: boolean;
   unavailable: boolean;
   showProvider: boolean;
+  pluginId: string;
+  onResetUsed: () => void;
 }) {
   const usage = account.usage;
   const email = usage?.status === "ok" ? usage.accountEmail : null;
@@ -410,6 +549,13 @@ function AccountUsage({
           <UsageWindow key={window.label} window={window} />
         ))
       ) : null}
+      {usage?.status === "ok" ? (
+        <ResetCredits
+          account={account}
+          pluginId={pluginId}
+          onUsed={onResetUsed}
+        />
+      ) : null}
     </section>
   );
 }
@@ -419,11 +565,15 @@ function ProviderAccounts({
   loading,
   unavailable,
   showProvider,
+  pluginId,
+  onResetUsed,
 }: {
   accounts: UsageProvider[];
   loading: boolean;
   unavailable: boolean;
   showProvider: boolean;
+  pluginId: string;
+  onResetUsed: () => void;
 }) {
   return accounts.map((account) => (
     <AccountUsage
@@ -432,6 +582,8 @@ function ProviderAccounts({
       loading={loading}
       unavailable={unavailable}
       showProvider={showProvider}
+      pluginId={pluginId}
+      onResetUsed={onResetUsed}
     />
   ));
 }
@@ -699,6 +851,16 @@ export function ProviderUsageStatusContent({
     });
   };
 
+  const showResetResult = () => {
+    void refreshUsage({
+      pluginId,
+      force: false,
+      machineIds: activeMachineId === null ? null : [activeMachineId],
+      maxAgeMs: CARD_MAX_AGE_MS,
+      providerIds: refreshProviderIds,
+    });
+  };
+
   const handleTabKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
     currentIndex: number,
@@ -895,6 +1057,8 @@ export function ProviderUsageStatusContent({
                   loading={snapshot.isRefreshing}
                   unavailable={unavailable}
                   showProvider
+                  pluginId={pluginId}
+                  onResetUsed={showResetResult}
                 />
               </div>
             ))}
@@ -906,6 +1070,8 @@ export function ProviderUsageStatusContent({
               loading={snapshot.isRefreshing}
               unavailable={unavailable}
               showProvider={false}
+              pluginId={pluginId}
+              onResetUsed={showResetResult}
             />
           </div>
         )}

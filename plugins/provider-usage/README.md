@@ -24,6 +24,15 @@ and `bb plugin rpc inspect <plugin-id> provider-usage.v1.listResources --json`
 to inspect their published contracts. RPC calls accept JSON through
 `--input-file`. See the Plugin Guide for the contract API.
 
+Accounts that hold usage-limit resets show the count and the earliest expiry under
+their windows. When the source plugin implements the optional
+`provider-usage.v1.consumeReset` method and a current window is eligible, the row
+offers **Use reset…**, which asks for confirmation before spending one; a spent reset
+cannot be restored. The Codex and Claude Code sources implement it for the login on
+the resource's machine. Outside the card, call
+`bb plugin rpc call bb--provider-usage useReset --input-file <json>` with the
+account's `id` from `getUsage`.
+
 `bb settings usage --json` and `bb.sdk.system.usageLimits()` remain the
 host-local provider-maintenance view; they do not aggregate shared pool accounts.
 

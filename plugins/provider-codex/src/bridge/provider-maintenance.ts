@@ -24,6 +24,7 @@ import {
   readCodexAuthFile,
   type CodexAuthCredentials,
 } from "../ai/codex-auth.js";
+import { codexRequestHeaders, readCodexResetCredits } from "./reset-credits.js";
 
 const CODEX_MINIMUM_SUPPORTED_VERSION = "0.136.0";
 const CODEX_REWIND_MINIMUM_SUPPORTED_VERSION = "0.143.0";
@@ -356,15 +357,7 @@ export async function getCodexProviderUsage(): Promise<ProviderUsageResult> {
     return { supported: true, usage: { status: "expired" } };
   }
   try {
-    const headers = new Headers({
-      Authorization: `Bearer ${credentials.accessToken}`,
-      "chatgpt-account-id": credentials.accountId,
-      originator: "bb",
-      "User-Agent": "bb-provider-codex",
-      Accept: "application/json",
-    });
-    if (credentials.isFedrampAccount) headers.set("X-OpenAI-Fedramp", "true");
-    const response = await fetchCodexUsage(headers);
+    const response = await fetchCodexUsage(codexRequestHeaders(credentials));
     if (response.status === 401) {
       return { supported: true, usage: { status: "expired" } };
     }
@@ -379,10 +372,15 @@ export async function getCodexProviderUsage(): Promise<ProviderUsageResult> {
         },
       };
     }
+    const body: unknown = await response.json();
+    const usage = normalizeUsage(body, credentials.accountEmail);
     return {
       supported: true,
       usage: {
-        ...normalizeUsage(await response.json(), credentials.accountEmail),
+        ...usage,
+        ...(usage.status === "ok"
+          ? { resetCredits: await readCodexResetCredits(body, credentials) }
+          : {}),
         accountKey: credentials.accountId
           ? `openai:chatgpt:${credentials.accountId}`
           : null,

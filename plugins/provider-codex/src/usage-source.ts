@@ -1,9 +1,12 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import { codexUsageResetHostContract } from "./usage-reset-host-contract.js";
 import {
   usageSourceRpcContract,
+  usageResetRpcContract,
   usageListMethod,
   usageFetchMethod,
+  usageConsumeResetMethod,
   usageMeasurementSchema,
   usagePlanSchema,
   usageWindowKindSchema,
@@ -171,6 +174,47 @@ export function registerUsageSource(bb: BbPluginApi) {
       experimental_discoverable: true,
       experimental_description:
         "Host-local usage owned by the codex provider plugin. Inventory reads metadata only. Independent of display plugins.",
+    },
+  );
+  const host = bb.hosts.experimental_client({
+    contract: codexUsageResetHostContract,
+  });
+  bb.rpc.register(
+    usageResetRpcContract,
+    {
+      async [usageConsumeResetMethod]({ resourceId, requestId }) {
+        const [hostId, providerId] = locatorSchema.parse(
+          JSON.parse(resourceId),
+        );
+        if (providerId !== "codex")
+          throw new Error("Usage resource no longer exists.");
+        const machine = await bb.sdk.hosts.get({ hostId });
+        if (machine.status === "disconnected")
+          return {
+            outcome: "failed" as const,
+            message: "Machine is disconnected.",
+          };
+        try {
+          return await host.call(
+            "codex.usage.consumeReset",
+            { requestId },
+            { hostId, timeoutMs: 30_000 },
+          );
+        } catch {
+          return {
+            outcome: "failed" as const,
+            message:
+              "This machine could not redeem the reset. Update bb on it, then try again.",
+          };
+        } finally {
+          cache.delete(resourceId);
+        }
+      },
+    },
+    {
+      experimental_discoverable: true,
+      experimental_description:
+        "Spends one ChatGPT usage-limit reset for the Codex login on the resource's machine.",
     },
   );
 }
