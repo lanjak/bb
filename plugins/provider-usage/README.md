@@ -29,9 +29,8 @@ their windows. When the source plugin implements the optional
 `provider-usage.v1.consumeReset` method and a current window is eligible, the row
 offers **Use reset…**, which asks for confirmation before spending one; a spent reset
 cannot be restored. The Codex and Claude Code sources implement it for the login on
-the resource's machine. Outside the card, call
-`bb plugin rpc call bb--provider-usage useReset --input-file <json>` with the
-account's `id` from `getUsage`.
+the resource's machine. From a terminal, `bb usage list` shows every account with
+its ID and resets, and `bb usage reset <id> --yes` spends one.
 
 `bb settings usage --json` and `bb.sdk.system.usageLimits()` remain the
 host-local provider-maintenance view; they do not aggregate shared pool accounts.

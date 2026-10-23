@@ -1,3 +1,4 @@
+import { registerUsageCli } from "./cli.js";
 import {
   normalizeUsageMeasurement,
   selectUsageResources,
@@ -418,12 +419,24 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
     outcome: z.infer<typeof usageConsumeResetOutcomeSchema>;
     message: string | null;
   }> => {
-    const match = [...inventories.values()].flatMap((source) =>
-      source.resources
-        .filter((resource) => `${source.pluginId}:${resource.id}` === id)
-        .map((resource) => ({ source, resource })),
-    )[0];
-    if (!match) throw new Error("Usage entry no longer exists. Reload usage.");
+    const find = () =>
+      [...inventories.values()].flatMap((source) =>
+        source.resources
+          .filter((resource) => `${source.pluginId}:${resource.id}` === id)
+          .map((resource) => ({ source, resource })),
+      )[0];
+    if (!find())
+      await readUsage({
+        force: false,
+        machineIds: null,
+        providerIds: [],
+        maxAgeMs: 60_000,
+      });
+    const match = find();
+    if (!match)
+      throw new Error(
+        "Usage entry no longer exists. List accounts again to get a current ID.",
+      );
     const result = await bb.sdk.plugins.callRpc({
       pluginId: match.source.pluginId,
       method: usageConsumeResetMethod,
@@ -439,6 +452,32 @@ export default function providerUsagePlugin(bb: BbPluginApi): void {
   bb.rpc.register(providerUsageRpcContract, {
     getUsage: readUsage,
     useReset,
+  });
+  registerUsageCli(bb, {
+    async readAll(force) {
+      const listed = await readUsage({
+        force: false,
+        machineIds: null,
+        providerIds: [],
+        maxAgeMs: 60_000,
+      });
+      const providerIds = [
+        ...new Set(
+          listed.machines.flatMap((machine) =>
+            machine.providers.map((provider) => provider.providerId),
+          ),
+        ),
+      ];
+      return providerIds.length === 0
+        ? listed
+        : readUsage({
+            force,
+            machineIds: null,
+            providerIds,
+            maxAgeMs: force ? 0 : 60_000,
+          });
+    },
+    useReset: (id) => useReset({ id }),
   });
   const markDirty = () => {
     for (const value of measurements.values()) value.loadedAt = 0;

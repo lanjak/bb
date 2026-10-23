@@ -484,6 +484,45 @@ it("offers a reset only where the source can spend one, and refreshes after spen
     await expect(
       host.harness.behavior.callRpc("useReset", { id: "missing:resource" }),
     ).rejects.toThrow();
+
+    const consumeCalls = () =>
+      rpc.mock.calls.filter(([args]) => args.method === usageConsumeResetMethod)
+        .length;
+    const unconfirmed = await host.harness.behavior.runCli([
+      "reset",
+      "codex-source:codex-source-resource",
+    ]);
+    expect(unconfirmed.exitCode).not.toBe(0);
+    expect(unconfirmed.stderr).toContain("--yes");
+    expect(consumeCalls()).toBe(1);
+
+    const listed = await host.harness.behavior.runCli(["list"]);
+    expect(listed.exitCode).toBe(0);
+    expect(listed.stdout).toContain("codex-source:codex-source-resource");
+    expect(listed.stdout).toContain(
+      "1 (1 usable now, next expires 2026-10-29)",
+    );
+    const listedJson = usageSnapshotSchema.parse(
+      JSON.parse(
+        (await host.harness.behavior.runCli(["list", "--json"])).stdout ?? "",
+      ),
+    );
+    expect(listedJson.machines[0]!.providers[0]!.usage).toMatchObject({
+      resetCredits: { available: 1 },
+    });
+
+    const spent = await host.harness.behavior.runCli([
+      "reset",
+      "codex-source:codex-source-resource",
+      "--yes",
+      "--json",
+    ]);
+    expect(spent.exitCode).toBe(0);
+    expect(JSON.parse(spent.stdout ?? "")).toEqual({
+      outcome: "reset",
+      message: null,
+    });
+    expect(consumeCalls()).toBe(2);
   } finally {
     await host.harness.lifecycle.dispose();
   }
