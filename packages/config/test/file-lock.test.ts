@@ -16,6 +16,22 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...actual, open: vi.fn(actual.open) };
 });
 
+it("refuses selected file locking before opening a handle or invoking work", async () => {
+  vi.resetModules();
+  try {
+    const admission = await import("../src/managed-root-admission.js");
+    const locks = await import("../src/file-lock.js");
+    admission.internal_DO_NOT_USE_enrollManagedRoot(Object.freeze({}));
+    const work = vi.fn(async () => undefined);
+    const openCalls = vi.mocked(fs.open).mock.calls.length;
+    await expect(locks.withFileLock({ path: "/unopened-lock", timeoutMs: 1, work })).rejects.toThrow("cohort NOT_ESTABLISHED");
+    expect(vi.mocked(fs.open).mock.calls.length).toBe(openCalls);
+    expect(work).not.toHaveBeenCalled();
+  } finally {
+    vi.resetModules();
+  }
+});
+
 it.skipIf(process.platform !== "linux")("memoizes an undefined original close failure and quarantines the physical root", async () => {
   const directory = await mkdtemp(join(tmpdir(), "bb-failed-lease-close-"));
   let bodyFailed = false;

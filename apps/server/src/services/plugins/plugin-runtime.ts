@@ -1,4 +1,5 @@
 import { capturePluginUse } from "./plugin-use-telemetry.js";
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   realtimeSubscriptionTargetKey,
   type PluginReadSubscriptionTarget,
@@ -382,6 +383,7 @@ export interface PluginLoadHold {
 }
 
 export function createPluginRuntime(context: PluginRuntimeContext) {
+  internal_DO_NOT_USE_assertManagedRootAdmission("server plugin runtime creation");
   const { deps } = context;
   const settingsChanged = context.settingsChanged ?? (() => {});
   const logger = deps.logger;
@@ -887,6 +889,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     run: (signal: AbortSignal) => T | Promise<T>,
     callerSignal?: AbortSignal,
   ): Promise<PluginInvocationOutcome<T>> {
+
     const id = instance.pluginId;
     const released = instance.released.signal;
     if (released.aborted) {
@@ -967,6 +970,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     label: string,
     run: () => Promise<T>,
   ): Promise<PluginHookInvocation<T>> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("server plugin owned invocation");
     const owner = recordOwners.get(record);
     if (owner === undefined) {
       return { ok: false, error: `${label} has no loaded plugin owner` };
@@ -1660,6 +1664,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
   }
 
   async function loadOne(row: InstalledPluginRow): Promise<string | null> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("server plugin load");
     const held = await heldDetail(row);
     if (held !== null) {
       await disposeOne(row.id);
@@ -1982,6 +1987,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
         const filename = runtimeRequire.resolve(serverEntry.path);
         pluginCodeLocations.set(filename, row.id);
         try {
+          internal_DO_NOT_USE_assertManagedRootAdmission("server plugin CommonJS import");
           const exported: unknown = runtimeRequire(filename);
           mod =
             typeof exported === "function"
@@ -2000,6 +2006,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
         rollbackGenerations.push(mutation.rollback);
         candidateModuleRootUrls.add(mutation.rootUrl);
         pluginCodeLocations.set(mutation.rootUrl, row.id);
+        internal_DO_NOT_USE_assertManagedRootAdmission("server plugin module import");
         mod = (await import(pathToFileURL(serverEntry.path).href)) as {
           default?: unknown;
         };
@@ -2010,6 +2017,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
           `server entry must default-export a factory (bb) => void, got ${typeof factory}`,
         );
       }
+      internal_DO_NOT_USE_assertManagedRootAdmission("server plugin factory invocation");
       await runFactoryTimeBoxed(
         factory as (api: BbPluginApi) => unknown,
         handle.api,

@@ -1,3 +1,4 @@
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   rpcInvalidationTags,
   type ContractTagDeclarations,
@@ -569,6 +570,7 @@ export function createPluginApi(options: {
   isProviderIdTaken: (providerId: string) => boolean;
   assertProviderRegistrable: (providerId: string) => void;
 }): PluginApiHandle {
+  internal_DO_NOT_USE_assertManagedRootAdmission("server plugin API creation");
   const {
     pluginId,
     logger,
@@ -753,6 +755,7 @@ export function createPluginApi(options: {
   const storage: PluginStorage = {
     kv,
     database() {
+      internal_DO_NOT_USE_assertManagedRootAdmission("server plugin database authority");
       assertLive();
       if (databaseHandle?.open) return databaseHandle;
       if (databaseHandle) {

@@ -1,4 +1,5 @@
 import { createDesktopAppUpdateService } from "./services/system/desktop-app-update.js";
+import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import { createDesktopUpdateChannel } from "./services/system/desktop-update-channel.js";
 import { serve } from "@hono/node-server";
 import { existsSync } from "node:fs";
@@ -111,7 +112,9 @@ export function startServerPlugins(
     });
 }
 
-export async function runServer(serverConfig: ServerConfig): Promise<void> {
+export async function runServer(serverConfig: ServerConfig, selection?: { managedRoot: object }): Promise<void> {
+  if (selection !== undefined) internal_DO_NOT_USE_enrollManagedRoot(selection.managedRoot);
+  internal_DO_NOT_USE_assertManagedRootAdmission("server startup");
   const logger = createLogger({
     component: "server",
     dataDir: serverConfig.BB_DATA_DIR,
@@ -121,6 +124,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     logger,
   });
   let diagnosticsEnabled = () => false;
+  internal_DO_NOT_USE_assertManagedRootAdmission("server database initialization");
   const db = initDb(serverConfig.databasePath, {
     slowQueryThresholdMs: () => (diagnosticsEnabled() ? 25 : 100),
     slowQueryDiagnosticsEnabled: () => diagnosticsEnabled(),
@@ -134,6 +138,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     now: Date.now(),
   });
   const pendingServerMove = serverImport.pendingMove;
+  internal_DO_NOT_USE_assertManagedRootAdmission("server post-import initialization");
   if (pendingServerMove === null) {
     await repairLastServerMoveHostName({
       dataDir: serverConfig.BB_DATA_DIR,
@@ -142,6 +147,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     });
   }
   if (serverConfig.BB_SKIP_ONBOARDING) {
+    internal_DO_NOT_USE_assertManagedRootAdmission("server onboarding persistence");
     const settings = getAppSettings(db);
     if (settings.onboardingCompletedAt === null) {
       setAppSettings(db, {
@@ -159,6 +165,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
         })
       : null;
   const hub = new NotificationHub();
+  internal_DO_NOT_USE_assertManagedRootAdmission("server coordinator initialization");
   const watchInterests = new WatchInterestCoordinator({ db, hub });
   const sharedPorts = new HostSharedPortCoordinator({ db, hub });
   const lifecycleDedupers = createLifecycleDedupers();
@@ -219,6 +226,7 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     logger,
   });
 
+  internal_DO_NOT_USE_assertManagedRootAdmission("server telemetry startup");
   const telemetry = await createTelemetryService({
     apiKey: serverConfig.BB_POSTHOG_API_KEY,
     appInstall: appInstallFromServerConfig(serverConfig),
@@ -231,12 +239,15 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     logger,
   });
 
+  internal_DO_NOT_USE_assertManagedRootAdmission("server machine authority creation");
   const machineAuth = await createMachineAuthService({
     dataDir: serverConfig.BB_DATA_DIR,
     db,
     logger,
   });
+  internal_DO_NOT_USE_assertManagedRootAdmission("server machine authority readiness");
   await machineAuth.ensureReady();
+  internal_DO_NOT_USE_assertManagedRootAdmission("server service initialization");
   const skillTreeRegistry = new SkillTreeRegistry();
   const pluginHostArtifacts = new PluginHostArtifactRegistry();
   const providerNativeRoots = createProviderNativeRootsCache();

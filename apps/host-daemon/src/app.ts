@@ -1,4 +1,5 @@
 import path from "node:path";
+import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import { HOST_DAEMON_RESTART_EXIT_CODE } from "@bb/config/machine-service";
 import { startDesktopBrowserBroker } from "./desktop-browser-broker.js";
 import { MachineEnvironment } from "./machine-environment.js";
@@ -142,6 +143,7 @@ interface StartIdleProviderSessionReaperArgs {
 }
 
 interface CreateHostDaemonAppOptions {
+  managedRoot?: object;
   dataDir: string;
   serverUrl: string;
   hostKey: string;
@@ -259,14 +261,18 @@ interface MaybeInvalidateSessionArgs {
 export async function createHostDaemonApp(
   options: CreateHostDaemonAppOptions,
 ): Promise<HostDaemonApp> {
+  if (options.managedRoot !== undefined) internal_DO_NOT_USE_enrollManagedRoot(options.managedRoot);
+  internal_DO_NOT_USE_assertManagedRootAdmission("host daemon startup");
   const machineEnvironment = new MachineEnvironment(
     process.env,
     options.runtimeShellEnv ?? {},
   );
   const threadStorageRootPath = await ensureThreadStorageRoot(options.dataDir);
+  internal_DO_NOT_USE_assertManagedRootAdmission("host daemon skill root setup");
   const dataDirSkillsRootPath = await ensureDataDirSkillsRootPath(
     options.dataDir,
   );
+  internal_DO_NOT_USE_assertManagedRootAdmission("host daemon skill cleanup");
   await cleanupInjectedSkillStagingDirs({
     dataDir: options.dataDir,
     keepCatalogHashes: [],
@@ -487,6 +493,7 @@ export async function createHostDaemonApp(
       "Host filesystem watch error (live updates for this path may be stale until it recovers)",
     );
   }
+  internal_DO_NOT_USE_assertManagedRootAdmission("host daemon watcher creation");
   watchManager = new WatchManager({
     hostWatcher: options.hostWatcher,
     refreshWorkspace: (args) =>
@@ -585,6 +592,7 @@ export async function createHostDaemonApp(
         request: () => serverClient.fetchSkillTreeContent(treeHash, paths),
       }),
   };
+  internal_DO_NOT_USE_assertManagedRootAdmission("host daemon runtime creation");
   runtimeManager = new RuntimeManager({
     bridgeBundleDir: options.bridgeBundleDir,
     createRuntime: options.createRuntime,
@@ -770,11 +778,13 @@ export async function createHostDaemonApp(
       };
     },
   });
+  internal_DO_NOT_USE_assertManagedRootAdmission("host daemon terminal creation");
   const terminalManager = new TerminalManager({
     logger: options.logger,
     runtimeManager,
     sendMessage: (message) => sendServerMessage(message),
   });
+  internal_DO_NOT_USE_assertManagedRootAdmission("host daemon plugin manager creation");
   const pluginHostManager = new PluginHostManager({
     dataDir: options.dataDir,
     hostWatcher: options.hostWatcher,

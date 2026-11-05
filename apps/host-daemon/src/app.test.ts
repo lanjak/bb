@@ -430,6 +430,39 @@ async function createAppFixture(
 }
 
 describe("createHostDaemonApp", () => {
+  it("refuses selected startup before storage, skill cleanup or runtime creation", async () => {
+    vi.resetModules();
+    try {
+      const { createHostDaemonApp: createSelectedApp } = await import("./app.js");
+      const createRuntime = vi.fn(() => createFakeRuntime());
+      const mkdir = vi.spyOn(fs, "mkdir").mockRejectedValue(new Error("Unexpected startup mkdir"));
+      const rm = vi.spyOn(fs, "rm").mockRejectedValue(new Error("Unexpected startup cleanup"));
+      try {
+        await expect(createSelectedApp({
+          managedRoot: Object.freeze({}),
+          dataDir: "/unopened-managed-root",
+          serverUrl: "http://127.0.0.1:3334",
+          hostKey: "unopened",
+          hostId: "unopened",
+          hostName: "unopened",
+          instanceId: "unopened",
+          logger: createLogger(),
+          releaseLock: async () => undefined,
+          localApiConfig: null,
+          createRuntime,
+        })).rejects.toThrow("cohort NOT_ESTABLISHED");
+        expect(mkdir).not.toHaveBeenCalled();
+        expect(rm).not.toHaveBeenCalled();
+        expect(createRuntime).not.toHaveBeenCalled();
+      } finally {
+        mkdir.mockRestore();
+        rm.mockRestore();
+      }
+    } finally {
+      vi.resetModules();
+    }
+  });
+
   it("installs machine variables into the daemon and child processes before work, then removes overrides live", async () => {
     vi.stubEnv("MACHINE_DAEMON_TEST", "original");
     let socket: ReconnectingWebSocketLike | undefined;

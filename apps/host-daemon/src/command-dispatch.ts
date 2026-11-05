@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import path from "node:path";
 import { withVcsProcessPriority } from "@bb/process-utils";
 import { operationEnvironment } from "./operation-environment.js";
@@ -696,6 +697,7 @@ export async function dispatchCommand<
   command: Extract<HostDaemonCommand, { type: TType }>,
   options: CommandDispatchOptions,
 ): Promise<HostDaemonCommandResult<TType>> {
+  internal_DO_NOT_USE_assertManagedRootAdmission(command.type);
   try {
     return await withVcsProcessPriority("interactive", () =>
       commandHandlers[command.type](command, options),
@@ -712,6 +714,7 @@ export async function dispatchOnlineRpcCommand<
   options: CommandDispatchOptions,
   signal: AbortSignal,
 ): Promise<HostDaemonOnlineRpcResult<TType>> {
+  internal_DO_NOT_USE_assertManagedRootAdmission(command.type);
   try {
     return await withVcsProcessPriority("interactive", () =>
       onlineRpcHandlers[command.type](command, options, signal),

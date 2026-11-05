@@ -1,3 +1,4 @@
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   capturePluginUse,
   forgetPluginRecommendation,
@@ -603,6 +604,7 @@ function normalizeMentionSearchItems(
 }
 
 export function createPluginService(deps: PluginServiceDeps): PluginService {
+  internal_DO_NOT_USE_assertManagedRootAdmission("server plugin service creation");
   const logger = deps.logger;
   const installHandlerTimeoutMs = deps.installHandlerTimeoutMs ?? 30_000;
 
@@ -1517,6 +1519,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     bindSdk: bindRuntimeSdk,
 
     async start(options) {
+      internal_DO_NOT_USE_assertManagedRootAdmission("server plugin service startup");
       setLoadHold(options?.hold ?? null);
       loadPassActive = true;
       try {

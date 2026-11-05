@@ -11,6 +11,7 @@ import type {
   HostDaemonCommandEnvironmentLane,
 } from "@bb/host-daemon-contract";
 import { performance } from "node:perf_hooks";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/file-lock";
 import {
   hostDaemonEnvironmentLaneForCommand,
   hostDaemonOnlineRpcResponseMessageSchema,
@@ -113,9 +114,15 @@ export class CommandRouter {
     const abortController = new AbortController();
     this.onlineRpcAbortControllers.set(message.requestId, abortController);
     try {
-      const result = await runWithTurnSubmitTrace(message.command, () =>
-        this.executeHostRpcCommand(message.command, abortController.signal),
-      );
+      const effect = internal_DO_NOT_USE_beginManagedRootEffect(message.command.type);
+      let result: HostDaemonRpcResultForCommand;
+      try {
+        result = await effect.runOriginal(() => runWithTurnSubmitTrace(message.command, () =>
+          this.executeHostRpcCommand(message.command, abortController.signal, effect),
+        ));
+      } finally {
+        effect.complete();
+      }
       this.logOnlineRpc({
         commandType: message.command.type,
         handlerMs: elapsedMs(handlerStartedAtMs),
@@ -170,16 +177,18 @@ export class CommandRouter {
   private executeHostRpcCommand(
     command: HostDaemonRpcCommand,
     signal: AbortSignal,
+    effect: ManagedRootEffect,
   ): Promise<HostDaemonRpcResultForCommand> {
     if (isHostDaemonCommand(command)) {
-      return this.executeLiveDaemonCommand(command);
+      return this.executeLiveDaemonCommand(command, effect);
     }
-    return this.executeOnlineRpcCommand(command, signal);
+    return this.executeOnlineRpcCommand(command, signal, effect);
   }
 
   private executeOnlineRpcCommand(
     command: HostDaemonOnlineRpcCommand,
     signal: AbortSignal,
+    effect: ManagedRootEffect,
   ): Promise<HostDaemonOnlineRpcResultForCommand> {
 
     if (command.type === "plugin.host.call") {
@@ -207,12 +216,12 @@ export class CommandRouter {
         ? this.runInEnvironmentLane(
             command.environmentId,
             environmentLaneMode,
-            () =>
+            () => effect.runOriginal(() =>
               dispatchOnlineRpcCommand(
                 command,
                 this.createDispatchOptions(),
                 signal,
-              ),
+              )),
           )
         : dispatchOnlineRpcCommand(
             command,
@@ -226,19 +235,20 @@ export class CommandRouter {
 
   private executeLiveDaemonCommand(
     command: HostDaemonCommand,
+    effect: ManagedRootEffect,
   ): Promise<HostDaemonCommandResultForCommand> {
     const environmentLaneMode = hostDaemonEnvironmentLaneForCommand(command);
     const threadLaneKey = this.resolveThreadLaneKey(command);
-    const task = this.runAfterThreadUnarchiveBarrier(command, () =>
-      this.runInThreadTurnLane(command, () =>
+    const task = this.runAfterThreadUnarchiveBarrier(command, () => effect.runOriginal(() =>
+      this.runInThreadTurnLane(command, () => effect.runOriginal(() =>
         this.runInExecutionLanes(
           command,
           environmentLaneMode,
           threadLaneKey,
-          () => this.executeLiveDaemonCommandBody(command),
+          () => effect.runOriginal(() => this.executeLiveDaemonCommandBody(command)),
         ),
-      ),
-    );
+      )),
+    ));
     this.registerThreadUnarchiveBarrier(command, task);
     return task;
   }

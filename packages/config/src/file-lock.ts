@@ -3,6 +3,16 @@ import { lstat, mkdir, open, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "./managed-root-admission.js";
+
+export {
+  internal_DO_NOT_USE_enrollManagedRoot,
+  internal_DO_NOT_USE_assertManagedRootAdmission,
+  internal_DO_NOT_USE_beginManagedRootEffect,
+  ManagedRootAdmissionUnavailableError,
+  type ManagedRootRegistration,
+  type ManagedRootEffect,
+} from "./managed-root-admission.js";
 
 const LOCK_RETRY_MS = 25;
 interface NativeFileLocks {
@@ -130,15 +140,29 @@ export async function withFileLock<T>(args: {
   path: string;
   timeoutMs: number;
   work: () => Promise<T>;
+  managedRootEffect?: ManagedRootEffect;
 }): Promise<T> {
-  const nativeFileLocks = loadNativeFileLocks();
-  await mkdir(dirname(args.path), { recursive: true });
-  const handle = await open(args.path, "a+", 0o600);
+  const effect = args.managedRootEffect ?? internal_DO_NOT_USE_beginManagedRootEffect("file lock");
+  effect.assertOriginalAtDequeue();
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   let acquired = false;
+  const cleanup = effect.reserveOriginalCleanup(async () => {
+    if (handle === undefined) return;
+    try {
+      if (acquired) loadNativeFileLocks().unlock(handle.fd);
+    } finally {
+      await handle.close();
+    }
+  });
   try {
+    const nativeFileLocks = loadNativeFileLocks();
+    await effect.runOriginal(() => mkdir(dirname(args.path), { recursive: true }));
+    const originalHandle = await effect.runOriginal(() => open(args.path, "a+", 0o600));
+    handle = originalHandle;
     const deadline = performance.now() + args.timeoutMs;
     for (;;) {
-      if (nativeFileLocks.tryLock(handle.fd)) {
+      effect.assertOriginalAtDequeue();
+      if (nativeFileLocks.tryLock(originalHandle.fd)) {
         acquired = true;
         break;
       }
@@ -147,12 +171,13 @@ export async function withFileLock<T>(args: {
       }
       await sleep(LOCK_RETRY_MS);
     }
-    return await args.work();
+    return await effect.runOriginal(args.work);
   } finally {
     try {
-      if (acquired) nativeFileLocks.unlock(handle.fd);
+      await cleanup();
+    } catch {
     } finally {
-      await handle.close();
+      if (args.managedRootEffect === undefined) effect.complete();
     }
   }
 }

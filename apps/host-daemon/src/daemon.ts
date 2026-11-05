@@ -1,4 +1,5 @@
 import { HOST_DAEMON_RESTART_EXIT_CODE } from "@bb/config/machine-service";
+import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import type { HostDaemonLogger } from "./logger.js";
 import { normalizeCaughtError } from "./error-utils.js";
 
@@ -14,6 +15,7 @@ interface SignalSource {
 }
 
 interface CreateDaemonOptions {
+  managedRoot?: object;
   identity: HostDaemonIdentity;
   logger: HostDaemonLogger;
   releaseLock: () => Promise<void>;
@@ -39,6 +41,8 @@ const TERMINATION_SIGNALS: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
 const DEFAULT_SHUTDOWN_EXIT_GRACE_MS = 15_000;
 
 export function createDaemon(options: CreateDaemonOptions): HostDaemon {
+  if (options.managedRoot !== undefined) internal_DO_NOT_USE_enrollManagedRoot(options.managedRoot);
+  internal_DO_NOT_USE_assertManagedRootAdmission("daemon lifecycle creation");
   let started = false;
   let startupFailed = false;
   let stopPromise: Promise<void> | null = null;
@@ -181,6 +185,7 @@ export function createDaemon(options: CreateDaemonOptions): HostDaemon {
   return {
     identity: options.identity,
     async start(): Promise<void> {
+      internal_DO_NOT_USE_assertManagedRootAdmission("daemon lifecycle startup");
       if (started || stopPromise) {
         return;
       }
