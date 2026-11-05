@@ -9,7 +9,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { basename, dirname, join, posix, resolve } from "node:path";
-import { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_assertManagedRootAdmission, type ManagedRootEffect } from "@bb/config/file-lock";
 import {
   type BbAppManagedConfig,
   type BbAppManagedEnvFile,
@@ -162,7 +162,6 @@ async function assertStagedFiles(
   filesDir: string,
   manifest: ServerArchiveManifest,
 ): Promise<void> {
-  internal_DO_NOT_USE_assertManagedRootAdmission("removeImportedServerFiles");
   for (const entry of manifest.entries) {
     const stats = await lstatOrNull(resolveRelativePath(filesDir, entry.path));
     if (stats?.isFile() !== true || stats.size !== entry.size) {
@@ -228,6 +227,7 @@ async function backUpExistingFile(
   relativePath: string,
   mode: "move" | "copy",
   result: InstallImportedServerFilesResult,
+  effect: ManagedRootEffect,
 ): Promise<void> {
   const destination = resolveRelativePath(dataDir, relativePath);
   if ((await lstatOrNull(destination)) === null) {
@@ -237,11 +237,11 @@ async function backUpExistingFile(
     join(dataDir, SERVER_IMPORT_BACKUP_DIR_NAME),
     relativePath,
   );
-  await mkdir(dirname(backupPath), { recursive: true });
+  await effect.runOriginal(() => mkdir(dirname(backupPath), { recursive: true }));
   if (mode === "move") {
-    await rename(destination, backupPath);
+    await effect.runOriginal(() => rename(destination, backupPath));
   } else {
-    await copyFileAtomically(destination, backupPath);
+    await effect.runOriginal(() => copyFileAtomically(destination, backupPath));
   }
   result.backups.push(relativePath);
 }
@@ -251,11 +251,12 @@ async function installStagedFile(
   filesDir: string,
   relativePath: string,
   result: InstallImportedServerFilesResult,
+  effect: ManagedRootEffect,
 ): Promise<void> {
   const destination = resolveRelativePath(dataDir, relativePath);
-  await backUpExistingFile(dataDir, relativePath, "move", result);
-  await mkdir(dirname(destination), { recursive: true });
-  await moveFile(resolveRelativePath(filesDir, relativePath), destination);
+  await backUpExistingFile(dataDir, relativePath, "move", result, effect);
+  await effect.runOriginal(() => mkdir(dirname(destination), { recursive: true }));
+  await effect.runOriginal(() => moveFile(resolveRelativePath(filesDir, relativePath), destination));
   result.importedEntries.push(relativePath);
 }
 
@@ -265,6 +266,7 @@ async function writeManagedFile<T extends object>(args: {
   readExisting: (path: string) => Promise<T>;
   merge: (existing: T) => T;
   result: InstallImportedServerFilesResult;
+  effect: ManagedRootEffect;
 }): Promise<void> {
   const path = join(args.dataDir, args.relativePath);
   await mutateManagedJsonFile({
@@ -275,6 +277,7 @@ async function writeManagedFile<T extends object>(args: {
         args.relativePath,
         "copy",
         args.result,
+        args.effect,
       );
       return args.readExisting(path);
     },
@@ -316,7 +319,32 @@ async function journalPlannedEntries(
 export async function installImportedServerFiles(
   args: InstallImportedServerFilesArgs,
 ): Promise<InstallImportedServerFilesResult> {
-  internal_DO_NOT_USE_assertManagedRootAdmission("installImportedServerFiles");
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("installImportedServerFiles");
+  let rollbackRequired = false;
+  let failed = false;
+  const rollback = effect.reserveOriginalCleanup(async () => {
+    if (rollbackRequired) await rollBackOriginalServerImport(args.dataDir);
+  });
+  try {
+    return await effect.runOriginal(() => installOriginalServerFiles(args, effect, () => { rollbackRequired = true; }));
+  } catch (error) {
+    failed = true;
+    await rollback().catch(() => undefined);
+    throw error;
+  } finally {
+    rollbackRequired = false;
+    try {
+      if (failed) await rollback().catch(() => undefined);
+      else await rollback();
+    } finally { effect.complete(); }
+  }
+}
+
+async function installOriginalServerFiles(
+  args: InstallImportedServerFilesArgs,
+  effect: ManagedRootEffect,
+  markRollbackRequired: () => void,
+): Promise<InstallImportedServerFilesResult> {
   const dataDir = resolve(args.dataDir);
   const filesDir = join(
     resolve(args.stagingDir),
@@ -326,7 +354,7 @@ export async function installImportedServerFiles(
     args.manifest.entries.map((entry) => entry.path),
     "Archive entry",
   );
-  await mkdir(dataDir, { recursive: true });
+  await effect.runOriginal(() => mkdir(dataDir, { recursive: true }));
   await assertNoServerData(dataDir);
   await assertStagedFiles(filesDir, args.manifest);
   const verifiedDirectories = new Set<string>();
@@ -382,7 +410,8 @@ export async function installImportedServerFiles(
       relativePath !== MANAGED_ENV_PATH &&
       relativePath !== SERVER_DATABASE_PATH,
   );
-  await rm(join(dataDir, SERVER_IMPORT_FILE_NAME), { force: true });
+  await effect.runOriginal(() => rm(join(dataDir, SERVER_IMPORT_FILE_NAME), { force: true }));
+  markRollbackRequired();
   await journalPlannedEntries(dataDir, [
     ...stagedEntries,
     ...(writesManagedConfig ? [MANAGED_CONFIG_PATH] : []),
@@ -395,11 +424,12 @@ export async function installImportedServerFiles(
   };
   try {
     for (const relativePath of stagedEntries) {
-      await installStagedFile(dataDir, filesDir, relativePath, result);
+      await installStagedFile(dataDir, filesDir, relativePath, result, effect);
     }
     if (writesManagedConfig) {
       await writeManagedFile({
         dataDir,
+        effect,
         relativePath: MANAGED_CONFIG_PATH,
         readExisting: async (path) =>
           (await readManagedJsonFile(
@@ -419,6 +449,7 @@ export async function installImportedServerFiles(
     if (importedEnv !== null) {
       await writeManagedFile({
         dataDir,
+        effect,
         relativePath: MANAGED_ENV_PATH,
         readExisting: async (path) =>
           (await readManagedJsonFile(path, parseManagedEnvFile, "existing")) ??
@@ -428,12 +459,9 @@ export async function installImportedServerFiles(
       });
     }
     if (manifestPaths.has(SERVER_DATABASE_PATH)) {
-      await installStagedFile(dataDir, filesDir, SERVER_DATABASE_PATH, result);
+      await installStagedFile(dataDir, filesDir, SERVER_DATABASE_PATH, result, effect);
     }
-  } catch (error) {
-    await rollBackServerImport(dataDir);
-    throw error;
-  }
+  } catch (error) { throw error; }
   return result;
 }
 
@@ -503,12 +531,16 @@ async function removeEmptyParentDirectories(
 async function removeImportedEntry(
   dataDir: string,
   relativePath: string,
+  effect?: ManagedRootEffect,
 ): Promise<void> {
   const path = resolveRelativePath(dataDir, relativePath);
-  await rm(path, { force: true, recursive: true });
+  const remove = (target: string, recursive: boolean) => effect === undefined
+    ? rm(target, { force: true, recursive })
+    : effect.runOriginal(() => rm(target, { force: true, recursive }));
+  await remove(path, true);
   if (relativePath.endsWith(".db")) {
     for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
-      await rm(`${path}${suffix}`, { force: true });
+      await remove(`${path}${suffix}`, false);
     }
   }
 }
@@ -516,26 +548,35 @@ async function removeImportedEntry(
 export async function removeImportedServerFiles(
   args: RemoveImportedServerFilesArgs,
 ): Promise<void> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("removeImportedServerFiles");
+  try {
   const dataDir = resolve(args.dataDir);
   assertServerOwnedPaths(args.importedEntries, "Imported entry");
   for (const entry of args.importedEntries) {
-    await removeImportedEntry(dataDir, entry);
+    await removeImportedEntry(dataDir, entry, effect);
   }
   const backupDir = join(dataDir, SERVER_IMPORT_BACKUP_DIR_NAME);
   for (const backup of await listBackupFiles(backupDir, null)) {
     const destination = resolveRelativePath(dataDir, backup);
-    await mkdir(dirname(destination), { recursive: true });
-    await rename(resolveRelativePath(backupDir, backup), destination);
+    await effect.runOriginal(() => mkdir(dirname(destination), { recursive: true }));
+    await effect.runOriginal(() => rename(resolveRelativePath(backupDir, backup), destination));
   }
-  await rm(backupDir, { force: true, recursive: true });
-  await removeEmptyParentDirectories(dataDir, args.importedEntries);
-  await removeServerImportJournalFile(dataDir);
+  await effect.runOriginal(() => rm(backupDir, { force: true, recursive: true }));
+  await effect.runOriginal(() => removeEmptyParentDirectories(dataDir, args.importedEntries));
+  await effect.runOriginal(() => removeServerImportJournalFile(dataDir));
+  } finally { effect.complete(); }
 }
 
 export async function rollBackServerImport(
   dataDir: string,
 ): Promise<ServerImportJournalFile | null> {
-  internal_DO_NOT_USE_assertManagedRootAdmission("rollBackServerImport");
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("rollBackServerImport");
+  try {
+    return await effect.runOriginal(() => rollBackOriginalServerImport(dataDir, effect));
+  } finally { effect.complete(); }
+}
+
+async function rollBackOriginalServerImport(dataDir: string, effect?: ManagedRootEffect): Promise<ServerImportJournalFile | null> {
   const root = resolve(dataDir);
   const status = await readServerImportJournalStatus(root);
   if (status.kind === "none") {
@@ -554,13 +595,16 @@ export async function rollBackServerImport(
     if (!backedUp && preexistingEntries.has(relativePath)) {
       continue;
     }
-    await removeImportedEntry(root, relativePath);
+    await removeImportedEntry(root, relativePath, effect);
     if (backedUp) {
       const destination = resolveRelativePath(root, relativePath);
+      effect?.assertOriginalAtDequeue();
       await mkdir(dirname(destination), { recursive: true });
+      effect?.assertOriginalAtDequeue();
       await rename(backupPath, destination);
     }
   }
+  effect?.assertOriginalAtDequeue();
   await rm(backupDir, { force: true, recursive: true });
   await removeEmptyParentDirectories(root, journal.entries);
   await removeServerImportJournalFile(root);

@@ -514,15 +514,18 @@ export class PluginHostManager {
       await this.stopWorker(current, "host artifact generation replaced");
     }
 
+    internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.mkdir");
     await mkdir(join(this.options.dataDir, "plugins", encodeURIComponent(command.pluginId), "host-data"), {
       recursive: true,
       mode: 0o700,
     });
+    internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.ensureDataDir");
     const dataDir = await ensurePluginProcessDataDir({
       daemonDataDir: this.options.dataDir,
       pluginId: command.pluginId,
       kind: "host-data",
     });
+    internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.acquireLease");
     const lease = await internal_DO_NOT_USE_acquireDirectoryLease(dataDir);
     let artifactPath: string;
     let tempDir: string | undefined;
@@ -543,7 +546,9 @@ export class PluginHostManager {
       if (failed) throw primary;
     };
     try {
+      internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.materializeArtifact");
       artifactPath = await this.materializeArtifact(command);
+      internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.createTempDir");
       tempDir = await createPluginProcessTempDir({
         pluginId: command.pluginId,
         prefix: "bb-host",
@@ -564,6 +569,7 @@ export class PluginHostManager {
         ...(shellPath !== undefined ? { shellPath } : {}),
       });
       pendingFork = { lease, tempDir, failures: secondaryFailures };
+      internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.fork");
       child = fork(
         workerPath,
         [artifactPath, command.pluginId, command.generation, dataDir, tempDir],

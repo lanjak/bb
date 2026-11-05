@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_assertManagedRootAdmission, type ManagedRootEffect } from "@bb/config/file-lock";
 import { resolveDataDirSkillsRootPath } from "@bb/config/skill-storage-paths";
 import { getRelativeHostPathSegments } from "@bb/domain";
 import type { AgentRuntimeSkillRoot } from "@bb/agent-runtime";
@@ -465,7 +465,7 @@ export function scheduleSkillStoreGc(
   scheduledSkillStoreGcs.add(dataDir);
   void effect.runOriginal(() => runInSerialLane(skillStoreQueues, dataDir, () => effect.runOriginal(() => {
     scheduledSkillStoreGcs.delete(dataDir);
-    return gcSkillStore(dataDir);
+    return gcSkillStore(dataDir, effect);
   }))).finally(() => { scheduledSkillStoreGcs.delete(dataDir); effect.complete(); }).catch((error: unknown) => {
     logger.warn(
       {
@@ -507,20 +507,20 @@ function hashCollectedTrees(trees: readonly CollectedSkillTree[]): string {
   return hash.digest("hex");
 }
 
-async function copyCollectedTree(args: StageTreeArgs): Promise<void> {
-  await fs.mkdir(args.skillDirectoryPath, { recursive: true });
+async function copyCollectedTree(args: StageTreeArgs, effect: ManagedRootEffect): Promise<void> {
+  await effect.runOriginal(() => fs.mkdir(args.skillDirectoryPath, { recursive: true }));
   for (const directory of args.tree.directories) {
-    await fs.mkdir(path.join(args.skillDirectoryPath, directory.relativePath), {
+    await effect.runOriginal(() => fs.mkdir(path.join(args.skillDirectoryPath, directory.relativePath), {
       recursive: true,
-    });
+    }));
   }
   for (const file of args.tree.files) {
     const destinationPath = path.join(
       args.skillDirectoryPath,
       file.relativePath,
     );
-    await fs.mkdir(path.dirname(destinationPath), { recursive: true });
-    await copyVerifiedFile({
+    await effect.runOriginal(() => fs.mkdir(path.dirname(destinationPath), { recursive: true }));
+    await effect.runOriginal(() => copyVerifiedFile({
       destinationPath,
       expected: {
         maxBytes: file.sizeBytes,
@@ -530,7 +530,7 @@ async function copyCollectedTree(args: StageTreeArgs): Promise<void> {
       label: `Skill file ${file.relativePath}`,
       mode: file.mode,
       sourcePath: file.sourcePath,
-    });
+    }));
   }
 }
 
@@ -539,7 +539,8 @@ export async function copyInjectedSkillSource(
 ): Promise<void> {
   const effect = internal_DO_NOT_USE_beginManagedRootEffect("cleanupInjectedSkillStagingDirs");
   try {
-  internal_DO_NOT_USE_assertManagedRootAdmission("copyInjectedSkillSource");
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("copyInjectedSkillSource");
+  try {
   const tree = await collectSkillDirectory({
     boundaryPath: null,
     name: args.name,
@@ -549,7 +550,8 @@ export async function copyInjectedSkillSource(
   await copyCollectedTree({
     skillDirectoryPath: args.destinationPath,
     tree,
-  });
+  }, effect);
+  } finally { effect.complete(); }
 }
 
 function createCatalogFile(args: CreateCatalogFileArgs): CatalogFile {
@@ -590,11 +592,12 @@ function isWindowsTransientRenameError(error: unknown): boolean {
 async function renameDirectoryIntoPlace(
   sourcePath: string,
   destinationPath: string,
+  effect: ManagedRootEffect,
 ): Promise<"renamed" | "destination-exists"> {
   const deadline = Date.now() + WINDOWS_RENAME_RETRY_BUDGET_MS;
   for (let delayMs = 20; ; delayMs = Math.min(delayMs * 2, 500)) {
     try {
-      await fs.rename(sourcePath, destinationPath);
+      await effect.runOriginal(() => fs.rename(sourcePath, destinationPath));
       return "renamed";
     } catch (error) {
       if (
@@ -615,21 +618,24 @@ async function publishDirectory(args: {
   destinationPath: string;
   isComplete: (directoryPath: string) => Promise<boolean>;
   tempRootPath: string;
+  effect: ManagedRootEffect;
 }): Promise<void> {
   if (
     (await renameDirectoryIntoPlace(
       args.tempRootPath,
       args.destinationPath,
+      args.effect,
+      args.effect,
     )) === "renamed" ||
     (await args.isComplete(args.destinationPath))
   ) {
     return;
   }
-  await fs.rm(args.destinationPath, {
+  await args.effect.runOriginal(() => fs.rm(args.destinationPath, {
     recursive: true,
     force: true,
     maxRetries: 5,
-  });
+  }));
   if (
     (await renameDirectoryIntoPlace(
       args.tempRootPath,
@@ -688,9 +694,9 @@ async function writeStageRoot(args: WriteStageRootArgs): Promise<string> {
       await copyCollectedTree({
         skillDirectoryPath: path.join(tempRootPath, "skills", tree.source.name),
         tree,
-      });
+      }, effect);
     }
-    await fs.writeFile(
+    await effect.runOriginal(() => fs.writeFile(
       path.join(tempRootPath, STAGE_CATALOG_FILE),
       `${JSON.stringify(
         createCatalogFile({
@@ -701,11 +707,12 @@ async function writeStageRoot(args: WriteStageRootArgs): Promise<string> {
         2,
       )}\n`,
       "utf8",
-    );
+    ));
     await publishDirectory({
       destinationPath: stageRootPath,
       isComplete: isStageRootComplete,
       tempRootPath,
+      effect,
     });
   return stageRootPath;
   } catch (error) {
@@ -844,7 +851,7 @@ async function touchStoredTree(treeRootPath: string): Promise<void> {
   await fs.writeFile(path.join(treeRootPath, STORE_LAST_USED_MARKER), "");
 }
 
-async function gcSkillStore(dataDir: string): Promise<void> {
+async function gcSkillStore(dataDir: string, effect: ManagedRootEffect): Promise<void> {
   const exemptTreeHashes = new Set(
     activeSkillTreeStages.get(dataDir)?.keys() ?? [],
   );
@@ -890,10 +897,10 @@ async function gcSkillStore(dataDir: string): Promise<void> {
     evictionCandidates
       .slice(Math.max(0, evictionCandidates.length - removalCount))
       .map((entry) =>
-        { internal_DO_NOT_USE_assertManagedRootAdmission("gcSkillStore.remove"); return fs.rm(path.join(storeRootPath, entry.name), {
+        effect.runOriginal(() => fs.rm(path.join(storeRootPath, entry.name), {
           recursive: true,
           force: true,
-        }); },
+        })),
       ),
   );
 }
@@ -963,16 +970,20 @@ async function downloadTreeFiles(args: {
   files: readonly HostDaemonSkillTreeFile[];
   skillTreeTransport: SkillTreeTransport;
   treeHash: string;
+  effect: ManagedRootEffect;
 }): Promise<void> {
-  const reader = new ChunkReader(
-    await args.skillTreeTransport.fetchContent(
-      args.treeHash,
-      args.files.map((file) => file.path),
-    ),
-  );
+  let reader: ChunkReader | undefined;
+  const cancel = args.effect.reserveOriginalCleanup(async () => { await reader?.cancel(); });
+  let failed = false;
   try {
+  const source = await args.effect.runOriginal(() => args.skillTreeTransport.fetchContent(
+    args.treeHash,
+    args.files.map((file) => file.path),
+  ));
+  reader = new ChunkReader(source);
+  const originalReader = reader;
     for (const file of args.files) {
-      await writeVerifiedFile({
+      await args.effect.runOriginal(() => writeVerifiedFile({
         destinationPath: path.join(
           args.contentRootPath,
           ...file.path.split("/"),
@@ -981,13 +992,17 @@ async function downloadTreeFiles(args: {
         expected: storedFileExpectation(file),
         label: `Skill tree file ${file.path}`,
         mode: { kind: "exact", mode: file.mode },
-        source: takeExactBytes(reader, file.sizeBytes),
-      });
+        source: takeExactBytes(originalReader, file.sizeBytes),
+      }));
     }
-    await reader.assertEnded();
+    await originalReader.assertEnded();
+    reader = undefined;
   } catch (error) {
-    await reader.cancel().catch(() => undefined);
+    failed = true;
     throw error;
+  } finally {
+    if (failed) await cancel().catch(() => undefined);
+    else await cancel();
   }
 }
 
@@ -999,13 +1014,19 @@ async function pullTreeIntoStore(args: {
 }): Promise<string> {
   const effect = internal_DO_NOT_USE_beginManagedRootEffect("ensureStoredSkillTree");
   try {
-  internal_DO_NOT_USE_assertManagedRootAdmission("ensureStoredSkillTree");
-  const manifest = await args.skillTreeTransport.fetchManifest(args.treeHash);
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("pullTreeIntoStore");
+  let ownedTempRootPath: string | undefined;
+  const cleanup = effect.reserveOriginalCleanup(async () => {
+    if (ownedTempRootPath !== undefined) await fs.rm(ownedTempRootPath, { recursive: true, force: true });
+  });
+  let failed = false;
+  try {
+  const manifest = await effect.runOriginal(() => args.skillTreeTransport.fetchManifest(args.treeHash));
   const files = validatedManifestFiles(manifest, args.treeHash);
 
   const storeRootPath = resolveSkillStoreRootPath(args.dataDir);
   const treeRootPath = resolveStoredTreeRootPath(args.dataDir, args.treeHash);
-  await fs.mkdir(storeRootPath, { recursive: true });
+  await effect.runOriginal(() => fs.mkdir(storeRootPath, { recursive: true }));
   const tempRootPath = path.join(
     storeRootPath,
     `.tmp-${args.treeHash}-${process.pid}-${Date.now()}-${randomUUID()}`,
@@ -1017,24 +1038,27 @@ async function pullTreeIntoStore(args: {
   const duplicates: HostDaemonSkillTreeFile[] = [];
   const pulledFiles = new Map<string, string>();
   let reusedFiles = 0;
-  try {
-    await fs.mkdir(contentRootPath, { recursive: true });
+    await effect.runOriginal(async () => {
+      await fs.mkdir(tempRootPath);
+      ownedTempRootPath = tempRootPath;
+    });
+    await effect.runOriginal(() => fs.mkdir(contentRootPath, { recursive: true }));
     for (const file of files) {
       const destinationPath = path.join(
         contentRootPath,
         ...file.path.split("/"),
       );
-      await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+      await effect.runOriginal(() => fs.mkdir(path.dirname(destinationPath), { recursive: true }));
       const storedPath = storedFiles.get(file.sha256);
       if (storedPath !== undefined && !pulledFiles.has(file.sha256)) {
         try {
-          await copyVerifiedFile({
+          await effect.runOriginal(() => copyVerifiedFile({
             destinationPath,
             expected: storedFileExpectation(file),
             label: `Stored skill file ${file.path}`,
             mode: file.mode,
             sourcePath: storedPath,
-          });
+          }));
           pulledFiles.set(file.sha256, destinationPath);
           reusedFiles += 1;
           continue;
@@ -1055,6 +1079,7 @@ async function pullTreeIntoStore(args: {
         files: downloads,
         skillTreeTransport: args.skillTreeTransport,
         treeHash: args.treeHash,
+        effect,
       });
       for (const file of downloads) {
         pulledFiles.set(
@@ -1068,31 +1093,29 @@ async function pullTreeIntoStore(args: {
       if (sourcePath === undefined) {
         throw new Error(`Missing pulled skill file for ${file.path}`);
       }
-      await copyVerifiedFile({
+      await effect.runOriginal(() => copyVerifiedFile({
         destinationPath: path.join(contentRootPath, ...file.path.split("/")),
         expected: storedFileExpectation(file),
         label: `Skill tree file ${file.path}`,
         mode: file.mode,
         sourcePath,
-      });
+      }));
     }
-    await fs.writeFile(
+    await effect.runOriginal(() => fs.writeFile(
       path.join(tempRootPath, STORE_MANIFEST_FILE),
       `${JSON.stringify(manifest)}\n`,
-    );
-    await fs.writeFile(path.join(tempRootPath, STORE_LAST_USED_MARKER), "");
-    await fs.writeFile(
+    ));
+    await effect.runOriginal(() => fs.writeFile(path.join(tempRootPath, STORE_LAST_USED_MARKER), ""));
+    await effect.runOriginal(() => fs.writeFile(
       path.join(tempRootPath, STORE_COMPLETE_MARKER),
       "complete\n",
-    );
+    ));
     await publishDirectory({
       destinationPath: treeRootPath,
       isComplete: isStoredTreeComplete,
       tempRootPath,
+      effect,
     });
-  } finally {
-    await fs.rm(tempRootPath, { recursive: true, force: true });
-  }
   args.logger.debug(
     {
       downloadedBytes: downloads.reduce(
@@ -1107,6 +1130,15 @@ async function pullTreeIntoStore(args: {
   );
   await touchStoredTree(treeRootPath);
   return path.join(treeRootPath, STORE_CONTENT_DIR);
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    try {
+      if (failed) await cleanup().catch(() => undefined);
+      else await cleanup();
+    } finally { effect.complete(); }
+  }
 }
 
 export async function ensureStoredSkillTree(args: {
