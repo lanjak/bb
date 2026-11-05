@@ -114,7 +114,11 @@ describe("POST /plugins/reload outcome", () => {
         });
         expect(preflights).toBe(1);
         expect(dispositions).toEqual([!replace]);
-        expect(replacement.messages).toHaveLength(0);
+        const replacementMessages = replacement.messages.map((data) =>
+          hostDaemonServerWsMessageSchema.parse(JSON.parse(data)));
+        expect(replacementMessages.map((message) => message.type).sort()).toEqual(
+          replace ? ["machine-environment.replace", "provider-session-policy.replace"] : [],
+        );
         expect(getInstalledPlugin(harness.db, "keeper")?.enabled).toBe(true);
         expect(harness.pluginService.getApi("keeper")).toBe(originalApi);
       });
