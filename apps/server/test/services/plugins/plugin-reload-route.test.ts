@@ -73,6 +73,19 @@ describe("POST /plugins/reload outcome", () => {
     const artifact = await readFile(join(rootDir, "dist", "host.js"));
     const { host, session } = seedHostSession(harness, { id: "host_selected" });
     const replacement = createMockHubSocket();
+    let releaseHandshake: () => void = () => {};
+    const handshake = new Promise<void>((resolve) => { releaseHandshake = resolve; });
+    const handshakeTypes = new Set<string>();
+    const replacementSocket = {
+      ...replacement,
+      send(data: string) {
+        replacement.send(data);
+        const parsed = hostDaemonServerWsMessageSchema.safeParse(JSON.parse(data));
+        if (parsed.success) handshakeTypes.add(parsed.data.type);
+        if (handshakeTypes.has("machine-environment.replace") &&
+            handshakeTypes.has("provider-session-policy.replace")) releaseHandshake();
+      },
+    };
     let preflights = 0;
     const dispositions: boolean[] = [];
     const socket = createMockHubSocket();
@@ -90,7 +103,7 @@ describe("POST /plugins/reload outcome", () => {
           artifact: { digest: createHash("sha256").update(artifact).digest("hex"), byteLength: artifact.length },
         });
         queueMicrotask(() => {
-          if (replace) harness.hub.registerDaemon(session.id, host.id, replacement);
+          if (replace) harness.hub.registerDaemon(session.id, host.id, replacementSocket);
           const disposition = harness.hub.recordHostOnlineRpcResponse({
             sessionId: session.id,
             message: {
@@ -114,6 +127,19 @@ describe("POST /plugins/reload outcome", () => {
         });
         expect(preflights).toBe(1);
         expect(dispositions).toEqual([!replace]);
+        if (replace) {
+          let deadline: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              handshake,
+              new Promise<never>((_resolve, reject) => {
+                deadline = setTimeout(() => reject(new Error("Replacement connection synchronization timed out")), 1000);
+              }),
+            ]);
+          } finally {
+            clearTimeout(deadline);
+          }
+        }
         const replacementMessages = replacement.messages.map((data) =>
           hostDaemonServerWsMessageSchema.parse(JSON.parse(data)));
         expect(replacementMessages.map((message) => message.type).sort()).toEqual(
@@ -123,6 +149,7 @@ describe("POST /plugins/reload outcome", () => {
         expect(harness.pluginService.getApi("keeper")).toBe(originalApi);
       });
     } finally {
+      releaseHandshake();
       harness.hub.unregisterDaemon(session.id);
     }
   });
