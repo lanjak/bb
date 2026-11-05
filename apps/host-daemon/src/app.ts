@@ -836,6 +836,8 @@ export async function createHostDaemonApp(
     onChanged: (event) => sendServerMessage(event),
   });
 
+  startupCleanups.push(() => desktopBrowserBroker.close());
+  startupEffect.assertOriginalAtDequeue();
   let requestServerMoveShutdown = async (
     _reason: string,
     _exitCode: 0 | 1,
