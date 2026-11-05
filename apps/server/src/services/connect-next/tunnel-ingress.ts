@@ -12,11 +12,11 @@ import {
 } from "node:http";
 import type { Duplex } from "node:stream";
 import {
+  GATE_ASSERTION_CLOCK_SKEW_SECONDS,
   GATE_ASSERTION_HEADER,
   GATE_PUBLIC_PATHS,
   type GateAssertionClaims,
 } from "@bb/tunnel-contract/next";
-import { markTunnelIngressRequest } from "../../request-context.js";
 import type { ServerLogger } from "../../types.js";
 import type { GateKeyStore, GateKeyVerification } from "./gate-keys.js";
 
@@ -45,6 +45,88 @@ export interface TunnelIngressLease {
   close(): Promise<void>;
 }
 
+interface VerifiedTunnelIngress {
+  readonly claims: Readonly<
+    Omit<GateAssertionClaims, "oauth"> & {
+      oauth: Readonly<NonNullable<GateAssertionClaims["oauth"]>> | null;
+    }
+  >;
+  readonly ownerPolicyDerived: boolean;
+}
+
+interface VerifiedIngressRecord {
+  verification: VerifiedTunnelIngress;
+  ingress: Ingress;
+  request: Request | null;
+  method: string;
+  pathAndQuery: string;
+}
+
+const verifiedIngressRequests = new WeakMap<
+  IncomingMessage,
+  VerifiedIngressRecord
+>();
+
+export function readVerifiedTunnelIngress(
+  incoming: IncomingMessage,
+  request: Request,
+): VerifiedTunnelIngress | null {
+  const record = verifiedIngressRequests.get(incoming);
+  if (
+    record === undefined ||
+    !record.ingress.active ||
+    incoming.aborted ||
+    incoming.socket.destroyed ||
+    request.signal.aborted ||
+    incoming.method !== record.method ||
+    incoming.url !== record.pathAndQuery ||
+    request.method !== record.method
+  ) {
+    return null;
+  }
+  const { claims } = record.verification;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (
+    claims.exp + GATE_ASSERTION_CLOCK_SKEW_SECONDS < nowSeconds ||
+    claims.iat - GATE_ASSERTION_CLOCK_SKEW_SECONDS > nowSeconds
+  ) {
+    return null;
+  }
+  if (record.request !== null) {
+    if (record.request !== request) return null;
+  } else {
+    const url = new URL(request.url);
+    if (`${url.pathname}${url.search}` !== record.pathAndQuery) return null;
+  }
+  return record.verification;
+}
+
+function captureVerifiedIngress(
+  ingress: Ingress,
+  incoming: IncomingMessage,
+  request: Request | null,
+  claims: GateAssertionClaims,
+): void {
+  const capturedClaims = Object.freeze({
+    ...claims,
+    oauth: claims.oauth === null ? null : Object.freeze({ ...claims.oauth }),
+  });
+  verifiedIngressRequests.set(incoming, {
+    verification: Object.freeze({
+      claims: capturedClaims,
+      ownerPolicyDerived:
+        request !== null &&
+        capturedClaims.kind === "session" &&
+        capturedClaims.sub.length > 0 &&
+        capturedClaims.sub.trim() === capturedClaims.sub,
+    }),
+    ingress,
+    request,
+    method: claims.htm,
+    pathAndQuery: claims.htu,
+  });
+}
+
 export interface TunnelIngressManager {
   open(audience: string): Promise<TunnelIngressLease>;
   closeAll(): Promise<void>;
@@ -66,6 +148,7 @@ export interface CreateTunnelIngressManagerArgs {
 }
 
 interface Ingress {
+  active: boolean;
   audience: string;
   baseUrl: string;
   server: Server;
@@ -242,10 +325,11 @@ export function createTunnelIngressManager(
   }
 
   async function handleHttp(
-    audience: string,
+    ingress: Ingress,
     request: Request,
     env: HttpBindings | Http2Bindings,
   ): Promise<Response> {
+    const { audience } = ingress;
     const incoming = env.incoming;
     if (!(incoming instanceof IncomingMessage)) {
       return refusalResponse("bad_request_target");
@@ -260,7 +344,7 @@ export function createTunnelIngressManager(
       claims: verification.claims,
       loopbackOrigin,
     });
-    markTunnelIngressRequest(incoming);
+
     const init: RequestInit & { duplex: "half" } = {
       method: request.method,
       headers,
@@ -268,10 +352,12 @@ export function createTunnelIngressManager(
       duplex: "half",
       signal: request.signal,
     };
-    return args.app.fetch(
-      new Request(`${loopbackOrigin}${verification.pathAndQuery}`, init),
-      env,
+    const forwarded = new Request(
+      `${loopbackOrigin}${verification.pathAndQuery}`,
+      init,
     );
+    captureVerifiedIngress(ingress, incoming, forwarded, verification.claims);
+    return args.app.fetch(forwarded, env);
   }
 
   async function handleUpgrade(
@@ -293,16 +379,17 @@ export function createTunnelIngressManager(
       incomingHeaderEntries(incoming.headers),
       { claims: verification.claims, loopbackOrigin: args.loopbackOrigin() },
     );
-    markTunnelIngressRequest(incoming);
+    captureVerifiedIngress(ingress, incoming, null, verification.claims);
     upgradeRelay().emit("upgrade", incoming, socket, head);
   }
 
   async function listen(audience: string): Promise<Ingress> {
     const upgradedSockets = new Set<Duplex>();
     const server = createServer(
-      getRequestListener((request, env) => handleHttp(audience, request, env)),
+      getRequestListener((request, env) => handleHttp(ingress, request, env)),
     );
     const ingress: Ingress = {
+      active: true,
       audience,
       baseUrl: "",
       server,
@@ -337,6 +424,7 @@ export function createTunnelIngressManager(
   }
 
   function stop(ingress: Ingress): Promise<void> {
+    ingress.active = false;
     ingress.stopped ??= new Promise<void>((resolve) => {
       ingress.server.close(() => resolve());
       ingress.server.closeAllConnections();

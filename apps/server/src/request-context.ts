@@ -7,6 +7,8 @@ import {
   type RequestAppSurface,
 } from "@bb/config/app-surface";
 import type { Context } from "hono";
+import { IncomingMessage } from "node:http";
+import { readVerifiedTunnelIngress } from "./services/connect-next/tunnel-ingress.js";
 
 export const TRUSTED_REMOTE_ADDRESS_CONTEXT_KEY = "bbTrustedRemoteAddress";
 const GATE_AUTH_HEADER_NAME = "x-bb-gate-auth";
@@ -27,11 +29,6 @@ declare module "hono" {
   }
 }
 
-const tunnelIngressRequests = new WeakSet<object>();
-
-export function markTunnelIngressRequest(incoming: object): void {
-  tunnelIngressRequests.add(incoming);
-}
 
 function isTunnelIngressContext(context: Context): boolean {
   const env: unknown = context.env;
@@ -40,9 +37,8 @@ function isTunnelIngressContext(context: Context): boolean {
   }
   const incoming = env.incoming;
   return (
-    typeof incoming === "object" &&
-    incoming !== null &&
-    tunnelIngressRequests.has(incoming)
+    incoming instanceof IncomingMessage &&
+    readVerifiedTunnelIngress(incoming, context.req.raw) !== null
   );
 }
 
