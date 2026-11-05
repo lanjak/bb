@@ -1,45 +1,48 @@
 import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { FileLockTimeoutError, withFileLock } from "./file-lock.js";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "./managed-root-admission.js";
 
 const LOCK_TIMEOUT_MS = 5_000;
-
-function hasCode(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
-}
 
 export async function mutateManagedJsonFile<T extends object>(args: {
   path: string;
   read: () => Promise<T>;
   mutate: (current: T) => T;
+  managedRootEffect?: ManagedRootEffect;
 }): Promise<T> {
+  const effect = args.managedRootEffect ?? internal_DO_NOT_USE_beginManagedRootEffect("managed JSON mutation");
+  effect.assertOriginalAtDequeue();
   const directory = dirname(args.path);
-  await mkdir(directory, { recursive: true });
-  const lockPath = join(directory, `.${basename(args.path)}.lock`);
+  const tempPath = join(directory, `.${basename(args.path)}.tmp`);
+  let ownsTemporary = false;
+  const cleanup = effect.reserveOriginalCleanup(async () => {
+    if (ownsTemporary) await unlink(tempPath);
+  });
   try {
+    await effect.runOriginal(() => mkdir(directory, { recursive: true }));
+    const lockPath = join(directory, `.${basename(args.path)}.lock`);
     return await withFileLock({
       path: lockPath,
       timeoutMs: LOCK_TIMEOUT_MS,
+      managedRootEffect: effect,
       work: async () => {
-        const tempPath = join(directory, `.${basename(args.path)}.tmp`);
         try {
-          await unlink(tempPath);
-        } catch (error) {
-          if (!hasCode(error, "ENOENT")) {
-            throw error;
-          }
-        }
-        try {
-          const next = args.mutate(await args.read());
-          await writeFile(tempPath, `${JSON.stringify(next, null, 2)}\n`, {
+          const current = await effect.runOriginal(args.read);
+          effect.assertOriginalAtDequeue();
+          const next = args.mutate(current);
+          const encoded = `${JSON.stringify(next, null, 2)}\n`;
+          await effect.runOriginal(() => writeFile(tempPath, encoded, {
             encoding: "utf8",
             flag: "wx",
             mode: 0o600,
-          });
-          await rename(tempPath, args.path);
+          }));
+          ownsTemporary = true;
+          await effect.runOriginal(() => rename(tempPath, args.path));
+          ownsTemporary = false;
           return next;
         } finally {
-          await unlink(tempPath).catch(() => undefined);
+          try { await cleanup(); } catch {}
         }
       },
     });
@@ -50,5 +53,8 @@ export async function mutateManagedJsonFile<T extends object>(args: {
       );
     }
     throw error;
+  } finally {
+    try { await cleanup(); } catch {}
+    if (args.managedRootEffect === undefined) effect.complete();
   }
 }
