@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { constants } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -208,17 +209,28 @@ async function assertInstallableDestination(
 async function copyFileAtomically(
   sourcePath: string,
   destinationPath: string,
+  effect: ManagedRootEffect,
 ): Promise<void> {
   const tempPath = join(
     dirname(destinationPath),
     `.${basename(destinationPath)}.${randomBytes(6).toString("hex")}.tmp`,
   );
+  let ownsTemp = false;
+  let failed = false;
+  const cleanup = effect.reserveOriginalCleanup(async () => {
+    if (ownsTemp) await rm(tempPath, { force: true });
+  });
   try {
-    await copyFile(sourcePath, tempPath);
-    await rename(tempPath, destinationPath);
+    await effect.runOriginal(() => copyFile(sourcePath, tempPath, constants.COPYFILE_EXCL));
+    ownsTemp = true;
+    await effect.runOriginal(() => rename(tempPath, destinationPath));
+    ownsTemp = false;
   } catch (error) {
-    await rm(tempPath, { force: true });
+    failed = true;
     throw error;
+  } finally {
+    if (failed) await cleanup().catch(() => undefined);
+    else await cleanup();
   }
 }
 
@@ -241,7 +253,7 @@ async function backUpExistingFile(
   if (mode === "move") {
     await effect.runOriginal(() => rename(destination, backupPath));
   } else {
-    await effect.runOriginal(() => copyFileAtomically(destination, backupPath));
+    await effect.runOriginal(() => copyFileAtomically(destination, backupPath, effect));
   }
   result.backups.push(relativePath);
 }
@@ -271,6 +283,7 @@ async function writeManagedFile<T extends object>(args: {
   const path = join(args.dataDir, args.relativePath);
   await mutateManagedJsonFile({
     path,
+    managedRootEffect: args.effect,
     read: async () => {
       await backUpExistingFile(
         args.dataDir,
