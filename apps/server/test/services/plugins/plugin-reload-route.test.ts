@@ -1,4 +1,6 @@
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { hostDaemonServerWsMessageSchema } from "@bb/host-daemon-contract";
 import { createServer, IncomingMessage, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { getInstalledPlugin } from "@bb/db";
@@ -54,6 +56,71 @@ describe("POST /plugins/reload outcome", () => {
     await writeFile(join(rootDir, "server.ts"), HEALTHY_SOURCE);
     const entry = await harness.pluginService.installPath(rootDir);
     expect(entry.status).toBe("running");
+  });
+
+  it.each([false, true])("carries the loaded host artifact through signed preflight with replacement %s", async (replace) => {
+    await writeFile(join(rootDir, "package.json"), JSON.stringify({
+      name: "bb-plugin-keeper", version: "0.1.0",
+      bb: {
+        name: "Keeper", description: "Reload outcome fixture.",
+        branding: { icon: "Zap" }, server: "./server.ts", host: "./host.ts",
+      },
+    }));
+    await writeFile(join(rootDir, "host.ts"),
+      'throw new Error("Host fixture must not be imported"); export default { experimental_apiVersion: 1 };');
+    expect((await harness.pluginService.reload("keeper")).ok).toBe(true);
+    const originalApi = harness.pluginService.getApi("keeper");
+    const artifact = await readFile(join(rootDir, "dist", "host.js"));
+    const { host, session } = seedHostSession(harness, { id: "host_selected" });
+    const replacement = createMockHubSocket();
+    let preflights = 0;
+    const dispositions: boolean[] = [];
+    const socket = createMockHubSocket();
+    harness.hub.registerDaemon(session.id, host.id, {
+      ...socket,
+      send(data) {
+        socket.send(data);
+        const parsed = hostDaemonServerWsMessageSchema.safeParse(JSON.parse(data));
+        if (!parsed.success || parsed.data.type !== "host-rpc.request") return;
+        const message = parsed.data;
+        if (message.command.type !== "plugin.host.preflight") return;
+        preflights += 1;
+        expect(message.command).toMatchObject({
+          pluginId: "keeper", hostId: host.id, sessionId: session.id,
+          artifact: { digest: createHash("sha256").update(artifact).digest("hex"), byteLength: artifact.length },
+        });
+        queueMicrotask(() => {
+          if (replace) harness.hub.registerDaemon(session.id, host.id, replacement);
+          const disposition = harness.hub.recordHostOnlineRpcResponse({
+            sessionId: session.id,
+            message: {
+              type: "host-rpc.response", requestId: message.requestId,
+              commandType: "plugin.host.preflight", ok: true,
+              result: { status: "refused", reason: "managed-generation-unavailable" },
+            },
+          });
+          dispositions.push(disposition.handled);
+        });
+      },
+    });
+    try {
+      await signedEnable(JSON.stringify({ operatorIntent: {
+        action: "request-managed-generation", computeChildRssAdmissionBytes: 1048576,
+        attemptKey: "loaded_host", hostId: host.id,
+      } }), async (response) => {
+        expect(response.status).toBe(409);
+        expect(response.body).toMatchObject({
+          error: replace ? "managed generation selected host is unavailable" : "managed generation cannot replace a running plugin",
+        });
+        expect(preflights).toBe(1);
+        expect(dispositions).toEqual([!replace]);
+        expect(replacement.messages).toHaveLength(0);
+        expect(getInstalledPlugin(harness.db, "keeper")?.enabled).toBe(true);
+        expect(harness.pluginService.getApi("keeper")).toBe(originalApi);
+      });
+    } finally {
+      harness.hub.unregisterDaemon(session.id);
+    }
   });
 
   it("refuses an unavailable selected host without replacing the running plugin", async () => {
