@@ -39,6 +39,27 @@ class OriginalChild extends EventEmitter {
 }
 
 describe("managed cohort original-channel control, not native custody", () => {
+  it("retains a throwing kill outcome and still joins original close", async () => {
+    native.spawn.mockClear();
+    const controller = createManagedCohortController(["server"], undefined, {
+      serverEntry: "/fixed/server.js", daemonEntry: "/fixed/daemon.js", logDir: "/fixed/logs", env: {},
+    });
+    const child = new OriginalChild();
+    child.kill.mockImplementation(() => { throw undefined; });
+    native.spawn.mockReturnValue(child);
+    await controller.spawnFixedOriginal("server");
+    let finished = false;
+    const draining = controller.drain().then((result) => { finished = true; return result; });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(child.kill).toHaveBeenCalled();
+    expect(finished).toBe(false);
+    child.emit("close");
+    const result = await draining;
+    expect(result.failures).toContain(undefined);
+    expect(result.status).toBe("PINNED");
+  });
+
   it("joins the queued spawn attempt and denies its body after drain starts", async () => {
     native.spawn.mockClear();
     native.delayed = true;

@@ -67,8 +67,11 @@ export function createManagedCohortController(
       const cleanup = effect.reserveOriginalCleanup(async () => {
         await attemptSettled;
         if (child === undefined || closed === undefined) return;
-        child.kill("SIGTERM");
-        await closed;
+        try {
+          child.kill("SIGTERM");
+        } finally {
+          await closed;
+        }
       });
       cleanups.add(cleanup);
       const sanitizedEnv: NodeJS.ProcessEnv = {};
