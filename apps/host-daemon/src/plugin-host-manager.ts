@@ -39,6 +39,14 @@ type PluginHostDisposeCommand = Extract<
   { type: "plugin.host.dispose" }
 >;
 type PluginHostCallResult = HostDaemonOnlineRpcResult<"plugin.host.call">;
+type PluginHostPreflightCommand = Extract<
+  HostDaemonOnlineRpcCommand,
+  { type: "plugin.host.preflight" }
+>;
+type PluginHostPreflightCancelCommand = Extract<
+  HostDaemonOnlineRpcCommand,
+  { type: "plugin.host.preflight.cancel" }
+>;
 
 interface PendingCall {
   resolve: (result: PluginHostCallResult) => void;
@@ -228,6 +236,11 @@ function sendToWorker(child: ChildProcess, message: object): boolean {
 }
 
 export class PluginHostManager {
+  private readonly preflights = new Map<string, {
+    pluginId: string;
+    generation: string;
+    release: () => void;
+  }>();
   private readonly uncertainForks = new Set<object>();
   private readonly workers = new Map<string, WorkerState>();
   private readonly activeCalls = new Map<string, ActiveCallState>();
@@ -240,6 +253,60 @@ export class PluginHostManager {
   private shuttingDown = false;
 
   constructor(private readonly options: PluginHostManagerOptions) {}
+
+  async preflight(
+    command: PluginHostPreflightCommand,
+    signal: AbortSignal,
+  ): Promise<HostDaemonOnlineRpcResult<"plugin.host.preflight">> {
+    const refused = {
+      status: "refused" as const,
+      reason: "managed-generation-unavailable" as const,
+    };
+    const key = this.preflightKey(command);
+    if (
+      signal.aborted ||
+      this.shuttingDown ||
+      this.workers.has(command.pluginId) ||
+      this.workerMutationTails.has(command.pluginId) ||
+      this.uncertainForks.size > 0 ||
+      this.retiredGenerations.has(command.pluginId) ||
+      this.preflights.has(key) ||
+      this.preflights.size >= 128
+    ) return refused;
+    const record = {
+      pluginId: command.pluginId,
+      generation: command.generation,
+      release: () => {
+        if (this.preflights.get(key) === record) this.preflights.delete(key);
+        signal.removeEventListener("abort", record.release);
+        clearTimeout(timer);
+      },
+    };
+    const timer = setTimeout(record.release, command.timeoutMs);
+    timer.unref?.();
+    this.preflights.set(key, record);
+    signal.addEventListener("abort", record.release, { once: true });
+    try {
+      await Promise.resolve();
+      return refused;
+    } finally {
+      record.release();
+    }
+  }
+
+  cancelPreflight(command: PluginHostPreflightCancelCommand): { cancelled: boolean } {
+    const record = this.preflights.get(this.preflightKey(command));
+    if (record === undefined) return { cancelled: false };
+    record.release();
+    return { cancelled: true };
+  }
+
+  private preflightKey(command: PluginHostPreflightCancelCommand | PluginHostPreflightCommand): string {
+    return JSON.stringify([
+      command.pluginId, command.generation, command.attemptId,
+      command.hostId, command.sessionId,
+    ]);
+  }
 
   async call(command: PluginHostCallCommand): Promise<PluginHostCallResult> {
     if (this.shuttingDown) {
@@ -364,6 +431,7 @@ export class PluginHostManager {
 
   async shutdown(): Promise<void> {
     this.shuttingDown = true;
+    for (const record of this.preflights.values()) record.release();
     await Promise.allSettled([...this.workerMutationTails.values()]);
     await Promise.all(
       [...this.workers.values()].map((worker) =>
@@ -381,6 +449,9 @@ export class PluginHostManager {
     const activeByPlugin = new Map(
       activeGenerations.map((entry) => [entry.pluginId, entry.generation]),
     );
+    for (const record of this.preflights.values()) {
+      if (activeByPlugin.get(record.pluginId) !== record.generation) record.release();
+    }
     await Promise.all(
       [...this.workers.keys()].map((pluginId) =>
         this.enqueueWorkerMutation(pluginId, async () => {

@@ -12,6 +12,7 @@ import {
 import { createDeferredPromise } from "@bb/test-helpers";
 import fs from "node:fs/promises";
 import os from "node:os";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -29,6 +30,8 @@ import {
   fetchDispatchTestArtifact,
 } from "./dispatch-helpers.js";
 import { RuntimeManager } from "../../src/runtime-manager.js";
+import { PluginHostManager } from "../../src/plugin-host-manager.js";
+import * as processUtils from "@bb/process-utils";
 import { WorkspaceError } from "bb-environment-provider-host/workspace-git";
 
 type EnvironmentProvisionCommand = Extract<
@@ -60,6 +63,7 @@ interface CreateTurnSubmitCommandArgs {
 }
 
 interface CreateRouterArgs {
+  pluginHostManager?: PluginHostManager;
   logger?: CommandRouterOptions["logger"];
   resolveInteractiveRequest?: CommandRouterOptions["resolveInteractiveRequest"];
   runtimeManager?: RuntimeManager;
@@ -92,6 +96,7 @@ function createRouter(
     },
     resolveInteractiveRequest: args.resolveInteractiveRequest,
     runtimeManager: args.runtimeManager ?? harness.manager,
+    pluginHostManager: args.pluginHostManager,
     threadStorageRootPath: "/tmp/bb-router-test-thread-storage",
   });
 }
@@ -214,6 +219,85 @@ async function runRouterCommand({
 }
 
 describe("CommandRouter", () => {
+  it("refuses managed preflight through the real manager without creating a root or fetching or forking", async () => {
+    const harness = createHarness({ workspacePath: "/tmp/env-router" });
+    const dataDir = path.join(os.tmpdir(), `bb-preflight-${randomUUID()}`);
+    const fetchArtifact = vi.fn(async () => {
+      throw new Error("Preflight must not fetch an artifact");
+    });
+    const manager = new PluginHostManager({
+      dataDir,
+      fetchArtifact,
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+    });
+    const router = createRouter(harness, { pluginHostManager: manager });
+    const fork = vi.spyOn(processUtils, "forkHostProcess");
+    try {
+      const response = await router.handleOnlineRpcRequest({
+        type: "host-rpc.request",
+        requestId: "preflight-original-request",
+        command: {
+          type: "plugin.host.preflight",
+          pluginId: "fixture",
+          generation: "generation-1",
+          artifact: { digest: "a".repeat(64), byteLength: 1 },
+          attemptId: "attempt-1",
+          hostId: "host-selected",
+          sessionId: "session-original",
+          timeoutMs: 1_000,
+        },
+      });
+      expect(response).toMatchObject({
+        ok: true,
+        result: { status: "refused", reason: "managed-generation-unavailable" },
+      });
+      const command = {
+        type: "plugin.host.preflight" as const,
+        pluginId: "fixture",
+        generation: "generation-1",
+        artifact: { digest: "a".repeat(64), byteLength: 1 },
+        attemptId: "attempt-cancel",
+        hostId: "host-selected",
+        sessionId: "session-original",
+        timeoutMs: 1_000,
+      };
+      const cancel = {
+        type: "plugin.host.preflight.cancel" as const,
+        pluginId: command.pluginId,
+        generation: command.generation,
+        attemptId: command.attemptId,
+        hostId: command.hostId,
+        sessionId: command.sessionId,
+      };
+      const pending = router.handleOnlineRpcRequest({
+        type: "host-rpc.request", requestId: "pending-original", command,
+      });
+      const wrong = await router.handleOnlineRpcRequest({
+        type: "host-rpc.request", requestId: "cancel-wrong",
+        command: { ...cancel, sessionId: "session-replacement" },
+      });
+      expect(wrong).toMatchObject({ ok: true, result: { cancelled: false } });
+      await pending;
+      const original = manager.preflight(command, new AbortController().signal);
+      expect(manager.cancelPreflight({ ...cancel, sessionId: "other" })).toEqual({ cancelled: false });
+      expect(manager.cancelPreflight(cancel)).toEqual({ cancelled: true });
+      expect(manager.cancelPreflight(cancel)).toEqual({ cancelled: false });
+      await expect(original).resolves.toEqual({ status: "refused", reason: "managed-generation-unavailable" });
+      const aborted = router.handleOnlineRpcRequest({
+        type: "host-rpc.request", requestId: "abort-original", command,
+      });
+      router.cancelOnlineRpcRequest({ type: "host-rpc.cancel", requestId: "abort-original" });
+      expect(manager.cancelPreflight(cancel)).toEqual({ cancelled: false });
+      await expect(aborted).resolves.toMatchObject({ ok: true, result: { status: "refused" } });
+      expect(fetchArtifact).not.toHaveBeenCalled();
+      expect(fork).not.toHaveBeenCalled();
+      await expect(fs.stat(dataDir)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      fork.mockRestore();
+      await manager.shutdown();
+    }
+  });
+
   it("does not warn for expected provision cancellation RPC failures", async () => {
     const harness = createHarness({ workspacePath: "/tmp/env-router" });
     const logger = {

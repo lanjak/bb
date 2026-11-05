@@ -325,6 +325,78 @@ describe("PluginHostManager", () => {
     expect(fetchArtifact).toHaveBeenCalledOnce();
   });
 
+  it("releases only the original unused preflight on abort, timeout, revocation, and shutdown", async () => {
+    const manager = new PluginHostManager({
+      dataDir: join(tmpdir(), `bb-unused-preflight-${randomUUID()}`),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+      fetchArtifact: vi.fn(async () => { throw new Error("Unexpected artifact fetch"); }),
+    });
+    const command = {
+      type: "plugin.host.preflight" as const,
+      pluginId: "fixture", generation: "generation-1",
+      artifact: { digest: "a".repeat(64), byteLength: 1 },
+      attemptId: "original-attempt", hostId: "selected-host", sessionId: "original-session",
+      timeoutMs: 1,
+    };
+    const cancel = {
+      type: "plugin.host.preflight.cancel" as const,
+      pluginId: command.pluginId, generation: command.generation,
+      attemptId: command.attemptId, hostId: command.hostId, sessionId: command.sessionId,
+    };
+    const refused = { status: "refused", reason: "managed-generation-unavailable" };
+    try {
+      const controller = new AbortController();
+      const original = manager.preflight(command, controller.signal);
+      const duplicate = manager.preflight(command, new AbortController().signal);
+      expect(manager.cancelPreflight({ ...cancel, hostId: "wrong-host" })).toEqual({ cancelled: false });
+      controller.abort(undefined);
+      expect(manager.cancelPreflight(cancel)).toEqual({ cancelled: false });
+      await expect(original).resolves.toEqual(refused);
+      await expect(duplicate).resolves.toEqual(refused);
+
+      vi.useFakeTimers();
+      const timed = manager.preflight(command, new AbortController().signal);
+      vi.advanceTimersByTime(1);
+      expect(manager.cancelPreflight(cancel)).toEqual({ cancelled: false });
+      await expect(timed).resolves.toEqual(refused);
+      vi.useRealTimers();
+
+      const revoked = manager.preflight(command, new AbortController().signal);
+      const reconciliation = manager.reconcileGenerations([]);
+      expect(manager.cancelPreflight(cancel)).toEqual({ cancelled: false });
+      await reconciliation;
+      await expect(revoked).resolves.toEqual(refused);
+
+      const stopped = manager.preflight(command, new AbortController().signal);
+      const shutdown = manager.shutdown();
+      expect(manager.cancelPreflight(cancel)).toEqual({ cancelled: false });
+      await shutdown;
+      await expect(stopped).resolves.toEqual(refused);
+      await expect(manager.preflight(command, new AbortController().signal)).resolves.toEqual(refused);
+    } finally {
+      vi.useRealTimers();
+      await manager.shutdown();
+    }
+  });
+
+  it("refuses warm preflight without disposing or replacing the ordinary worker", async () => {
+    const fetchArtifact = vi.fn(async () => artifactBody(artifactSource));
+    const manager = await createManager({ fetchArtifact });
+    const before = await manager.call(callCommand());
+    const command = callCommand();
+    await expect(manager.preflight({
+      type: "plugin.host.preflight",
+      pluginId: command.pluginId, generation: command.generation, artifact: command.artifact,
+      attemptId: "warm-attempt", hostId: "selected-host", sessionId: "original-session",
+      timeoutMs: 1_000,
+    }, new AbortController().signal)).resolves.toEqual({
+      status: "refused", reason: "managed-generation-unavailable",
+    });
+    const after = await manager.call(callCommand());
+    expect(Reflect.get(Object(after.output), "pid")).toBe(Reflect.get(Object(before.output), "pid"));
+    expect(fetchArtifact).toHaveBeenCalledOnce();
+  });
+
   it.skipIf(process.platform !== "linux")("refuses a second manager before artifact setup until the original worker closes", async () => {
     const { manager, dataDir } = await createManagerFixture();
     await manager.call(callCommand());

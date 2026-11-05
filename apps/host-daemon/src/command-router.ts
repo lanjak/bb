@@ -181,6 +181,17 @@ export class CommandRouter {
     command: HostDaemonOnlineRpcCommand,
     signal: AbortSignal,
   ): Promise<HostDaemonOnlineRpcResultForCommand> {
+    if (command.type === "plugin.host.preflight") {
+      if (!this.options.pluginHostManager) {
+        return Promise.resolve({ status: "refused", reason: "managed-generation-unavailable" });
+      }
+      return this.options.pluginHostManager.preflight(command, signal);
+    }
+    if (command.type === "plugin.host.preflight.cancel") {
+      return Promise.resolve(
+        this.options.pluginHostManager?.cancelPreflight(command) ?? { cancelled: false },
+      );
+    }
     if (command.type === "plugin.host.call") {
       if (!this.options.pluginHostManager) {
         return Promise.reject(new Error("host plugin runtime is unavailable"));
