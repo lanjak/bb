@@ -2,17 +2,22 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import {
   createServer,
   request as httpRequest,
+  IncomingMessage,
   type IncomingHttpHeaders,
   type Server,
 } from "node:http";
-import { createServer as createNetServer } from "node:net";
+import { createServer as createNetServer, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
+import { Hono } from "hono";
+import type { HttpBindings } from "@hono/node-server";
 import { getHost, setExperiments } from "@bb/db";
 import {
   GATE_ASSERTION_HEADER,
+  GATE_ASSERTION_CLOCK_SKEW_SECONDS,
+  GATE_ASSERTION_TTL_SECONDS,
   generateGateKeyPair,
   signGateAssertion,
   type GateAssertionKind,
@@ -29,7 +34,18 @@ import {
   waitFor,
 } from "@bb/frp-client/testing";
 import { NextTunnel } from "bb-plugin-bb--connect-next/src/tunnel.js";
-import { tunnelIngressHeaders } from "../../src/services/connect-next/tunnel-ingress.js";
+import {
+  createTunnelIngressManager,
+  readVerifiedTunnelIngress,
+  tunnelIngressHeaders,
+  type TunnelIngressLease,
+  type TunnelIngressManager,
+} from "../../src/services/connect-next/tunnel-ingress.js";
+import { createGateKeyStore } from "../../src/services/connect-next/gate-keys.js";
+import {
+  captureTrustedRemoteAddress,
+  resolveRequestAccessRoute,
+} from "../../src/request-context.js";
 import type { BbPluginApi } from "../../src/services/plugins/plugin-api.js";
 import { seedHost } from "../helpers/seed.js";
 import {
@@ -221,6 +237,316 @@ function closeSocket(socket: WebSocket): Promise<void> {
     socket.close();
   });
 }
+
+describe("verified tunnel ingress lifetime", () => {
+  it("stops trusting a signed request when its assertion expires during handling", async () => {
+    const nowMs = Date.now();
+    const pair = await generateGateKeyPair("lifetime");
+    const keyServer = await startKeyServer([pair.publicKey]);
+    const app = new Hono<{ Bindings: HttpBindings }>();
+    const observations: Array<ReturnType<typeof resolveRequestAccessRoute>> = [];
+    const policy: Array<boolean | null> = [];
+    app.get("/lifetime", (context) => {
+      captureTrustedRemoteAddress(context);
+      observations.push(resolveRequestAccessRoute(context));
+      policy.push(
+        readVerifiedTunnelIngress(context.env.incoming, context.req.raw)
+          ?.ownerPolicyDerived ?? null,
+      );
+      const clock = vi.spyOn(Date, "now").mockReturnValue(
+        nowMs +
+          (GATE_ASSERTION_TTL_SECONDS +
+            GATE_ASSERTION_CLOCK_SKEW_SECONDS +
+            1) *
+            1000,
+      );
+      try {
+        captureTrustedRemoteAddress(context);
+        observations.push(resolveRequestAccessRoute(context));
+        policy.push(
+          readVerifiedTunnelIngress(context.env.incoming, context.req.raw)
+            ?.ownerPolicyDerived ?? null,
+        );
+      } finally {
+        clock.mockRestore();
+      }
+      return context.json({ ok: true });
+    });
+    const manager = createTunnelIngressManager({
+      app,
+      injectWebSocket: () => {},
+      keys: createGateKeyStore({
+        url: () => keyServer.url,
+        now: () => nowMs,
+        logger: { debug: () => {}, warn: () => {} },
+      }),
+      loopbackOrigin: () => "http://127.0.0.1:3000",
+      logger: { debug: () => {}, warn: () => {} },
+    });
+    try {
+      const lease = await manager.open(AUDIENCE);
+      const token = await signGateAssertion(pair.signingKey, {
+        audience: AUDIENCE,
+        subject: "user_1",
+        kind: "session",
+        method: "GET",
+        pathAndQuery: "/lifetime",
+        target: null,
+        oauth: null,
+        nowSeconds: Math.floor(nowMs / 1000),
+      });
+      const response = await send(lease.baseUrl, {
+        method: "GET",
+        path: "/lifetime",
+        headers: { [GATE_ASSERTION_HEADER]: token },
+      });
+      expect(response.status).toBe(200);
+      expect(keyServer.hits).toBe(1);
+      expect(observations).toEqual(["connect", "loopback"]);
+      expect(policy).toEqual([true, null]);
+    } finally {
+      await manager.closeAll();
+      await keyServer.close();
+    }
+  });
+});
+
+describe("verified tunnel ingress registry", () => {
+  let nowMs: number;
+  let signing: GateSigningKey;
+  let keyServer: KeyServer;
+  let manager: TunnelIngressManager;
+  let lease: TunnelIngressLease;
+  let handle: (incoming: IncomingMessage, request: Request) => Response;
+
+  beforeEach(async () => {
+    nowMs = Date.now();
+    const pair = await generateGateKeyPair("registry");
+    signing = pair.signingKey;
+    keyServer = await startKeyServer([pair.publicKey]);
+    const app = new Hono<{ Bindings: HttpBindings }>();
+    handle = () => new Response("ok");
+    app.get("/registry", (context) =>
+      handle(context.env.incoming, context.req.raw),
+    );
+    manager = createTunnelIngressManager({
+      app,
+      injectWebSocket: () => {},
+      keys: createGateKeyStore({
+        url: () => keyServer.url,
+        now: () => nowMs,
+        logger: { debug: () => {}, warn: () => {} },
+      }),
+      loopbackOrigin: () => "http://127.0.0.1:3000",
+      logger: { debug: () => {}, warn: () => {} },
+    });
+    lease = await manager.open(AUDIENCE);
+  });
+
+  afterEach(async () => {
+    await manager.closeAll();
+    await keyServer.close();
+  });
+
+  async function token(
+    kind: GateAssertionKind = "session",
+    subject = "user_1",
+    oauth: GateAssertionOAuth | null = null,
+  ): Promise<string> {
+    return signGateAssertion(signing, {
+      audience: AUDIENCE,
+      subject,
+      kind,
+      method: "GET",
+      pathAndQuery: "/registry",
+      target: null,
+      oauth,
+      nowSeconds: Math.floor(nowMs / 1000),
+    });
+  }
+
+  async function dispatch(assertion: string): Promise<RawResponse> {
+    return send(lease.baseUrl, {
+      method: "GET",
+      path: "/registry",
+      headers: {
+        [GATE_ASSERTION_HEADER]: assertion,
+        "x-bb-gate-auth": "session",
+        "x-bb-gate-owner": "forged_owner",
+      },
+    });
+  }
+
+  it.each([
+    { kind: "session", subject: "user_1", oauth: null, owner: true },
+    { kind: "session", subject: "signed_foreign_user", oauth: null, owner: true },
+    { kind: "session", subject: "", oauth: null, owner: false },
+    { kind: "session", subject: " user_1 ", oauth: null, owner: false },
+    { kind: "machine", subject: "machine_1", oauth: null, owner: false },
+    {
+      kind: "oauth",
+      subject: "user_1",
+      oauth: { scope: "bb", grantId: "grant_1", clientName: "Client" },
+      owner: false,
+    },
+  ] satisfies Array<{
+    kind: GateAssertionKind;
+    subject: string;
+    oauth: GateAssertionOAuth | null;
+    owner: boolean;
+  }>)(
+    "derives signer policy for $kind subject '$subject' without trusting headers",
+    async ({ kind, subject, oauth, owner }) => {
+      const records: Array<ReturnType<typeof readVerifiedTunnelIngress>> = [];
+      handle = (incoming, request) => {
+        records.push(readVerifiedTunnelIngress(incoming, request));
+        return new Response("ok");
+      };
+      expect((await dispatch(await token(kind, subject, oauth))).status).toBe(200);
+      expect(records).toHaveLength(1);
+      const observed = records[0];
+      expect(observed).toMatchObject({
+        claims: { kind, sub: subject, aud: AUDIENCE, oauth },
+        ownerPolicyDerived: owner,
+      });
+      expect(Object.isFrozen(observed)).toBe(true);
+      expect(Object.isFrozen(observed?.claims)).toBe(true);
+      if (observed === null || observed === undefined) {
+        throw new Error("verified claims were not captured");
+      }
+      expect(Reflect.set(observed.claims, "sub", "forged_owner")).toBe(false);
+      expect(observed.claims.sub).toBe(subject);
+      if (oauth !== null) {
+        expect(Object.isFrozen(observed?.claims.oauth)).toBe(true);
+        if (observed.claims.oauth === null) throw new Error("oauth claims missing");
+        expect(Reflect.set(observed.claims.oauth, "scope", "forged")).toBe(false);
+        expect(observed.claims.oauth.scope).toBe(oauth.scope);
+      }
+    },
+  );
+
+  it("rejects request clones, incoming lookalikes, and cross-request pairs", async () => {
+    let previous: { incoming: IncomingMessage; request: Request } | null = null;
+    const results: unknown[] = [];
+    const lookalike = new IncomingMessage(new Socket());
+    handle = (incoming, request) => {
+      results.push(
+        readVerifiedTunnelIngress(incoming, request)?.ownerPolicyDerived,
+      );
+      results.push(readVerifiedTunnelIngress(incoming, request.clone()));
+      lookalike.headers = incoming.headers;
+      lookalike.method = incoming.method;
+      lookalike.url = incoming.url;
+      results.push(readVerifiedTunnelIngress(lookalike, request));
+      if (previous !== null) {
+        results.push(readVerifiedTunnelIngress(previous.incoming, request));
+        results.push(readVerifiedTunnelIngress(incoming, previous.request));
+      }
+      previous = { incoming, request };
+      return new Response("ok");
+    };
+    const assertion = await token();
+    expect((await dispatch(assertion)).status).toBe(200);
+    expect((await dispatch(assertion)).status).toBe(200);
+    expect(results).toEqual([true, null, null, true, null, null, null, null]);
+    lookalike.socket.destroy();
+  });
+
+  it("does not deliver a public assertion to a private handler despite session headers", async () => {
+    let handled = false;
+    handle = () => {
+      handled = true;
+      return new Response("unexpected");
+    };
+    const response = await dispatch(await token("public", ""));
+    expect(response.status).toBe(401);
+    expect(json(response)).toMatchObject({ reason: "not_public" });
+    expect(handled).toBe(false);
+  });
+
+  it("invalidates a verified incoming message whose method or target is changed", async () => {
+    const results: unknown[] = [];
+    handle = (incoming, request) => {
+      results.push(
+        readVerifiedTunnelIngress(incoming, request)?.ownerPolicyDerived,
+      );
+      const method = incoming.method;
+      incoming.method = "POST";
+      results.push(readVerifiedTunnelIngress(incoming, request));
+      incoming.method = method;
+      const path = incoming.url;
+      incoming.url = "/registry?forged=1";
+      results.push(readVerifiedTunnelIngress(incoming, request));
+      incoming.url = path;
+      return new Response("ok");
+    };
+    expect((await dispatch(await token())).status).toBe(200);
+    expect(results).toEqual([true, null, null]);
+  });
+
+  it("revokes the original request when its ingress generation closes and reopens", async () => {
+    const results: unknown[] = [];
+    let closing: Promise<void> | undefined;
+    let original: { incoming: IncomingMessage; request: Request } | undefined;
+    handle = (incoming, request) => {
+      original = { incoming, request };
+      results.push(
+        readVerifiedTunnelIngress(incoming, request)?.ownerPolicyDerived,
+      );
+      closing = lease.close();
+      results.push(readVerifiedTunnelIngress(incoming, request));
+      return new Response("closed");
+    };
+    await dispatch(await token()).catch(() => null);
+    await closing;
+    lease = await manager.open(AUDIENCE);
+    handle = (incoming, request) => {
+      results.push(
+        readVerifiedTunnelIngress(incoming, request)?.ownerPolicyDerived,
+      );
+      if (original === undefined) throw new Error("original ingress was not reached");
+      results.push(readVerifiedTunnelIngress(original.incoming, original.request));
+      return new Response("reopened");
+    };
+    expect((await dispatch(await token())).status).toBe(200);
+    expect(results).toEqual([true, null, true, null]);
+  });
+
+  it("revokes provenance after the real HTTP client aborts its request", async () => {
+    let captured: { incoming: IncomingMessage; request: Request } | undefined;
+    let entered: () => void = () => {};
+    const handling = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    handle = (incoming, request) => {
+      captured = { incoming, request };
+      entered();
+      return new Response(new ReadableStream({ start() {} }));
+    };
+    const url = new URL(lease.baseUrl);
+    const client = httpRequest({
+      hostname: url.hostname,
+      port: url.port,
+      path: "/registry",
+      headers: { [GATE_ASSERTION_HEADER]: await token() },
+    });
+    client.on("error", () => {});
+    client.end();
+    await handling;
+    if (captured === undefined) throw new Error("signed ingress was not reached");
+    expect(
+      readVerifiedTunnelIngress(captured.incoming, captured.request)
+        ?.ownerPolicyDerived,
+    ).toBe(true);
+    const incoming = captured.incoming;
+    const disconnected = new Promise<void>((resolve) =>
+      incoming.socket.once("close", () => resolve()),
+    );
+    client.destroy();
+    await disconnected;
+    expect(readVerifiedTunnelIngress(captured.incoming, captured.request)).toBeNull();
+  });
+});
 
 describe("bb connect next tunnel ingress", () => {
   let nowMs: number;
