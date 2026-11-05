@@ -1,11 +1,11 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createManagedCohortController } from "../src/managed-cohort-controller.js";
 
-const native = vi.hoisted(() => ({ spawn: vi.fn(), delayed: false, resume: undefined as (() => void) | undefined }));
+const native = vi.hoisted(() => ({ spawn: vi.fn(), delayed: false, wrappers: 0, resume: undefined as (() => void) | undefined }));
 vi.mock("../src/logged-process.js", () => ({ spawnLoggedProcess: native.spawn }));
 vi.mock("@bb/config/file-lock", async () => {
-  const owner = await import("../../config/src/managed-root-admission.js");
+  const owner = await vi.importActual<typeof import("../../config/src/managed-root-admission.js")>("../../config/src/managed-root-admission.js");
   return {
     ...owner,
     internal_DO_NOT_USE_beginManagedRootEffect(effect: string) {
@@ -13,12 +13,12 @@ vi.mock("@bb/config/file-lock", async () => {
       return {
         ...original,
         runOriginal<T>(body: () => Promise<T>): Promise<T> {
-          console.info("launcher control trace: wrapper entered", native.delayed);
+          native.wrappers += 1;
           if (!native.delayed) return original.runOriginal(body);
           return original.runOriginal(async () => {
-            console.info("launcher control trace: queued body entered");
+
             await new Promise<void>((resolve) => { native.resume = resolve; });
-            console.info("launcher control trace: queued body resumed");
+
             return body();
           });
         },
@@ -42,6 +42,12 @@ class OriginalChild extends EventEmitter {
 }
 
 describe("managed cohort original-channel control, not native custody", () => {
+  beforeEach(() => {
+    native.spawn.mockReset();
+    native.delayed = false;
+    native.wrappers = 0;
+    native.resume = undefined;
+  });
   it("retains a throwing kill outcome and still joins original close", async () => {
     native.spawn.mockClear();
     const controller = createManagedCohortController(["server"], undefined, {
@@ -71,25 +77,18 @@ describe("managed cohort original-channel control, not native custody", () => {
     });
     try {
       const spawning = controller.spawnFixedOriginal("server");
-      void spawning.then(
-        () => console.info("launcher control trace: spawn fulfilled"),
-        () => console.info("launcher control trace: spawn rejected"),
-      );
+
       const rejection = expect(spawning).rejects.toThrow();
       let finished = false;
-      const draining = controller.drain().then(() => {
-        console.info("launcher control trace: drain fulfilled");
-        finished = true;
-      });
+      const draining = controller.drain().then(() => { finished = true; });
       await Promise.resolve();
       await Promise.resolve();
       expect(finished).toBe(false);
       expect(native.spawn).not.toHaveBeenCalled();
       expect(native.resume).toBeTypeOf("function");
+      expect(native.wrappers).toBe(1);
       native.resume?.();
-      console.info("launcher control trace: resume called");
       await rejection;
-      console.info("launcher control trace: rejection assertion fulfilled");
       await draining;
       expect(native.spawn).not.toHaveBeenCalled();
     } finally {
