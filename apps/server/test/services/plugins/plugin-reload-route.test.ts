@@ -61,7 +61,7 @@ describe("POST /plugins/reload outcome", () => {
   async function signedEnable(
     body: string,
     verify: (response: { status: number; body: unknown }) => Promise<void>,
-    afterResponse?: (incoming: IncomingMessage, request: Request) => Promise<void>,
+    afterResponse?: (incoming: IncomingMessage, request: Request, clone: Request) => Promise<void>,
   ): Promise<void> {
     const pair = await generateGateKeyPair("managed-enable");
     const keyServer = createServer((_request, response) => {
@@ -96,8 +96,15 @@ describe("POST /plugins/reload outcome", () => {
               claims: { kind: "session", sub: "signed_owner" },
             });
             ownerRequests += 1;
+            const clone = afterResponse === undefined ? null : request.clone();
             const response = await harness.app.fetch(request, env);
-            await afterResponse?.(env.incoming, request);
+            if (afterResponse !== undefined && clone !== null) {
+              try {
+                await afterResponse(env.incoming, request, clone);
+              } catch (error) {
+                failures.push(error);
+              }
+            }
             return response;
           },
         },
@@ -270,14 +277,14 @@ describe("POST /plugins/reload outcome", () => {
       expect(response.status).toBe(409);
       expect(getInstalledPlugin(harness.db, "keeper")?.enabled).toBe(true);
       expect(harness.pluginService.getApi("keeper")).toBe(originalApi);
-    }, async (incoming, request) => {
+    }, async (incoming, request, clone) => {
       const args = { pluginId: "keeper", intent, incoming, request };
       await expect(requestPluginManagedGeneration(harness.pluginService, args)).resolves.toMatchObject({
         status: 409,
         error: "managed generation attempt already consumed or limit reached",
       });
       await expect(requestPluginManagedGeneration(harness.pluginService, {
-        ...args, request: request.clone(),
+        ...args, request: clone,
       })).resolves.toMatchObject({ status: 403 });
       for (let index = 1; index < 128; index += 1) {
         await expect(requestPluginManagedGeneration(harness.pluginService, {
