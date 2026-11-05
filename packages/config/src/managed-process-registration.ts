@@ -1,4 +1,4 @@
-import { internal_DO_NOT_USE_enrollManagedRoot } from "./managed-root-admission.js";
+import { internal_DO_NOT_USE_enrollManagedRoot } from "@bb/config/internal-managed-root-admission";
 
 export type ManagedProcessRole = "server" | "host-daemon" | "bootstrap-cli";
 

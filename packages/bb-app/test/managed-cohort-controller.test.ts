@@ -5,7 +5,7 @@ import { createManagedCohortController } from "../src/managed-cohort-controller.
 const native = vi.hoisted(() => ({ spawn: vi.fn(), delayed: false, wrappers: 0, resume: undefined as (() => void) | undefined }));
 vi.mock("../src/logged-process.js", () => ({ spawnLoggedProcess: native.spawn }));
 vi.mock("@bb/config/file-lock", async () => {
-  const owner = await vi.importActual<typeof import("../../config/src/managed-root-admission.js")>("../../config/src/managed-root-admission.js");
+  const owner = await vi.importActual<typeof import("@bb/config/internal-managed-root-admission")>("@bb/config/internal-managed-root-admission");
   return {
     ...owner,
     internal_DO_NOT_USE_beginManagedRootEffect(effect: string) {
