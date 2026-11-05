@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import {
   mkdtemp,
+
   readFile,
   readdir,
   rm,
@@ -10,6 +11,9 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { once } from "node:events";
+
+import * as processUtils from "@bb/process-utils";
 import type { HostDaemonOnlineRpcCommand } from "@bb/host-daemon-contract";
 import type { WatchPathRootArgs } from "@bb/host-watcher";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +27,16 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 async function* artifactBody(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
   yield bytes;
 }
+
+async function bounded<T>(work: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([work, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out: ${label}`)), 4000);
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
 
 type PluginCall = Extract<
   HostDaemonOnlineRpcCommand,
@@ -52,9 +66,19 @@ export default {
     watch: { input: anySchema, output: anySchema },
     retain: { input: anySchema, output: anySchema },
     hangDispose: { input: anySchema, output: anySchema },
+    finitePipeHolder: { input: anySchema, output: anySchema },
   },
   experimental_signals: { changed: { payload: anySchema } },
   handlers: {
+    async finitePipeHolder() {
+      const { spawn } = await import("node:child_process");
+      const holder = spawn(process.execPath, ["-e", "setTimeout(() => process.exit(0), 250)"], {
+        stdio: ["ignore", "ignore", 2],
+      });
+      holder.once("error", () => process.exit(1));
+      holder.once("spawn", () => process.stderr.write("finite-holder-created\\n", () => process.exit(0)));
+      return new Promise(() => {});
+    },
     async secretProbe(input, context) {
       const secret = process.env.TEST_SECRET ?? null;
       if (input.chunks) {
@@ -186,6 +210,84 @@ describe("PluginHostManager", () => {
     );
   });
 
+  it.skipIf(process.platform !== "linux")("retains lease and temp resources between original EXIT and CLOSE with a fixed finite pipe holder", async () => {
+    const fork = processUtils.forkHostProcess;
+    type Owned = { child: ReturnType<typeof fork>; closed: Promise<void>; exited: boolean; hasError: boolean; error: unknown };
+    const owned: Owned[] = [];
+    const cleanupErrors: unknown[] = [];
+    let hasPrimary = false;
+    let primary: unknown;
+    let admissionClosed = false;
+    const register = (child: ReturnType<typeof fork>) => {
+      const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
+      const record: Owned = { child, closed, exited: false, hasError: false, error: undefined };
+      child.on("error", (error: unknown) => {
+        if (!record.hasError) { record.hasError = true; record.error = error; }
+      });
+      child.once("exit", () => { record.exited = true; });
+      owned.push(record);
+      if (admissionClosed && !record.exited) {
+        try { child.kill("SIGKILL"); } catch (error) { cleanupErrors.push(error); }
+      }
+      return record;
+    };
+    const stopLive = () => {
+      for (const record of owned) {
+        if (!record.exited && record.child.exitCode === null && record.child.signalCode === null) {
+          try { record.child.kill("SIGKILL"); } catch (error) { cleanupErrors.push(error); }
+        }
+      }
+    };
+    const spy = vi.spyOn(processUtils, "forkHostProcess").mockImplementation((...args) => {
+      if (admissionClosed) throw new Error("Test fork admission closed");
+      return register(fork(...args)).child;
+    });
+    const watchdog = setTimeout(() => { admissionClosed = true; stopLive(); }, 6000);
+
+    try {
+      const { manager, dataDir } = await createManagerFixture();
+      const paths = await bounded(manager.call(callCommand({ method: "pathsAndSignal" })), "worker startup");
+      const tempDir = Reflect.get(Object(paths.output), "tempDir");
+      if (typeof tempDir !== "string") throw new Error("Missing original temp directory");
+      const worker = owned[0];
+      if (worker === undefined || worker.child.pid === undefined) throw new Error("Missing original worker");
+      const exited = once(worker.child, "exit");
+      let closed = false;
+      void worker.closed.then(() => { closed = true; });
+      const callOutcome = manager.call(callCommand({ method: "finitePipeHolder" })).then(
+        () => ({ rejected: false }), () => ({ rejected: true }),
+      );
+      await bounded(exited, "original EXIT");
+      expect(closed).toBe(false);
+      await expect(stat(tempDir)).resolves.toBeDefined();
+      const other = await createManager({ dataDir });
+      await expect(bounded(other.call(callCommand()), "contender refusal")).rejects.toThrow("already leased");
+      await bounded(worker.closed, "worker original CLOSE");
+      expect(await bounded(callOutcome, "original call settlement")).toEqual({ rejected: true });
+      await bounded(manager.shutdown(), "original manager cleanup");
+      await expect(bounded(other.call(callCommand()), "next generation")).resolves.toHaveProperty("output");
+      await expect(stat(tempDir)).rejects.toThrow();
+    } catch (error) { hasPrimary = true; primary = error; } finally {
+      admissionClosed = true;
+      {
+        stopLive();
+        try {
+          let joined = 0;
+          while (joined < owned.length) {
+            const record = owned[joined++];
+            if (record !== undefined) {
+              try { await bounded(record.closed, "original cleanup CLOSE"); } catch (error) { cleanupErrors.push(error); }
+              if (record.hasError) cleanupErrors.push(record.error);
+            }
+            stopLive();
+          }
+        } finally { clearTimeout(watchdog); spy.mockRestore(); }
+      }
+    }
+    if (hasPrimary) throw primary;
+    if (cleanupErrors.length > 0) throw cleanupErrors[0];
+  });
+
   async function createManager(
     overrides: Partial<ConstructorParameters<typeof PluginHostManager>[0]> = {},
   ): Promise<PluginHostManager> {
@@ -220,6 +322,50 @@ describe("PluginHostManager", () => {
     expect(Reflect.get(Object(first.output), "pid")).toBe(
       Reflect.get(Object(second.output), "pid"),
     );
+    expect(fetchArtifact).toHaveBeenCalledOnce();
+  });
+
+  it.skipIf(process.platform !== "linux")("refuses a second manager before artifact setup until the original worker closes", async () => {
+    const { manager, dataDir } = await createManagerFixture();
+    await manager.call(callCommand());
+    const fetchArtifact = vi.fn(async () => artifactBody(artifactSource));
+    const other = await createManager({ dataDir, fetchArtifact });
+    await expect(other.call(callCommand())).rejects.toThrow();
+    expect(fetchArtifact).not.toHaveBeenCalled();
+    await manager.shutdown();
+    await expect(other.call(callCommand())).resolves.toHaveProperty("output");
+  });
+
+  it.skipIf(process.platform !== "linux")("preserves an undefined pre-fork failure when diagnostics also throw and releases custody", async () => {
+    let first = true;
+    const { manager, dataDir } = await createManagerFixture({
+      shellEnv: () => {
+        if (first) { first = false; throw undefined; }
+        return {};
+      },
+      logger: {
+        debug: vi.fn(), info: vi.fn(),
+        warn: (_fields: unknown, message?: string) => {
+          if (message === "Failed to start host plugin worker") throw new Error("diagnostic failure");
+        },
+      },
+    });
+    let rejected = false;
+    try { await manager.call(callCommand()); } catch (error) {
+      rejected = true;
+      expect(error).toBeUndefined();
+    }
+    expect(rejected).toBe(true);
+    const nextArtifact = Buffer.concat([artifactSource, Buffer.from("\n")]);
+    const fetchArtifact = vi.fn(async () => artifactBody(nextArtifact));
+    const other = await createManager({ dataDir, fetchArtifact });
+    await expect(other.call(callCommand({
+      generation: "generation-after-pre-fork-failure",
+      artifact: {
+        digest: createHash("sha256").update(nextArtifact).digest("hex"),
+        byteLength: nextArtifact.byteLength,
+      },
+    }))).resolves.toHaveProperty("output");
     expect(fetchArtifact).toHaveBeenCalledOnce();
   });
 

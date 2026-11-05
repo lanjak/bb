@@ -5,10 +5,11 @@ import {
   sanitizeInheritedChildProcessEnv,
 } from "@bb/process-utils";
 import { operationEnvironment } from "./operation-environment.js";
+import { internal_DO_NOT_USE_acquireDirectoryLease } from "@bb/config/file-lock";
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { mkdir, rm } from "node:fs/promises";
+import { isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import type { Readable } from "node:stream";
@@ -227,6 +228,7 @@ function sendToWorker(child: ChildProcess, message: object): boolean {
 }
 
 export class PluginHostManager {
+  private readonly uncertainForks = new Set<object>();
   private readonly workers = new Map<string, WorkerState>();
   private readonly activeCalls = new Map<string, ActiveCallState>();
   private readonly activeCallAdmissions = new Map<
@@ -439,33 +441,66 @@ export class PluginHostManager {
       await this.stopWorker(current, "host artifact generation replaced");
     }
 
-    const artifactPath = await this.materializeArtifact(command);
+    await mkdir(join(this.options.dataDir, "plugins", encodeURIComponent(command.pluginId), "host-data"), {
+      recursive: true,
+      mode: 0o700,
+    });
     const dataDir = await ensurePluginProcessDataDir({
       daemonDataDir: this.options.dataDir,
       pluginId: command.pluginId,
       kind: "host-data",
     });
-    const tempDir = await createPluginProcessTempDir({
-      pluginId: command.pluginId,
-      prefix: "bb-host",
-    });
-    const shellPath = this.options.shellEnv?.().PATH;
+    const lease = await internal_DO_NOT_USE_acquireDirectoryLease(dataDir);
+    let artifactPath: string;
+    let tempDir: string | undefined;
+    const secondaryFailures: unknown[] = [];
+    const cleanupOriginals = async () => {
+      let failed = false;
+      let primary: unknown;
+      for (const cleanup of [
+        async () => { if (tempDir !== undefined) await rm(tempDir, { recursive: true, force: true }); },
+        () => lease.close(),
+      ]) {
+        try { await cleanup(); } catch (error) {
+          if (!failed) { failed = true; primary = error; }
+          secondaryFailures.push(error);
+          lease.quarantine();
+        }
+      }
+      if (failed) throw primary;
+    };
+    try {
+      artifactPath = await this.materializeArtifact(command);
+      tempDir = await createPluginProcessTempDir({
+        pluginId: command.pluginId,
+        prefix: "bb-host",
+      });
+    } catch (error) {
+      try { await cleanupOriginals(); } catch { lease.quarantine(); }
+      throw error;
+    }
     const startedAtMs = performance.now();
     let child: ChildProcess;
+    let pendingFork: { lease: typeof lease; tempDir: string; failures: unknown[] } | undefined;
     try {
+      await lease.validate();
+      const shellPath = this.options.shellEnv?.().PATH;
+      const workerPath = defaultWorkerEntryPath();
+      const env = sanitizeInheritedChildProcessEnv({
+        env: process.env,
+        ...(shellPath !== undefined ? { shellPath } : {}),
+      });
+      pendingFork = { lease, tempDir, failures: secondaryFailures };
       child = fork(
-        defaultWorkerEntryPath(),
+        workerPath,
         [artifactPath, command.pluginId, command.generation, dataDir, tempDir],
         {
-          env: sanitizeInheritedChildProcessEnv({
-            env: process.env,
-            ...(shellPath !== undefined ? { shellPath } : {}),
-          }),
-          stdio: ["ignore", "ignore", "pipe", "ipc"],
+          env,
+          stdio: ["ignore", "ignore", "pipe", "ipc", lease.fd],
         },
       );
     } catch (error) {
-      this.options.logger.warn(
+      try { this.options.logger.warn(
         {
           pluginId: command.pluginId,
           generation: command.generation,
@@ -473,19 +508,22 @@ export class PluginHostManager {
           err: error,
         },
         "Failed to start host plugin worker",
-      );
-      await rm(tempDir, { recursive: true, force: true });
+      ); } catch (diagnosticError) { secondaryFailures.push(diagnosticError); }
+      if (pendingFork !== undefined) {
+        this.uncertainForks.add(pendingFork);
+        lease.quarantine(pendingFork);
+      } else {
+        try { await cleanupOriginals(); } catch { lease.quarantine(); }
+      }
       throw error;
     }
     const closed = new Promise<void>((resolve) => child.once("close", resolve));
-    const cleanup = closed.then(() =>
-      rm(tempDir, { recursive: true, force: true }),
-    );
+    const cleanup = closed.then(cleanupOriginals);
     void cleanup.catch((error) => {
-      this.options.logger.warn(
+      try { this.options.logger.warn(
         { pluginId: command.pluginId, err: error },
         "Failed to remove host plugin temporary directory",
-      );
+      ); } catch (diagnosticError) { secondaryFailures.push(diagnosticError); }
     });
     let resolveReady!: () => void;
     let rejectReady!: (error: Error) => void;
