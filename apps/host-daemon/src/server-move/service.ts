@@ -1216,9 +1216,11 @@ export class ServerMoveService {
     const effect = internal_DO_NOT_USE_beginManagedRootEffect("serverMove.runPrepare");
     let cleanupRequired = false;
     let cleanupState: IncomingMoveState | undefined;
+    let originalImportedEntries: readonly string[] | undefined;
+    const originalDataDir = this.options.dataDir;
     const rollbackImport = internal_DO_NOT_USE_reserveServerImportRollback(effect, () =>
-      cleanupRequired && cleanupState !== undefined
-        ? { dataDir: this.options.dataDir, importedEntries: cleanupState.importedEntries }
+      cleanupRequired && originalImportedEntries !== undefined
+        ? { dataDir: originalDataDir, importedEntries: originalImportedEntries }
         : null,
     );
     const cleanup = effect.reserveOriginalCleanup(async () => {
@@ -1302,6 +1304,7 @@ export class ServerMoveService {
         manifest,
         localServerUrl,
       }));
+      originalImportedEntries = [...installed.importedEntries];
       await updateState({ importedEntries: installed.importedEntries });
       await effect.runOriginal(() => removeServerImportJournalFile(dataDir));
       await effect.runOriginal(() => restoreMachineConnectionConfig({
@@ -1537,7 +1540,12 @@ export class ServerMoveService {
 
   private async cleanupMove(state: IncomingMoveState, originalRollback?: () => Promise<void>): Promise<void> {
     const { dataDir } = this.options;
-    await this.stopPendingServer(state);
+    const failures: unknown[] = [];
+    const attempt = async (body: () => Promise<void>): Promise<void> => {
+      try { await body(); } catch (error) { failures.push(error); }
+    };
+    await attempt(() => this.stopPendingServer(state));
+    await attempt(async () => {
     if (originalRollback !== undefined) {
       await originalRollback();
     } else if (state.importedEntries === null) {
@@ -1548,11 +1556,15 @@ export class ServerMoveService {
         importedEntries: state.importedEntries,
       });
     }
-    await this.removeStaleConnectHold();
+    });
+    await attempt(() => this.removeStaleConnectHold());
+    await attempt(async () => {
     const importFile = await readServerImportFile(dataDir).catch(() => null);
     if (importFile?.kind === "move" && importFile.moveId === state.moveId) {
       await rm(join(dataDir, SERVER_IMPORT_FILE_NAME), { force: true });
     }
+    });
+    await attempt(async () => {
     const archived = state.archivedServerData;
     if (
       archived !== null &&
@@ -1561,7 +1573,9 @@ export class ServerMoveService {
     ) {
       await rename(archived.archivedPath, archived.originalPath);
     }
-    await this.removeIncomingState(state);
+    });
+    await attempt(() => this.removeIncomingState(state));
+    if (failures.length > 0) throw failures[0];
   }
 
   private async restartThroughServiceManager(
