@@ -13,9 +13,12 @@ vi.mock("@bb/config/file-lock", async () => {
       return {
         ...original,
         runOriginal<T>(body: () => Promise<T>): Promise<T> {
+          console.info("launcher control trace: wrapper entered", native.delayed);
           if (!native.delayed) return original.runOriginal(body);
           return original.runOriginal(async () => {
+            console.info("launcher control trace: queued body entered");
             await new Promise<void>((resolve) => { native.resume = resolve; });
+            console.info("launcher control trace: queued body resumed");
             return body();
           });
         },
@@ -68,16 +71,25 @@ describe("managed cohort original-channel control, not native custody", () => {
     });
     try {
       const spawning = controller.spawnFixedOriginal("server");
+      void spawning.then(
+        () => console.info("launcher control trace: spawn fulfilled"),
+        () => console.info("launcher control trace: spawn rejected"),
+      );
       const rejection = expect(spawning).rejects.toThrow();
       let finished = false;
-      const draining = controller.drain().then(() => { finished = true; });
+      const draining = controller.drain().then(() => {
+        console.info("launcher control trace: drain fulfilled");
+        finished = true;
+      });
       await Promise.resolve();
       await Promise.resolve();
       expect(finished).toBe(false);
       expect(native.spawn).not.toHaveBeenCalled();
       expect(native.resume).toBeTypeOf("function");
       native.resume?.();
+      console.info("launcher control trace: resume called");
       await rejection;
+      console.info("launcher control trace: rejection assertion fulfilled");
       await draining;
       expect(native.spawn).not.toHaveBeenCalled();
     } finally {
