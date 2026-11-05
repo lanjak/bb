@@ -59,9 +59,11 @@ export {
   HOST_DAEMON_DESKTOP_BROKER_PROOF_PROTOCOL_VERSION,
   HOST_DAEMON_ENVIRONMENT_CLEANUP_INSPECTION_PROTOCOL_VERSION,
   HOST_DAEMON_PROTOCOL_VERSION,
+  HOST_DAEMON_PLUGIN_HOST_PREFLIGHT_PROTOCOL_VERSION,
   hostDaemonSupportsConnectNext,
   hostDaemonSupportsDesktopBrokerProof,
   hostDaemonSupportsEnvironmentCleanupInspection,
+  hostDaemonSupportsPluginHostPreflight,
   isCompatibleHostDaemonProtocolVersion,
 } from "./protocol.js";
 
@@ -637,6 +639,30 @@ const environmentHookCancelCommandSchema = z
   .object({
     type: z.literal("environment.hook.cancel"),
     operationId: z.string().min(1),
+  })
+  .strict();
+
+const pluginHostPreflightBindingSchema = z
+  .object({
+    pluginId: z.string().min(1),
+    generation: z.string().min(1),
+    attemptId: z.string().min(1),
+    hostId: z.string().min(1),
+    sessionId: z.string().min(1),
+  })
+  .strict();
+
+const pluginHostPreflightCommandSchema = pluginHostPreflightBindingSchema
+  .extend({
+    type: z.literal("plugin.host.preflight"),
+    artifact: pluginHostArtifactSchema,
+    timeoutMs: z.number().int().positive().max(120_000),
+  })
+  .strict();
+
+const pluginHostPreflightCancelCommandSchema = pluginHostPreflightBindingSchema
+  .extend({
+    type: z.literal("plugin.host.preflight.cancel"),
   })
   .strict();
 
@@ -1666,6 +1692,29 @@ export const hostDaemonCommandRegistry = {
       .strict(),
     transport: "onlineRpc",
     retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "plugin.host.preflight": defineHostDaemonCommandDescriptor({
+    type: "plugin.host.preflight",
+    schema: pluginHostPreflightCommandSchema,
+    resultSchema: z
+      .object({
+        status: z.literal("refused"),
+        reason: z.literal("managed-generation-unavailable"),
+      })
+      .strict(),
+    transport: "onlineRpc",
+    retryable: false,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "plugin.host.preflight.cancel": defineHostDaemonCommandDescriptor({
+    type: "plugin.host.preflight.cancel",
+    schema: pluginHostPreflightCancelCommandSchema,
+    resultSchema: pluginHostCancelResultSchema,
+    transport: "onlineRpc",
+    retryable: false,
     flushEventsBeforeResult: false,
     envLane: null,
   }),

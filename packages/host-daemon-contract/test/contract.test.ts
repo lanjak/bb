@@ -161,6 +161,11 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     skippedDomains: ["example.com"],
   },
   "plugin.host.call": { output: { ok: true } },
+  "plugin.host.preflight": {
+    status: "refused",
+    reason: "managed-generation-unavailable",
+  },
+  "plugin.host.preflight.cancel": { cancelled: false },
   "plugin.host.cancel": { cancelled: true },
   "plugin.host.dispose": { disposed: true },
   "connect-tunnel.ensure-identity": {
@@ -1060,7 +1065,7 @@ describe("host-daemon command schemas", () => {
   });
 
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(260);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(261);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 
@@ -1081,6 +1086,8 @@ describe("host-daemon command schemas", () => {
     expect(contract.isCompatibleHostDaemonProtocolVersion(258)).toBe(false);
     expect(contract.isCompatibleHostDaemonProtocolVersion(259)).toBe(false);
     expect(contract.isCompatibleHostDaemonProtocolVersion(260)).toBe(true);
+    expect(contract.isCompatibleHostDaemonProtocolVersion(261)).toBe(true);
+    expect(contract.isCompatibleHostDaemonProtocolVersion(262)).toBe(false);
     expect(contract.hostDaemonSupportsConnectNext(246)).toBe(false);
     expect(contract.hostDaemonSupportsConnectNext(247)).toBe(true);
     expect(contract.hostDaemonSupportsDesktopBrokerProof(247)).toBe(false);
@@ -1149,6 +1156,98 @@ describe("host-daemon command schemas", () => {
       );
     },
   );
+
+  it("accepts only complete bounded managed preflight bindings", () => {
+    const binding = {
+      pluginId: "fixture",
+      generation: "generation-1",
+      attemptId: "attempt-1",
+      hostId: "host-1",
+      sessionId: "session-1",
+    };
+    const preflight = {
+      type: "plugin.host.preflight",
+      ...binding,
+      artifact: { digest: "a".repeat(64), byteLength: 1 },
+      timeoutMs: 120_000,
+    };
+    const cancel = { type: "plugin.host.preflight.cancel", ...binding };
+    for (const command of [preflight, cancel]) {
+      expect(hostDaemonOnlineRpcCommandSchema.safeParse(command).success).toBe(
+        true,
+      );
+      for (const key of Object.keys(binding)) {
+        expect(
+          hostDaemonOnlineRpcCommandSchema.safeParse({
+            ...command,
+            [key]: undefined,
+          }).success,
+        ).toBe(false);
+        expect(
+          hostDaemonOnlineRpcCommandSchema.safeParse({ ...command, [key]: "" })
+            .success,
+        ).toBe(false);
+      }
+      expect(
+        hostDaemonOnlineRpcCommandSchema.safeParse({
+          ...command,
+          nativeIdentity: "claimed",
+        }).success,
+      ).toBe(false);
+    }
+    for (const timeoutMs of [undefined, 0, -1, 1.5, 120_001]) {
+      expect(
+        hostDaemonOnlineRpcCommandSchema.safeParse({ ...preflight, timeoutMs })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      hostDaemonOnlineRpcCommandSchema.safeParse({ ...preflight, timeoutMs: 1 })
+        .success,
+    ).toBe(true);
+    for (const artifact of [
+      undefined,
+      { digest: "invalid", byteLength: 1 },
+      { digest: "a".repeat(64), byteLength: HOST_ARTIFACT_MAX_BYTES + 1 },
+    ]) {
+      expect(
+        hostDaemonOnlineRpcCommandSchema.safeParse({ ...preflight, artifact })
+          .success,
+      ).toBe(false);
+    }
+    expect(
+      hostDaemonOnlineRpcCommandSchema.safeParse({ ...cancel, timeoutMs: 1 })
+        .success,
+    ).toBe(false);
+  });
+
+  it("allows only refusal results for managed preflight", () => {
+    const result = { status: "refused", reason: "managed-generation-unavailable" };
+    const schema = Reflect.get(
+      hostDaemonCommandResultSchemaByType,
+      "plugin.host.preflight",
+    );
+    expect(schema).toBeDefined();
+    if (!schema) return;
+    expect(schema.safeParse(result).success).toBe(true);
+    for (const invalid of [
+      { status: "ready" },
+      { ...result, admitted: true },
+      { ...result, reason: "ready" },
+    ]) {
+      expect(schema.safeParse(invalid).success).toBe(false);
+    }
+  });
+
+  it("gates managed preflight on the exact implemented protocol", () => {
+    const supports = Reflect.get(contract, "hostDaemonSupportsPluginHostPreflight");
+    expect(typeof supports).toBe("function");
+    if (typeof supports !== "function") return;
+    expect(supports(261)).toBe(true);
+    for (const version of [260, 262, 0, -1, NaN, Infinity, 261.5]) {
+      expect(supports(version)).toBe(false);
+    }
+  });
 
   it("uses relative host-plugin timeouts and bounds artifact declarations", () => {
     const command = {

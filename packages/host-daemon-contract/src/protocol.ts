@@ -1,4 +1,6 @@
-export const HOST_DAEMON_PROTOCOL_VERSION = 260 as const;
+export const HOST_DAEMON_PROTOCOL_VERSION = 261 as const;
+
+export const HOST_DAEMON_PLUGIN_HOST_PREFLIGHT_PROTOCOL_VERSION = 261 as const;
 
 export const HOST_DAEMON_CONNECT_NEXT_PROTOCOL_VERSION = 247 as const;
 
@@ -9,7 +11,14 @@ export const HOST_DAEMON_ENVIRONMENT_CLEANUP_INSPECTION_PROTOCOL_VERSION =
 
 export const HOST_DAEMON_COMPATIBLE_PROTOCOL_VERSIONS: readonly number[] = [
   HOST_DAEMON_PROTOCOL_VERSION,
+  260,
 ];
+
+export function hostDaemonSupportsPluginHostPreflight(
+  protocolVersion: number,
+): boolean {
+  return protocolVersion === HOST_DAEMON_PLUGIN_HOST_PREFLIGHT_PROTOCOL_VERSION;
+}
 
 export function isCompatibleHostDaemonProtocolVersion(
   protocolVersion: number,
