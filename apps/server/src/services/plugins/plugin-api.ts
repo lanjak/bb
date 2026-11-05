@@ -670,6 +670,7 @@ export function createPluginApi(options: {
 
   function assertLive(): void {
     if (invalidated) throw stale();
+    internal_DO_NOT_USE_assertManagedRootAdmission("server plugin retained API call");
   }
 
   const prefix = `[plugin:${pluginId}]`;

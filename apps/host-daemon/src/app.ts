@@ -1,5 +1,5 @@
 import path from "node:path";
-import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission, internal_DO_NOT_USE_beginManagedRootEffect } from "@bb/config/file-lock";
 import { HOST_DAEMON_RESTART_EXIT_CODE } from "@bb/config/machine-service";
 import { startDesktopBrowserBroker } from "./desktop-browser-broker.js";
 import { MachineEnvironment } from "./machine-environment.js";
@@ -263,6 +263,19 @@ export async function createHostDaemonApp(
 ): Promise<HostDaemonApp> {
   if (options.managedRoot !== undefined) internal_DO_NOT_USE_enrollManagedRoot(options.managedRoot);
   internal_DO_NOT_USE_assertManagedRootAdmission("host daemon startup");
+  const startupEffect = internal_DO_NOT_USE_beginManagedRootEffect("host daemon startup ownership");
+  const startupCleanups: Array<() => Promise<void>> = [];
+  const cleanupStartup = startupEffect.reserveOriginalCleanup(async () => {
+    let failed = false;
+    let primary: unknown;
+    for (const cleanup of startupCleanups.reverse()) {
+      try { await cleanup(); } catch (error) {
+        if (!failed) { failed = true; primary = error; }
+      }
+    }
+    if (failed) throw primary;
+  });
+  try {
   const machineEnvironment = new MachineEnvironment(
     process.env,
     options.runtimeShellEnv ?? {},
@@ -809,6 +822,11 @@ export async function createHostDaemonApp(
     },
   });
 
+  startupCleanups.push(() => watchManager.shutdown());
+  startupCleanups.push(() => runtimeManager.shutdownAll());
+  startupCleanups.push(() => terminalManager.shutdownAll());
+  startupCleanups.push(() => pluginHostManager.shutdown());
+  startupEffect.assertOriginalAtDequeue();
   const desktopBrowserBroker = await startDesktopBrowserBroker({
     dataDir: options.dataDir,
     hostId: options.hostId,
@@ -1128,4 +1146,10 @@ export async function createHostDaemonApp(
     router,
     connection,
   };
+  } catch (primary) {
+    try { await cleanupStartup(); } catch {}
+    throw primary;
+  } finally {
+    startupEffect.complete();
+  }
 }

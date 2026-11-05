@@ -1,5 +1,5 @@
 import { capturePluginUse } from "./plugin-use-telemetry.js";
-import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_assertManagedRootAdmission, internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/file-lock";
 import {
   realtimeSubscriptionTargetKey,
   type PluginReadSubscriptionTarget,
@@ -1664,8 +1664,17 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
   }
 
   async function loadOne(row: InstalledPluginRow): Promise<string | null> {
-    internal_DO_NOT_USE_assertManagedRootAdmission("server plugin load");
+    const effect = internal_DO_NOT_USE_beginManagedRootEffect("server plugin load");
+    try {
+      return await effect.runOriginal(() => loadOneOriginal(row, effect));
+    } finally {
+      effect.complete();
+    }
+  }
+
+  async function loadOneOriginal(row: InstalledPluginRow, effect: ManagedRootEffect): Promise<string | null> {
     const held = await heldDetail(row);
+    effect.assertOriginalAtDequeue();
     if (held !== null) {
       await disposeOne(row.id);
       await populateIdentity(row);
@@ -1968,7 +1977,8 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
       invocations: new Set(),
     };
     try {
-      const serverEntry = await resolveServerEntry(row, manifest);
+      const serverEntry = await effect.runOriginal(() => resolveServerEntry(row, manifest));
+      effect.assertOriginalAtDequeue();
       if (row.sourceKind === "path" || row.sourceKind === "builtin") {
         const mutation = setMutableRootVersion(
           row.rootDir,
