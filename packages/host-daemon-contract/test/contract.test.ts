@@ -1224,7 +1224,7 @@ describe("host-daemon command schemas", () => {
   it("allows only refusal results for managed preflight", () => {
     const result = { status: "refused", reason: "managed-generation-unavailable" };
     const schema = Reflect.get(
-      hostDaemonCommandResultSchemaByType,
+      contract.hostDaemonOnlineRpcResultSchemaByType,
       "plugin.host.preflight",
     );
     expect(schema).toBeDefined();

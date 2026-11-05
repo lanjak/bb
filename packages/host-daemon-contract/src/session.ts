@@ -533,6 +533,8 @@ const hostDaemonOnlineRpcResponseSuccessSchema = z.discriminatedUnion(
     onlineRpcResponseSuccessSchemaFor("environment.hook.run"),
     onlineRpcResponseSuccessSchemaFor("environment.hook.cancel"),
     onlineRpcResponseSuccessSchemaFor("environment.inspect_cleanup"),
+    onlineRpcResponseSuccessSchemaFor("plugin.host.preflight"),
+    onlineRpcResponseSuccessSchemaFor("plugin.host.preflight.cancel"),
     onlineRpcResponseSuccessSchemaFor("plugin.host.call"),
     onlineRpcResponseSuccessSchemaFor("plugin.host.cancel"),
     onlineRpcResponseSuccessSchemaFor("plugin.host.dispose"),
