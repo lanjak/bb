@@ -968,13 +968,14 @@ export class RuntimeManager {
       args.environmentId,
     );
     const creation = Promise.resolve()
-      .then(() =>
-        this.createEntry({
+      .then(() => {
+        internal_DO_NOT_USE_assertManagedRootAdmission("runtime.createEntry.dequeue");
+        return this.createEntry({
           ...args,
           provisionSignal: pendingProvision.abortController.signal,
           skillConfig,
-        }),
-      )
+        });
+      })
       .then((entry) => {
         this.entries.set(args.environmentId, entry);
         return entry;
@@ -1002,6 +1003,7 @@ export class RuntimeManager {
   async refreshEnvironmentWorkspace(
     args: RefreshEnvironmentWorkspaceArgs,
   ): Promise<HostWorkspace> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("refreshEnvironmentWorkspace");
     const pending = this.pendingWorkspaceRefreshes.get(args.environmentId);
     if (pending) {
       return pending;
@@ -1026,6 +1028,7 @@ export class RuntimeManager {
       );
     }
 
+    internal_DO_NOT_USE_assertManagedRootAdmission("refreshEnvironmentWorkspace.provision");
     const workspace = await this.provisionHostWorkspace(args.provision);
     if (workspace.path !== args.workspacePath) {
       throw new Error(
@@ -1184,6 +1187,7 @@ export class RuntimeManager {
     args: { dataDir: string },
     slot: ProviderMaintenanceRuntimeSlot,
   ): Promise<AgentRuntime> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("createProviderMaintenanceRuntime");
     const workspacePath = path.join(
       args.dataDir,
       PROVIDER_MAINTENANCE_WORKSPACE_DIR,
@@ -1193,6 +1197,7 @@ export class RuntimeManager {
     let runtime: AgentRuntime | null = null;
     const shellEnv = this.getShellEnv();
     const providerProcessEnv = providerProcessEnvFromShellEnv(shellEnv);
+    internal_DO_NOT_USE_assertManagedRootAdmission("providerMaintenance.createRuntime");
     runtime = this.createRuntime({
       workspacePath,
       additionalWorkspaceWriteRoots: [],
@@ -1229,6 +1234,7 @@ export class RuntimeManager {
   }
 
   private async createEntry(args: CreateEntryArgs): Promise<RuntimeEntry> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("createEntry");
     const provision =
       args.provision ??
       (args.workspacePath ? { path: args.workspacePath } : null);
@@ -1250,6 +1256,7 @@ export class RuntimeManager {
       });
     }
 
+    internal_DO_NOT_USE_assertManagedRootAdmission("createEntry.provision");
     const workspace = await this.provisionHostWorkspace({
       ...provision,
       signal: args.provisionSignal,
@@ -1264,6 +1271,7 @@ export class RuntimeManager {
     const shellEnv = this.getShellEnv();
     const shellEnvGeneration = this.shellEnvGeneration;
     const providerProcessEnv = providerProcessEnvFromShellEnv(shellEnv);
+    internal_DO_NOT_USE_assertManagedRootAdmission("environment.createRuntime");
     runtime = this.createRuntime({
       workspacePath: workspace.path,
       additionalWorkspaceWriteRoots,

@@ -1,4 +1,4 @@
-import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_assertManagedRootAdmission, internal_DO_NOT_USE_beginManagedRootEffect } from "@bb/config/file-lock";
 import {
   hostToolchain,
   sanitizeInheritedChildProcessEnv,
@@ -647,6 +647,7 @@ export class ServerMoveService {
     state: ActivatingState,
     waitForSessionClose: boolean,
   ): Promise<void> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.runActivation");
     const { dataDir } = this.options;
     if (waitForSessionClose) {
       await this.waitForServerSessionClose(state.moveId);
@@ -662,6 +663,7 @@ export class ServerMoveService {
       await this.options.requestShutdown("server-move-activation-port-busy", 1);
       return;
     }
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.writeLastMove");
     await writeLastServerMoveFile(dataDir, {
       version: 1,
       ...state.activation.lastMove,
@@ -671,8 +673,10 @@ export class ServerMoveService {
       plan.kind === "service" &&
       !sameArguments(plan.definition.programArguments, plan.programArguments)
     ) {
+      internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.writeServiceDefinition");
       await writeServiceDefinition(plan.definition, plan.programArguments);
     }
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.switchConfig");
     await switchConfigToLocalServer({
       dataDir,
       serverUrl: `http://127.0.0.1:${state.serverPort}`,
@@ -1208,6 +1212,13 @@ export class ServerMoveService {
     command: CommandOf<"server_move.prepare">,
     signal: AbortSignal,
   ): Promise<HostDaemonOnlineRpcResult<"server_move.prepare">> {
+    const effect = internal_DO_NOT_USE_beginManagedRootEffect("serverMove.runPrepare");
+    let cleanupRequired = false;
+    let cleanupState: IncomingMoveState | undefined;
+    const cleanup = effect.reserveOriginalCleanup(async () => {
+      if (cleanupRequired && cleanupState !== undefined) await this.cleanupMove(cleanupState);
+    });
+    try {
     const { dataDir } = this.options;
     const moveDir = incomingMoveDir(dataDir, command.moveId);
     let state: IncomingMoveState = {
@@ -1226,13 +1237,16 @@ export class ServerMoveService {
       patch: Partial<IncomingMoveState>,
     ): Promise<void> => {
       state = { ...state, ...patch };
-      await writeIncomingMoveState(dataDir, state);
+      cleanupState = state;
+      await effect.runOriginal(() => writeIncomingMoveState(dataDir, state));
     };
     try {
-      await mkdir(moveDir, { recursive: true, mode: 0o700 });
+      await effect.runOriginal(() => mkdir(moveDir, { recursive: true, mode: 0o700 }));
+      cleanupRequired = true;
+      cleanupState = state;
       await updateState({});
       if (command.bbApp !== null) {
-        await this.installBbApp(command, moveDir, signal);
+        await effect.runOriginal(() => this.installBbApp(command, moveDir, signal));
       }
       const serverEntry = await this.resolveServerEntry();
       if (serverEntry === null) {
@@ -1242,7 +1256,7 @@ export class ServerMoveService {
         );
       }
       const archivePath = join(moveDir, ARCHIVE_FILE_NAME);
-      await this.download({
+      await effect.runOriginal(() => this.download({
         moveId: command.moveId,
         step: "transfer",
         label: "server data",
@@ -1252,7 +1266,7 @@ export class ServerMoveService {
         sizeBytes: command.archive.sizeBytes,
         maxSizeBytes: Number.MAX_SAFE_INTEGER,
         signal,
-      });
+      }));
       signal.throwIfAborted();
       if (command.archiveExistingServerData) {
         const archivedServerData = await this.archiveStandaloneServerData(
@@ -1268,30 +1282,30 @@ export class ServerMoveService {
         "Importing server data",
       );
       const stagingDir = join(moveDir, STAGING_DIR_NAME);
-      await rm(stagingDir, { recursive: true, force: true });
-      const manifest = await extractServerArchive({
+      await effect.runOriginal(() => rm(stagingDir, { recursive: true, force: true }));
+      const manifest = await effect.runOriginal(() => extractServerArchive({
         archivePath,
         destinationDir: stagingDir,
-      });
+      }));
       signal.throwIfAborted();
       const localServerUrl = `http://127.0.0.1:${command.serverPort}`;
-      const installed = await installImportedServerFiles({
+      const installed = await effect.runOriginal(() => installImportedServerFiles({
         stagingDir,
         dataDir,
         manifest,
         localServerUrl,
-      });
+      }));
       await updateState({ importedEntries: installed.importedEntries });
-      await removeServerImportJournalFile(dataDir);
-      await restoreMachineConnectionConfig({
+      await effect.runOriginal(() => removeServerImportJournalFile(dataDir));
+      await effect.runOriginal(() => restoreMachineConnectionConfig({
         dataDir,
         backupConfigPath: join(
           dataDir,
           SERVER_IMPORT_BACKUP_DIR_NAME,
           "config.json",
         ),
-      });
-      await writeServerImportFile(dataDir, {
+      }));
+      await effect.runOriginal(() => writeServerImportFile(dataDir, {
         version: 1,
         kind: "move",
         moveId: command.moveId,
@@ -1303,9 +1317,9 @@ export class ServerMoveService {
         importedEntries: installed.importedEntries,
         createdAt: this.options.now(),
         fixupsAppliedAt: null,
-      });
-      await rm(stagingDir, { recursive: true, force: true });
-      await rm(archivePath, { force: true });
+      }));
+      await effect.runOriginal(() => rm(stagingDir, { recursive: true, force: true }));
+      await effect.runOriginal(() => rm(archivePath, { force: true }));
       signal.throwIfAborted();
       if ((await this.detectLauncherMovedMode()) !== null) {
         this.emitProgress(
@@ -1321,7 +1335,7 @@ export class ServerMoveService {
         "Starting the imported server",
       );
       const logPath = this.logPath(PENDING_SERVER_LOG_FILE_NAME);
-      const pid = await this.options.launchPendingServer({
+      const pid = await effect.runOriginal(() => this.options.launchPendingServer({
         bbServerEntry: serverEntry,
         dataDir,
         serverPort: command.serverPort,
@@ -1332,7 +1346,7 @@ export class ServerMoveService {
           this.options.hostDaemonPort,
         ),
         logPath,
-      });
+      }));
       this.spawnedPendingServerPids.add(pid);
       await updateState({ pendingServer: { pid, localServerUrl } });
       await waitForPendingServer({
@@ -1353,6 +1367,8 @@ export class ServerMoveService {
         "start-target",
         "The imported server is running",
       );
+      cleanupRequired = false;
+      await cleanup();
       return { localServerUrl, pid };
     } catch (error) {
       const normalized = normalizePrepareError(error, signal);
@@ -1360,7 +1376,7 @@ export class ServerMoveService {
         { err: normalized, moveId: command.moveId },
         "Server move prepare failed; cleaning up",
       );
-      await this.cleanupMove(state).catch((cleanupError: unknown) => {
+      await cleanup().catch((cleanupError: unknown) => {
         this.options.logger.error(
           { err: cleanupError, moveId: command.moveId },
           "Server move cleanup failed",
@@ -1368,6 +1384,7 @@ export class ServerMoveService {
       });
       throw normalized;
     }
+    } finally { effect.complete(); }
   }
 
   private async installBbApp(
@@ -1637,6 +1654,7 @@ export class ServerMoveService {
   }
 
   private async spawnReplacement(args: string[]): Promise<void> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.spawnReplacement");
     const pid = await this.options.spawnDetached({
       command: process.execPath,
       args,
@@ -1648,6 +1666,7 @@ export class ServerMoveService {
       INSTALL_DAEMON_PID_FILE_NAME,
     );
     if (await pathExists(pidFilePath)) {
+      internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.writeReplacementPid");
       await writeFileAtomically({
         path: pidFilePath,
         content: `${pid}\n`,
