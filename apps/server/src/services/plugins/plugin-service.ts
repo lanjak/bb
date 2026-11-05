@@ -2804,7 +2804,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
 
   const consumedAttempts = new WeakMap<Request, Set<string>>();
   registerPluginManagedGenerationControl(service, async (args) => {
-    const pin = deps.hub.pinDaemonConnection(args.intent.hostId);
+    const pin = deps.hub.pinDaemonConnection?.(args.intent.hostId) ?? null;
     const hostIsCurrent = (): boolean => {
       if (pin === null || !pin.isCurrent()) return false;
       const host = getHost(deps.db, args.intent.hostId);

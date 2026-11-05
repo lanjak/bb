@@ -49,6 +49,8 @@ const hostCommandWakePolicy = {
   "environment.hook.cancel": "never",
   "environment.inspect_cleanup": "never",
   "plugin.host.call": "work",
+  "plugin.host.preflight": "never",
+  "plugin.host.preflight.cancel": "never",
   "plugin.host.cancel": "never",
   "plugin.host.dispose": "never",
   "connect-tunnel.ensure-identity": "work",

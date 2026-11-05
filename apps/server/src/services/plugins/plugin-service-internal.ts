@@ -147,12 +147,12 @@ export interface PluginServiceDeps {
   hub: Pick<
     NotificationHub,
     | "getDaemonSessionIdForHost"
-    | "pinDaemonConnection"
+
     | "notifyPluginSignal"
     | "notifySystem"
     | "notifyPluginChanged"
     | "onWatchedTargets"
-  >;
+  > & Partial<Pick<NotificationHub, "pinDaemonConnection">>;
   logger: ServerLogger;
   telemetry: TelemetryService;
   pendingInteractions?: Pick<
