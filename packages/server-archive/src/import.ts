@@ -53,6 +53,7 @@ export interface MergeImportedManagedConfigArgs {
   importedConfig: ImportedManagedConfig;
   existingConfig: ImportedManagedConfig;
   localServerUrl: string | null;
+  internal_DO_NOT_USE_captureOriginalRollback?: (rollback: () => Promise<void>) => void;
 }
 
 export interface InstallImportedServerFilesArgs {
@@ -339,6 +340,7 @@ export async function installImportedServerFiles(
     if (rollbackRequired) await rollBackOriginalServerImport(args.dataDir);
   });
   try {
+    args.internal_DO_NOT_USE_captureOriginalRollback?.(rollback);
     return await effect.runOriginal(() => installOriginalServerFiles(args, effect, () => { rollbackRequired = true; }));
   } catch (error) {
     failed = true;

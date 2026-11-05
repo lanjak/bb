@@ -1217,6 +1217,7 @@ export class ServerMoveService {
     let cleanupRequired = false;
     let cleanupState: IncomingMoveState | undefined;
     let originalImportedEntries: readonly string[] | undefined;
+    let originalInstallerRollback: (() => Promise<void>) | undefined;
     const originalDataDir = this.options.dataDir;
     const rollbackImport = internal_DO_NOT_USE_reserveServerImportRollback(effect, () =>
       cleanupRequired && originalImportedEntries !== undefined
@@ -1224,7 +1225,14 @@ export class ServerMoveService {
         : null,
     );
     const cleanup = effect.reserveOriginalCleanup(async () => {
-      if (cleanupRequired && cleanupState !== undefined) await this.cleanupMove(cleanupState, rollbackImport);
+      const originalRollback = originalImportedEntries === undefined && originalInstallerRollback !== undefined
+        ? originalInstallerRollback
+        : rollbackImport;
+      if (cleanupRequired && cleanupState !== undefined) {
+        try { await this.cleanupMove(cleanupState, originalRollback); }
+        catch (error) { await rollbackImport().catch(() => undefined); throw error; }
+        await rollbackImport();
+      }
       else await rollbackImport();
     });
     try {
@@ -1303,6 +1311,7 @@ export class ServerMoveService {
         dataDir,
         manifest,
         localServerUrl,
+        internal_DO_NOT_USE_captureOriginalRollback: (rollback) => { originalInstallerRollback = rollback; },
       }));
       originalImportedEntries = [...installed.importedEntries];
       await updateState({ importedEntries: installed.importedEntries });

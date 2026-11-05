@@ -310,7 +310,7 @@ async function walkSkillTree(args: WalkSkillTreeArgs): Promise<void> {
         depth: args.depth + 1,
         rootPath: args.rootPath,
         state: args.state,
-      }));
+      });
       continue;
     }
     if (!entryStat.isFile()) {
@@ -441,9 +441,6 @@ async function collectSkillTree(
       skillFilePath: args.skillFilePath,
     }),
   );
-  } finally {
-    effect.complete();
-  }
 }
 
 function storedTreeMemoKey(
@@ -537,8 +534,6 @@ async function copyCollectedTree(args: StageTreeArgs, effect: ManagedRootEffect)
 export async function copyInjectedSkillSource(
   args: CopyInjectedSkillSourceArgs,
 ): Promise<void> {
-  const effect = internal_DO_NOT_USE_beginManagedRootEffect("cleanupInjectedSkillStagingDirs");
-  try {
   const effect = internal_DO_NOT_USE_beginManagedRootEffect("copyInjectedSkillSource");
   try {
   const tree = await collectSkillDirectory({
@@ -625,7 +620,6 @@ async function publishDirectory(args: {
       args.tempRootPath,
       args.destinationPath,
       args.effect,
-      args.effect,
     )) === "renamed" ||
     (await args.isComplete(args.destinationPath))
   ) {
@@ -640,6 +634,7 @@ async function publishDirectory(args: {
     (await renameDirectoryIntoPlace(
       args.tempRootPath,
       args.destinationPath,
+      args.effect,
     )) === "renamed" ||
     (await args.isComplete(args.destinationPath))
   ) {
@@ -1012,8 +1007,6 @@ async function pullTreeIntoStore(args: {
   skillTreeTransport: SkillTreeTransport;
   treeHash: string;
 }): Promise<string> {
-  const effect = internal_DO_NOT_USE_beginManagedRootEffect("ensureStoredSkillTree");
-  try {
   const effect = internal_DO_NOT_USE_beginManagedRootEffect("pullTreeIntoStore");
   let ownedTempRootPath: string | undefined;
   const cleanup = effect.reserveOriginalCleanup(async () => {
@@ -1147,6 +1140,8 @@ export async function ensureStoredSkillTree(args: {
   skillTreeTransport: SkillTreeTransport;
   treeHash: string;
 }): Promise<string> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("ensureStoredSkillTree");
+  try {
   const key = `${args.dataDir}\0${args.treeHash}`;
   const pending = pendingSkillTreePulls.get(key);
   if (pending) {
@@ -1357,6 +1352,8 @@ export async function stageInjectedSkillSources(
 export async function cleanupInjectedSkillStagingDirs(
   args: CleanupInjectedSkillStagingDirsArgs,
 ): Promise<void> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("cleanupInjectedSkillStagingDirs");
+  try {
   const stagingRootPath = resolveStagingRootPath(args.dataDir);
   const keep = new Set(args.keepCatalogHashes);
   let entries: Dirent[];
@@ -1406,7 +1403,10 @@ export async function cleanupInjectedSkillStagingDirs(
       await effect.runOriginal(() => fs.rm(entryPath, {
         recursive: true,
         force: true,
-      });
+      }));
     }),
   );
+  } finally {
+    effect.complete();
+  }
 }

@@ -5,6 +5,33 @@ import { describe, expect, it, vi } from "vitest";
 import { copyVerifiedFile } from "../src/index.js";
 
 describe("copyVerifiedFile", () => {
+  it("removes only the original destination when its iterator mutates the caller arguments", async () => {
+    const close = vi.fn(async () => {});
+    type Handle = Awaited<ReturnType<typeof fs.open>>;
+    const open = vi.spyOn(fs, "open").mockResolvedValue({ close } as Handle);
+    const rm = vi.spyOn(fs, "rm").mockResolvedValue(undefined);
+    const transfer = await import("../src/verified-file-transfer.js");
+    const args = {
+      destinationPath: "/original/owned",
+      durable: false,
+      expected: { maxBytes: 0, sha256: null, sizeBytes: 0 },
+      label: "test",
+      mode: { kind: "create" as const, mode: 0o600 },
+      source: (async function* () {
+        args.destinationPath = "/foreign/path";
+        yield Buffer.from("invalid");
+      })(),
+    };
+    try {
+      await expect(transfer.writeVerifiedFile(args)).rejects.toThrow("exceeds maximum size");
+      expect(open).toHaveBeenCalledWith("/original/owned", "wx", 0o600);
+      expect(rm).toHaveBeenCalledExactlyOnceWith("/original/owned", { force: true });
+    } finally {
+      open.mockRestore();
+      rm.mockRestore();
+    }
+  });
+
   it("preserves a successfully written destination when reserved cleanup settles", async () => {
     const close = vi.fn(async () => {});
     const sync = vi.fn(async () => {});

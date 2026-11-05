@@ -75,13 +75,14 @@ export async function writeVerifiedFile(args: {
   mode: VerifiedFileMode;
   source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
 }): Promise<WrittenFile> {
+  const destinationPath = args.destinationPath;
   const effect = internal_DO_NOT_USE_beginManagedRootEffect("writeVerifiedFile");
   let handle: FileHandle | undefined;
   const close = effect.reserveOriginalCleanup(async () => { if (handle !== undefined) await handle.close(); });
-  const remove = effect.reserveOriginalCleanup(async () => { if (handle !== undefined) await fs.rm(args.destinationPath, { force: true }); });
+  const remove = effect.reserveOriginalCleanup(async () => { if (handle !== undefined) await fs.rm(destinationPath, { force: true }); });
   try {
-  handle = await effect.runOriginal(() => fs.open(args.destinationPath, "wx", args.mode.mode));
-  const originalHandle = handle;
+  const originalHandle: FileHandle = await effect.runOriginal(() => fs.open(destinationPath, "wx", args.mode.mode));
+  handle = originalHandle;
   const hash = createHash("sha256");
   let sizeBytes = 0;
   try {
