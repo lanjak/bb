@@ -678,6 +678,7 @@ export function createPluginApi(options: {
     level: "debug" | "info" | "warn" | "error",
     message: string,
   ): void {
+    assertLive();
     logger[level](`${prefix} ${message}`);
     appendPluginLogLine(dataDir, pluginId, level, message);
   }

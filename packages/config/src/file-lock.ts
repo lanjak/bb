@@ -155,12 +155,20 @@ export async function withFileLock<T>(args: {
   let acquired = false;
   const cleanup = effect.reserveOriginalCleanup(async () => {
     if (handle === undefined) return;
+    let failed = false;
+    let primary: unknown;
     try {
       if (acquired) loadNativeFileLocks().unlock(handle.fd);
-    } finally {
-      await handle.close();
+    } catch (error) {
+      failed = true;
+      primary = error;
     }
+    try { await handle.close(); } catch (error) {
+      if (!failed) { failed = true; primary = error; }
+    }
+    if (failed) throw primary;
   });
+  let bodyFailed = false;
   try {
     const nativeFileLocks = loadNativeFileLocks();
     await effect.runOriginal(() => mkdir(dirname(args.path), { recursive: true }));
@@ -179,10 +187,14 @@ export async function withFileLock<T>(args: {
       await sleep(LOCK_RETRY_MS);
     }
     return await effect.runOriginal(args.work);
+  } catch (primary) {
+    bodyFailed = true;
+    throw primary;
   } finally {
     try {
       await cleanup();
-    } catch {
+    } catch (cleanupFailure) {
+      if (!bodyFailed) throw cleanupFailure;
     } finally {
       if (args.managedRootEffect === undefined) effect.complete();
     }
