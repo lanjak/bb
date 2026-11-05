@@ -53,7 +53,6 @@ export interface MergeImportedManagedConfigArgs {
   importedConfig: ImportedManagedConfig;
   existingConfig: ImportedManagedConfig;
   localServerUrl: string | null;
-  internal_DO_NOT_USE_captureOriginalRollback?: (rollback: () => Promise<void>) => void;
 }
 
 export interface InstallImportedServerFilesArgs {
@@ -61,6 +60,7 @@ export interface InstallImportedServerFilesArgs {
   dataDir: string;
   manifest: ServerArchiveManifest;
   localServerUrl: string | null;
+  internal_DO_NOT_USE_captureOriginalRollback?: (rollback: () => Promise<void>) => void;
 }
 
 export interface InstallImportedServerFilesResult {
