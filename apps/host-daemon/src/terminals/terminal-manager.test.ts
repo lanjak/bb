@@ -28,7 +28,7 @@ it("refuses selected PTY helper mutation before filesystem discovery", async () 
   const terminal = await import("./terminal-manager.js");
   admission.internal_DO_NOT_USE_enrollManagedRoot({});
   try {
-    expect(() => terminal.ensureNodePtySpawnHelperExecutable({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() })).toThrow(admission.ManagedRootAdmissionUnavailableError);
+    expect(() => terminal.ensureNodePtySpawnHelperExecutable({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() })).toThrow(admission.ManagedRootAdmissionUnavailableError);
   } finally {
     vi.resetModules();
   }

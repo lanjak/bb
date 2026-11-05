@@ -38,7 +38,7 @@ it("refuses selected server move cleanup before reading or deleting an old copy"
   const { ServerMoveService, defaultServerMoveServiceOptions } = await import("./service.js");
   admission.internal_DO_NOT_USE_enrollManagedRoot({});
   try {
-    const service = new ServerMoveService({ ...defaultServerMoveServiceOptions(), dataDir: "/unresolved/data", hostId: "host_test", serverUrl: "http://localhost", hostKey: "test", serverHeaders: {}, hostDaemonPort: null, autoUpdate: false, supervised: false, logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }, isServerSessionOpen: () => false, getShellEnv: () => ({}), emitProgress: vi.fn(), requestShutdown: vi.fn(async () => {}) });
+    const service = new ServerMoveService({ ...defaultServerMoveServiceOptions(), dataDir: "/unresolved/data", hostId: "host_test", serverUrl: "http://localhost", hostKey: "test", serverHeaders: {}, hostDaemonPort: null, autoUpdate: false, supervised: false, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() }, isServerSessionOpen: () => false, getShellEnv: () => ({}), emitProgress: vi.fn(), requestShutdown: vi.fn(async () => {}) });
     await expect(service.deleteOldCopy()).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
   } finally {
     vi.resetModules();

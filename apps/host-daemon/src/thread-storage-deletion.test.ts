@@ -20,7 +20,7 @@ it("refuses direct selected thread deletion before process termination or remova
   const rm = vi.spyOn(fs, "rm").mockRejectedValue(new Error("Unexpected removal"));
   admission.internal_DO_NOT_USE_enrollManagedRoot({});
   try {
-    await expect(deleteThreadStorage({ type: "thread.storage.delete", threadId: "thr_test", environmentId: "env_test" }, makeDispatchOptions({ threadStorageRootPath: "/unresolved/storage" }))).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+    await expect(deleteThreadStorage({ type: "thread.storage.delete", threadId: "thr_test", environmentId: "env_test" }, makeDispatchOptions({ runtimeManager: new RuntimeManager(), threadStorageRootPath: "/unresolved/storage" }))).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
     expect(kill).not.toHaveBeenCalled();
     expect(rm).not.toHaveBeenCalled();
   } finally {
