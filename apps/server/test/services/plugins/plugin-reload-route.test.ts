@@ -2,6 +2,8 @@ import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { createServer, IncomingMessage, request as httpRequest } from "node:http";
 import { join } from "node:path";
 import { getInstalledPlugin } from "@bb/db";
+import { seedHostSession } from "../../helpers/seed.js";
+import { createMockHubSocket } from "../../helpers/mock-hub-socket.js";
 import {
   GATE_ASSERTION_HEADER,
   generateGateKeyPair,
@@ -52,6 +54,21 @@ describe("POST /plugins/reload outcome", () => {
     await writeFile(join(rootDir, "server.ts"), HEALTHY_SOURCE);
     const entry = await harness.pluginService.installPath(rootDir);
     expect(entry.status).toBe("running");
+  });
+
+  it("refuses an unavailable selected host without replacing the running plugin", async () => {
+    const originalApi = harness.pluginService.getApi("keeper");
+    await signedEnable(JSON.stringify({ operatorIntent: {
+      action: "request-managed-generation",
+      computeChildRssAdmissionBytes: 1048576,
+      attemptKey: "unavailable",
+      hostId: "host_selected",
+    } }), async (response) => {
+      expect(response.status).toBe(409);
+      expect(response.body).toMatchObject({ error: "managed generation selected host is unavailable" });
+      expect(getInstalledPlugin(harness.db, "keeper")?.enabled).toBe(true);
+      expect(harness.pluginService.getApi("keeper")).toBe(originalApi);
+    });
   });
 
   afterEach(async () => {
@@ -293,6 +310,8 @@ describe("POST /plugins/reload outcome", () => {
   });
 
   it("refuses warm managed replacement and consumes bounded attempts on the original signed request", async () => {
+    const { host, session } = seedHostSession(harness, { id: "host_selected" });
+    harness.hub.registerDaemon(session.id, host.id, createMockHubSocket());
     const originalApi = harness.pluginService.getApi("keeper");
     const intent = {
       action: "request-managed-generation" as const,

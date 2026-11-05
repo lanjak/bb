@@ -859,11 +859,11 @@ export class NotificationHub implements DbNotifier {
         timeoutMs: number;
       }): Promise<HostDaemonOnlineRpcResponseMessage> => {
         if (!isCurrent()) throw new HostOnlineRpcUnavailableError();
-        const response = await this.requestHostOnlineRpc({
+        const response = await this.dispatchHostOnlineRpc({
           ...args,
           hostId,
           signal: AbortSignal.any([args.signal, entry.invalidation.signal]),
-        });
+        }, true);
         if (!isCurrent()) throw new HostOnlineRpcUnavailableError();
         return response;
       },
@@ -994,6 +994,15 @@ export class NotificationHub implements DbNotifier {
     signal?: AbortSignal;
     timeoutMs: number;
   }): Promise<HostDaemonOnlineRpcResponseMessage> {
+    return this.dispatchHostOnlineRpc(args, false);
+  }
+
+  private dispatchHostOnlineRpc(args: {
+    hostId: string;
+    message: HostDaemonOnlineRpcRequestMessage;
+    signal?: AbortSignal;
+    timeoutMs: number;
+  }, preserveOpaqueError: boolean): Promise<HostDaemonOnlineRpcResponseMessage> {
     const sessionId = this.daemonSessionIdsByHost.get(args.hostId);
     if (!sessionId) {
       return Promise.reject(new HostOnlineRpcUnavailableError());
@@ -1035,7 +1044,7 @@ export class NotificationHub implements DbNotifier {
           session.socket.send(JSON.stringify(args.message));
         } catch (error) {
           this.deleteHostOnlineRpcWaiter(requestId, waiter);
-          reject(error instanceof Error ? error : new Error(String(error)));
+          reject(preserveOpaqueError ? error : error instanceof Error ? error : new Error(String(error)));
         }
       },
     );

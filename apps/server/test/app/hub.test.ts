@@ -44,6 +44,44 @@ describe("NotificationHub", () => {
     expect(foreignPin?.signal.aborted).toBe(true);
   });
 
+  it("preserves an original pinned socket throw of undefined and removes its waiter", async () => {
+    const hub = new NotificationHub();
+    const controller = new AbortController();
+    hub.registerDaemon("session", "host", {
+      ...createMockHubSocket(),
+      send() { throw undefined; },
+    });
+    try {
+      const pin = hub.pinDaemonConnection("host");
+      if (pin === null) throw new Error("Missing pin");
+      await expect(pin.request({
+        message: {
+          type: "host-rpc.request",
+          requestId: "opaque",
+          command: {
+            type: "plugin.host.preflight",
+            pluginId: "plugin", generation: "generation",
+            artifact: { digest: "a".repeat(64), byteLength: 1 },
+            attemptId: "attempt", hostId: "host", sessionId: "session", timeoutMs: 1000,
+          },
+        },
+        signal: controller.signal,
+        timeoutMs: 1000,
+      })).rejects.toBeUndefined();
+      controller.abort();
+      expect(hub.recordHostOnlineRpcResponse({
+        sessionId: "session",
+        message: {
+          type: "host-rpc.response", requestId: "opaque", commandType: "plugin.host.preflight",
+          ok: true, result: { status: "refused", reason: "managed-generation-unavailable" },
+        },
+      })).toEqual({ handled: false, reason: "stale" });
+    } finally {
+      controller.abort();
+      hub.unregisterDaemon("session");
+    }
+  });
+
   it("rejects an in-flight pinned response after replacement while preserving a foreign ordinary RPC", async () => {
     const hub = new NotificationHub();
     const socket = createMockHubSocket();
