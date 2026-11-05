@@ -392,6 +392,14 @@ export async function runServer(serverConfig: ServerConfig, selection?: { manage
     },
     { sessions: serverImport.importedDaemonSessions },
   );
+  startupCleanups.push(async () => { serverMove.dispose(); });
+  startupCleanups.push(async () => { appUpdate.dispose(); });
+  startupCleanups.push(async () => { pluginCatalogService.stopPeriodicRefresh(); });
+  startupCleanups.push(() => pluginService.stopPeriodicUpdateChecks());
+  startupCleanups.push(() => pluginService.stop());
+  startupCleanups.push(() => tunnelIngress.closeAll());
+  startupCleanups.push(() => closeWebSockets());
+  startupEffect.assertOriginalAtDequeue();
   const performanceDiagnostics = await startGatedPerformanceDiagnostics({
     allowed: serverConfig.BB_PERF_DIAGNOSTICS,
     dataDir: serverConfig.BB_DATA_DIR,
