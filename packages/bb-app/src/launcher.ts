@@ -4402,7 +4402,21 @@ export async function runBbApp(
 export function runLauncherEntry(entry: () => Promise<void>): void {
   const run = async (): Promise<void> => {
     if (process.argv.includes("--bb-managed-bootstrap")) {
-      const controller = createManagedCohortController(["server", "host-daemon"]);
+      const entrypointDir = dirname(fileURLToPath(import.meta.url));
+      const packageRoot = resolve(entrypointDir, "..");
+      const workspaceRoot = resolve(packageRoot, "..", "..");
+      const fromSource = runsFromSourceCheckout(import.meta.url);
+      const dataDir = resolveDataDir({ env: process.env, homeDir: homedir() });
+      const controller = createManagedCohortController(["server", "host-daemon"], undefined, {
+        serverEntry: fromSource
+          ? resolve(workspaceRoot, "apps", "server", "dist", "index.js")
+          : resolve(packageRoot, "server", "dist", "index.js"),
+        daemonEntry: fromSource
+          ? resolve(workspaceRoot, "apps", "host-daemon", "dist", "daemon-bundle.mjs")
+          : resolve(packageRoot, "host-daemon", "dist", "daemon-bundle.mjs"),
+        logDir: join(dataDir, "logs"),
+        env: { ...process.env, BB_DATA_DIR: dataDir },
+      });
       selectedCohort = controller;
       internal_DO_NOT_USE_enrollManagedRoot(controller);
       internal_DO_NOT_USE_assertManagedRootAdmission("launcher runtime resolution and child creation");

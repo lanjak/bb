@@ -2,15 +2,16 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { createManagedCohortController } from "../src/managed-cohort-controller.js";
 
-vi.mock("../src/logged-process.js", () => ({
-  spawnLoggedProcess: () => { throw new Error("Native spawn forbidden in controller control tests."); },
-}));
+const native = vi.hoisted(() => ({ spawn: vi.fn() }));
+vi.mock("../src/logged-process.js", () => ({ spawnLoggedProcess: native.spawn }));
+vi.mock("@bb/config/file-lock", async () => await import("../../config/src/managed-root-admission.js"));
 
 class OriginalChild extends EventEmitter {
   connected = true;
   sent: object[] = [];
   delayed = false;
   callbacks: ((error: Error | null) => void)[] = [];
+  kill = vi.fn(() => true);
   send(message: object, callback: (error: Error | null) => void): boolean {
     this.sent.push(message);
     if (this.delayed) this.callbacks.push(callback);
@@ -20,6 +21,49 @@ class OriginalChild extends EventEmitter {
 }
 
 describe("managed cohort original-channel control, not native custody", () => {
+  it("refuses missing and duplicate roles before simulated spawn", async () => {
+    native.spawn.mockClear();
+    const config = { serverEntry: "/fixed/server.js", daemonEntry: "/fixed/daemon.js", logDir: "/fixed/logs", env: {} };
+    const controller = createManagedCohortController(["server"], undefined, config);
+    await expect(controller.spawnFixedOriginal("host-daemon")).rejects.toThrow();
+    expect(native.spawn).not.toHaveBeenCalled();
+    const child = new OriginalChild();
+    native.spawn.mockReturnValue(child);
+    await controller.spawnFixedOriginal("server");
+    await expect(controller.spawnFixedOriginal("server")).rejects.toThrow();
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    const draining = controller.drain();
+    child.emit("close");
+    await draining;
+  });
+
+  it("joins original close despite error and ignores caller configuration mutation", async () => {
+    native.spawn.mockClear();
+    const config = { serverEntry: "/fixed/server.js", daemonEntry: "/fixed/daemon.js", logDir: "/fixed/logs", env: { NODE_OPTIONS: "--require evil", BB_DATA_DIR: "/fixed/data" } };
+    const controller = createManagedCohortController(["server"], undefined, config);
+    config.serverEntry = "/changed.js";
+    config.env.BB_DATA_DIR = "/changed";
+    const child = new OriginalChild();
+    native.spawn.mockReturnValue(child);
+    await controller.spawnFixedOriginal("server");
+    expect(native.spawn).toHaveBeenCalledWith(expect.objectContaining({
+      args: ["/fixed/server.js", "--bb-managed-bootstrap"],
+      env: { BB_DATA_DIR: "/fixed/data" },
+      ipc: true,
+    }));
+    child.emit("error", undefined);
+    let finished = false;
+    const draining = controller.drain().then((result) => { finished = true; return result; });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    child.emit("close");
+    const result = await draining;
+    expect(result.status).toBe("PINNED");
+    expect(result.failures).toContain(undefined);
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
   it("does not bind one original child to different required roles", () => {
     const controller = createManagedCohortController(["server", "host-daemon"]);
     const child = new OriginalChild();

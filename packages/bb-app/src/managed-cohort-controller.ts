@@ -23,6 +23,12 @@ export function createManagedCohortController(
   predecessor: object | undefined = undefined,
   launch: { serverEntry: string; daemonEntry: string; logDir: string; env: NodeJS.ProcessEnv } | undefined = undefined,
 ) {
+  const fixedLaunch = launch === undefined ? undefined : Object.freeze({
+    serverEntry: launch.serverEntry,
+    daemonEntry: launch.daemonEntry,
+    logDir: launch.logDir,
+    env: Object.freeze({ ...launch.env }),
+  });
   const required = new Set(roles);
   if (required.size === 0 || required.size !== roles.length) throw new Error("Managed cohort requires distinct fixed roles.");
   const records = new Map<ManagedProcessRole, OriginalRecord>();
@@ -51,28 +57,37 @@ export function createManagedCohortController(
     async spawnFixedOriginal(
       role: "server" | "host-daemon",
     ) {
-      if (launch === undefined || pinned || !required.has(role) || records.has(role) || spawning.has(role)) throw new Error("Managed cohort cannot spawn an unreserved required role.");
+      if (fixedLaunch === undefined || pinned || !required.has(role) || records.has(role) || spawning.has(role)) throw new Error("Managed cohort cannot spawn an unreserved required role.");
       spawning.add(role);
       const effect = controller.beginOriginalEffect(`fixed ${role} bootstrap spawn`);
       let child: ReturnType<typeof spawnLoggedProcess> | undefined;
       let closed: Promise<void> | undefined;
+      let settleAttempt: () => void = () => undefined;
+      const attemptSettled = new Promise<void>((resolve) => { settleAttempt = resolve; });
       const cleanup = effect.reserveOriginalCleanup(async () => {
+        await attemptSettled;
         if (child === undefined || closed === undefined) return;
         child.kill("SIGTERM");
         await closed;
-      });
+        });
+      } finally {
+        settleAttempt();
+      }
       cleanups.add(cleanup);
       const sanitizedEnv: NodeJS.ProcessEnv = {};
       for (const key of ["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP", "BB_DATA_DIR", "BB_SERVER_URL", "BB_HOST_ID", "BB_HOST_KEY"]) {
-        if (launch.env[key] !== undefined) sanitizedEnv[key] = launch.env[key];
+        if (fixedLaunch.env[key] !== undefined) sanitizedEnv[key] = fixedLaunch.env[key];
       }
-      return effect.runOriginal(async () => {
+      try {
+        return await effect.runOriginal(async () => {
+        if (pinned) throw new Error("Managed cohort was revoked before its spawn attempt.");
+        effect.assertOriginalAtDequeue();
         child = spawnLoggedProcess({
           command: process.execPath,
-          args: [role === "server" ? launch.serverEntry : launch.daemonEntry, "--bb-managed-bootstrap"],
+          args: [role === "server" ? fixedLaunch.serverEntry : fixedLaunch.daemonEntry, "--bb-managed-bootstrap"],
           env: sanitizedEnv,
           ipc: true,
-          logDir: launch.logDir,
+          logDir: fixedLaunch.logDir,
           logName: role,
         });
         const originalChild = child;

@@ -14,7 +14,7 @@ import { internal_DO_NOT_USE_registerManagedProcess } from "@bb/config/managed-p
 if (process.argv.includes("--bb-managed-bootstrap")) {
   const registration = await internal_DO_NOT_USE_registerManagedProcess("bootstrap-cli", process);
   registration.assertBootstrapActive();
-  throw new Error("Managed bootstrap CLI runtime is unavailable while cohort is NOT_ESTABLISHED.");
+  throw new Error("Cannot start the CLI: cohort NOT_ESTABLISHED.");
 }
 
 if (process.env.FORCE_COLOR !== undefined) {
