@@ -31,6 +31,7 @@ import {
   removeServerConnectHoldFile,
   removeServerImportJournalFile,
   rollBackServerImport,
+  internal_DO_NOT_USE_reserveServerImportRollback,
   SERVER_IMPORT_BACKUP_DIR_NAME,
   SERVER_IMPORT_FILE_NAME,
   SERVER_MOVED_FILE_NAME,
@@ -1215,8 +1216,14 @@ export class ServerMoveService {
     const effect = internal_DO_NOT_USE_beginManagedRootEffect("serverMove.runPrepare");
     let cleanupRequired = false;
     let cleanupState: IncomingMoveState | undefined;
+    const rollbackImport = internal_DO_NOT_USE_reserveServerImportRollback(effect, () =>
+      cleanupRequired && cleanupState !== undefined
+        ? { dataDir: this.options.dataDir, importedEntries: cleanupState.importedEntries }
+        : null,
+    );
     const cleanup = effect.reserveOriginalCleanup(async () => {
-      if (cleanupRequired && cleanupState !== undefined) await this.cleanupMove(cleanupState);
+      if (cleanupRequired && cleanupState !== undefined) await this.cleanupMove(cleanupState, rollbackImport);
+      else await rollbackImport();
     });
     try {
     const { dataDir } = this.options;
@@ -1528,10 +1535,12 @@ export class ServerMoveService {
     this.spawnedPendingServerPids.delete(pendingServer.pid);
   }
 
-  private async cleanupMove(state: IncomingMoveState): Promise<void> {
+  private async cleanupMove(state: IncomingMoveState, originalRollback?: () => Promise<void>): Promise<void> {
     const { dataDir } = this.options;
     await this.stopPendingServer(state);
-    if (state.importedEntries === null) {
+    if (originalRollback !== undefined) {
+      await originalRollback();
+    } else if (state.importedEntries === null) {
       await rollBackServerImport(dataDir);
     } else {
       await removeImportedServerFiles({

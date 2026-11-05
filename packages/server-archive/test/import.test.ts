@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import fs from "node:fs/promises";
 import {
   mkdir,
   readdir,
@@ -33,6 +34,29 @@ import {
   SERVER_OWNED_FIXTURE_PATHS,
   writeFixtureFile,
 } from "./data-dir-fixtures.js";
+
+it("joins original reserved rollback after enrollment without admitting fresh rollback", async () => {
+  vi.resetModules();
+  const admission = await import("@bb/config/file-lock");
+  const archive = await import("../src/import.js");
+  const effect = admission.internal_DO_NOT_USE_beginManagedRootEffect("original move");
+  const originalMove = vi.fn(() => null);
+  const rollback = archive.internal_DO_NOT_USE_reserveServerImportRollback(effect, originalMove);
+  const rm = vi.spyOn(fs, "rm").mockRejectedValue(new Error("Unexpected native removal"));
+  admission.internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    const first = rollback();
+    expect(rollback()).toBe(first);
+    await first;
+    expect(originalMove).toHaveBeenCalledOnce();
+    expect(rm).not.toHaveBeenCalled();
+    expect(effect.complete().status).toBe("PINNED");
+    await expect(archive.rollBackServerImport("/unresolved/data")).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+  } finally {
+    rm.mockRestore();
+    vi.resetModules();
+  }
+});
 
 it("refuses standalone archive and rollback before unresolved native access when selected", async () => {
   vi.resetModules();

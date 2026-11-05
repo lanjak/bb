@@ -6,6 +6,7 @@ export {
   archiveExistingServerData,
   discardImportBackups,
   installImportedServerFiles,
+  internal_DO_NOT_USE_reserveServerImportRollback,
   mergeImportedManagedConfig,
   removeImportedServerFiles,
   rollBackServerImport,

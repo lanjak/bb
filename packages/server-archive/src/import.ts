@@ -563,6 +563,15 @@ export async function removeImportedServerFiles(
 ): Promise<void> {
   const effect = internal_DO_NOT_USE_beginManagedRootEffect("removeImportedServerFiles");
   try {
+    await effect.runOriginal(() => removeOriginalImportedServerFiles(args, effect));
+  } finally { effect.complete(); }
+}
+
+async function removeOriginalImportedServerFiles(
+  args: RemoveImportedServerFilesArgs,
+  effect?: ManagedRootEffect,
+): Promise<void> {
+  const run = <T>(body: () => Promise<T>): Promise<T> => effect === undefined ? body() : effect.runOriginal(body);
   const dataDir = resolve(args.dataDir);
   assertServerOwnedPaths(args.importedEntries, "Imported entry");
   for (const entry of args.importedEntries) {
@@ -571,13 +580,27 @@ export async function removeImportedServerFiles(
   const backupDir = join(dataDir, SERVER_IMPORT_BACKUP_DIR_NAME);
   for (const backup of await listBackupFiles(backupDir, null)) {
     const destination = resolveRelativePath(dataDir, backup);
-    await effect.runOriginal(() => mkdir(dirname(destination), { recursive: true }));
-    await effect.runOriginal(() => rename(resolveRelativePath(backupDir, backup), destination));
+    await run(() => mkdir(dirname(destination), { recursive: true }));
+    await run(() => rename(resolveRelativePath(backupDir, backup), destination));
   }
-  await effect.runOriginal(() => rm(backupDir, { force: true, recursive: true }));
-  await effect.runOriginal(() => removeEmptyParentDirectories(dataDir, args.importedEntries));
-  await effect.runOriginal(() => removeServerImportJournalFile(dataDir));
-  } finally { effect.complete(); }
+  await run(() => rm(backupDir, { force: true, recursive: true }));
+  await run(() => removeEmptyParentDirectories(dataDir, args.importedEntries));
+  await run(() => removeServerImportJournalFile(dataDir));
+}
+
+export function internal_DO_NOT_USE_reserveServerImportRollback(
+  effect: ManagedRootEffect,
+  originalMove: () => { dataDir: string; importedEntries: readonly string[] | null } | null,
+): () => Promise<void> {
+  return effect.reserveOriginalCleanup(async () => {
+    const original = originalMove();
+    if (original === null) return;
+    if (original.importedEntries === null) {
+      await rollBackOriginalServerImport(original.dataDir);
+    } else {
+      await removeOriginalImportedServerFiles({ dataDir: original.dataDir, importedEntries: [...original.importedEntries] });
+    }
+  });
 }
 
 export async function rollBackServerImport(
