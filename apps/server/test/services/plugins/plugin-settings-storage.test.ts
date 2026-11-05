@@ -1,4 +1,5 @@
 import { createPluginUpdateJobs } from "../../../src/services/plugins/plugin-update-jobs.js";
+import * as managedAdmission from "@bb/config/file-lock";
 import {
   mkdtemp,
   mkdir,
@@ -110,6 +111,31 @@ describe("plugin settings + storage", () => {
   });
 
   describe("settings", () => {
+    it("refuses retained logging before logger and plugin log publication", async () => {
+      const rootDir = await writeFixturePluginRoot(workDir, {
+        id: "retained-log",
+        serverSource: `export default function plugin() {}`,
+      });
+      await service.installPath(rootDir);
+      const api = service.getApi("retained-log");
+      expect(api).toBeDefined();
+      if (!api) throw new Error("Missing retained plugin API");
+      api.log.info("original line");
+      const logPath = join(dataDir, "plugins", "retained-log", "logs", "plugin.log");
+      const original = await readFile(logPath, "utf8");
+      const logged = vi.spyOn(logger, "info");
+      const refused = new managedAdmission.ManagedRootAdmissionUnavailableError("retained log");
+      const admission = vi.spyOn(managedAdmission, "internal_DO_NOT_USE_assertManagedRootAdmission").mockImplementation(() => { throw refused; });
+      try {
+        expect(() => api.log.info("refused line")).toThrow(refused);
+        expect(logged).not.toHaveBeenCalled();
+        expect(await readFile(logPath, "utf8")).toBe(original);
+      } finally {
+        admission.mockRestore();
+        logged.mockRestore();
+      }
+    });
+
     async function installConfigurable(): Promise<void> {
       const rootDir = await writePlugin(workDir, {
         name: "bb-plugin-configurable",
