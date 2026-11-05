@@ -200,6 +200,8 @@ import type {
   PluginResolvedProviderEnvHealth,
 } from "./plugin-service-internal.js";
 import type { PluginMachineProviderBridge } from "./plugin-machine-provider-registry.js";
+import { registerPluginManagedGenerationControl } from "./plugin-service-internal.js";
+import { readVerifiedTunnelIngress } from "../connect-next/tunnel-ingress.js";
 import { fillPluginPresentation } from "./plugin-presentation.js";
 export type {
   PluginAgentToolContribution,
@@ -1342,7 +1344,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     }
   }
 
-  return {
+  const service: PluginService = {
     isBuiltin: isBuiltinPluginId,
 
     listThemes() {
@@ -2795,4 +2797,65 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       }
     },
   };
+
+  const consumedAttempts = new WeakMap<Request, Set<string>>();
+  registerPluginManagedGenerationControl(service, async (args) => {
+    const hasOwnerProof = (): boolean => {
+      if (args.incoming === null) return false;
+      const proof = readVerifiedTunnelIngress(args.incoming, args.request);
+      return (
+        proof !== null &&
+        proof.ownerPolicyDerived &&
+        proof.claims.kind === "session" &&
+        proof.claims.sub.length > 0 &&
+        proof.claims.sub.trim() === proof.claims.sub
+      );
+    };
+    const proofRefusal = {
+      ok: false as const,
+      status: 403 as const,
+      error: "managed generation requires verified owner ingress",
+    };
+    return withPluginOperationLock(REGISTRATION_MUTATION_KEY, async () => {
+      if (!hasOwnerProof()) return proofRefusal;
+      let attempts = consumedAttempts.get(args.request);
+      if (attempts === undefined) {
+        attempts = new Set<string>();
+        consumedAttempts.set(args.request, attempts);
+      }
+      if (attempts.has(args.intent.attemptKey) || attempts.size >= 128) {
+        return {
+          ok: false as const,
+          status: 409 as const,
+          error: "managed generation attempt already consumed or limit reached",
+        };
+      }
+      attempts.add(args.intent.attemptKey);
+      return withLifecycleLock(args.pluginId, async () => {
+        if (!hasOwnerProof()) return proofRefusal;
+        const installed = getInstalledPlugin(deps.db, args.pluginId);
+        if (!hasOwnerProof()) return proofRefusal;
+        if (installed === undefined) {
+          return {
+            ok: false as const,
+            status: 422 as const,
+            error: `unknown plugin "${args.pluginId}"`,
+          };
+        }
+        if (loaded.has(args.pluginId)) {
+          return {
+            ok: false as const,
+            status: 409 as const,
+            error: "managed generation cannot replace a running plugin",
+          };
+        }
+        return {
+          ok: false as const,
+          status: 409 as const,
+          error: "managed generation native admission is unavailable",
+        };
+      });
+    });
+  });
+  return service;
 }
