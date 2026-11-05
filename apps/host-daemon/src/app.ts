@@ -830,6 +830,7 @@ export async function createHostDaemonApp(
   startupCleanups.push(() => pluginHostManager.shutdown());
   startupEffect.assertOriginalAtDequeue();
   const desktopBrowserBroker = await startDesktopBrowserBroker({
+    managedRootEffect: startupEffect,
     dataDir: options.dataDir,
     hostId: options.hostId,
     serverUrl: options.serverUrl,

@@ -7,6 +7,7 @@ import {
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/file-lock";
 import { WebSocket, WebSocketServer } from "ws";
 import {
   DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE,
@@ -50,7 +51,22 @@ export async function startDesktopBrowserBroker(options: {
   serverUrl: string;
   onChanged: (event: DesktopBrowserChanged) => void;
   requestTimeoutMs?: number;
+  managedRootEffect?: ManagedRootEffect;
 }): Promise<DesktopBrowserBroker> {
+  const effect = options.managedRootEffect ?? internal_DO_NOT_USE_beginManagedRootEffect("desktop browser broker");
+  effect.assertOriginalAtDequeue();
+  const cleanups: Array<() => Promise<void>> = [];
+  const cleanup = effect.reserveOriginalCleanup(async () => {
+    let failed = false;
+    let primary: unknown;
+    for (const close of [...cleanups].reverse()) {
+      try { await close(); } catch (error) {
+        if (!failed) { failed = true; primary = error; }
+      }
+    }
+    if (failed) throw primary;
+  });
+  try {
   const token = randomBytes(32).toString("hex");
   const serverUrl = new URL(options.serverUrl).origin;
   let connected = false;
@@ -61,10 +77,15 @@ export async function startDesktopBrowserBroker(options: {
   const server = createServer((_request, response) => {
     response.writeHead(404).end();
   });
+  cleanups.push(() => new Promise<void>((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  }));
+  effect.assertOriginalAtDequeue();
   const websocketServer = new WebSocketServer({
     noServer: true,
     maxPayload: 18 * 1024 * 1024,
   });
+  cleanups.push(() => new Promise<void>((resolve) => { websocketServer.close(() => resolve()); }));
 
   function removePeer(peer: Peer): void {
     peers.delete(peer);
@@ -237,13 +258,14 @@ export async function startDesktopBrowserBroker(options: {
       });
     });
   });
-  await new Promise<void>((resolve, reject) => {
+  await effect.runOriginal(() => new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       server.off("error", reject);
       resolve();
     });
-  });
+  }));
+  effect.assertOriginalAtDequeue();
   const address = server.address();
   if (!address || typeof address === "string")
     throw new Error("Desktop broker missing loopback address");
@@ -259,19 +281,24 @@ export async function startDesktopBrowserBroker(options: {
     DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE,
   );
   const temporaryPath = `${descriptorPath}.${randomUUID()}.tmp`;
-  try {
-    await mkdir(options.dataDir, { recursive: true, mode: 0o700 });
-    await writeFile(temporaryPath, JSON.stringify(descriptor), {
+  let ownsTemporary = false;
+  let ownsDescriptor = false;
+  cleanups.push(async () => {
+    if (ownsTemporary) await rm(temporaryPath, { force: true });
+  });
+  cleanups.push(async () => {
+    if (ownsDescriptor) await rm(descriptorPath, { force: true });
+  });
+    await effect.runOriginal(() => mkdir(options.dataDir, { recursive: true, mode: 0o700 }));
+    const encoded = JSON.stringify(descriptor);
+    await effect.runOriginal(() => writeFile(temporaryPath, encoded, {
       mode: 0o600,
       flag: "wx",
-    });
-    await rename(temporaryPath, descriptorPath);
-  } catch (error) {
-    await rm(temporaryPath, { force: true });
-    websocketServer.close();
-    server.close();
-    throw error;
-  }
+    }));
+    ownsTemporary = true;
+    await effect.runOriginal(() => rename(temporaryPath, descriptorPath));
+    ownsTemporary = false;
+    ownsDescriptor = true;
 
   function request<C extends DesktopBrowserCommand>(
     command: C,
@@ -338,13 +365,14 @@ export async function startDesktopBrowserBroker(options: {
       closed = true;
       connected = false;
       for (const peer of peers) disconnect(peer);
-      await rm(descriptorPath, { force: true });
-      await new Promise<void>((resolve) =>
-        websocketServer.close(() => resolve()),
-      );
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
+      try { await cleanup(); } finally {
+        if (options.managedRootEffect === undefined) effect.complete();
+      }
     },
   };
+  } catch (primary) {
+    try { await cleanup(); } catch {}
+    if (options.managedRootEffect === undefined) effect.complete();
+    throw primary;
+  }
 }
