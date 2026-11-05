@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -606,6 +607,7 @@ process.once("disconnect", () => void dispose());
 if (!process.connected) void dispose();
 
 try {
+  internal_DO_NOT_USE_assertManagedRootAdmission("pluginHostWorker.artifactImport");
   const imported = await import(pathToFileURL(artifactPath).href);
   if (disposing) process.exit(0);
   entry = parseEntry(imported.default);

@@ -8,7 +8,7 @@ import {
   writeServerImportFile,
   writeServerMovedFile,
 } from "@bb/server-archive";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { writeIncomingMoveState } from "./move-state.js";
 import {
   ACTIVATION_TOKEN,
@@ -31,6 +31,19 @@ import {
 } from "./test-fixture.js";
 
 registerServerMoveFixtureCleanup();
+
+it("refuses selected server move cleanup before reading or deleting an old copy", async () => {
+  vi.resetModules();
+  const admission = await import("@bb/config/file-lock");
+  const { ServerMoveService, defaultServerMoveServiceOptions } = await import("./service.js");
+  admission.internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    const service = new ServerMoveService({ ...defaultServerMoveServiceOptions(), dataDir: "/unresolved/data", hostId: "host_test", serverUrl: "http://localhost", hostKey: "test", serverHeaders: {}, hostDaemonPort: null, autoUpdate: false, supervised: false, logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }, isServerSessionOpen: () => false, getShellEnv: () => ({}), emitProgress: vi.fn(), requestShutdown: vi.fn(async () => {}) });
+    await expect(service.deleteOldCopy()).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+  } finally {
+    vi.resetModules();
+  }
+});
 
 describe("ServerMoveService.prepare", () => {
   it("installs bb-app, imports the archive, keeps this machine's credentials, starts the pending server, and answers a repeated prepare with the same server", async () => {

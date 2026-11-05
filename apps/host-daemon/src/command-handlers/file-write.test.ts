@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { makeTempDir } from "@bb/test-helpers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   CommandDispatchError,
   type CommandOf,
@@ -40,6 +40,30 @@ async function captureWriteError(
 }
 
 describe("writeHostFile", () => {
+  it("rejects enrollment during target resolution before publishing or creating parents", async () => {
+    vi.resetModules();
+    const admission = await import("@bb/config/file-lock");
+    const { writeHostFile: write } = await import("./file-write.js");
+    let resolveTarget!: (value: string) => void;
+    const resolved = new Promise<string>((resolve) => { resolveTarget = resolve; });
+    const realpath = vi.spyOn(fs, "realpath").mockReturnValue(resolved);
+    const mkdir = vi.spyOn(fs, "mkdir").mockRejectedValue(new Error("Unexpected mkdir"));
+    const stat = vi.spyOn(fs, "stat").mockRejectedValue(new Error("Unexpected publication"));
+    try {
+      const pending = write(writeCommand({ path: "/unresolved/note", createParents: true }));
+      admission.internal_DO_NOT_USE_enrollManagedRoot({});
+      resolveTarget("/unresolved/note");
+      await expect(pending).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+      expect(mkdir).not.toHaveBeenCalled();
+      expect(stat).not.toHaveBeenCalled();
+    } finally {
+      realpath.mockRestore();
+      mkdir.mockRestore();
+      stat.mockRestore();
+      vi.resetModules();
+    }
+  });
+
   it("writes a new file unconditionally and returns its hash", async () => {
     const dir = await makeTempDir("bb-file-write-");
     const target = path.join(dir, "note.md");

@@ -3,13 +3,31 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { makeDispatchOptions } from "../test/command/dispatch-helpers.js";
 import {
   dispatchCommand,
   dispatchOnlineRpcCommand,
 } from "./command-dispatch.js";
 import { RuntimeManager } from "./runtime-manager.js";
+
+it("refuses direct selected thread deletion before process termination or removal", async () => {
+  vi.resetModules();
+  const admission = await import("@bb/config/file-lock");
+  const { deleteThreadStorage } = await import("./command-handlers/thread.js");
+  const processes = await import("@bb/process-utils");
+  const kill = vi.spyOn(processes, "killProcessesWithCwdUnder").mockRejectedValue(new Error("Unexpected process termination"));
+  const rm = vi.spyOn(fs, "rm").mockRejectedValue(new Error("Unexpected removal"));
+  admission.internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    await expect(deleteThreadStorage({ type: "thread.storage.delete", threadId: "thr_test", environmentId: "env_test" }, makeDispatchOptions({ threadStorageRootPath: "/unresolved/storage" }))).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+    expect(kill).not.toHaveBeenCalled();
+    expect(rm).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  }
+});
 
 it.for(["thread deletion", "orphan removal"] as const)(
   "%s stops processes in nested thread storage before removing files and preserves neighboring processes",

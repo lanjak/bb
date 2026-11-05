@@ -22,6 +22,18 @@ import {
 
 const DEFAULT_TERMINAL_START = { mode: "shell" } as const;
 
+it("refuses selected PTY helper mutation before filesystem discovery", async () => {
+  vi.resetModules();
+  const admission = await import("@bb/config/file-lock");
+  const terminal = await import("./terminal-manager.js");
+  admission.internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    expect(() => terminal.ensureNodePtySpawnHelperExecutable({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() })).toThrow(admission.ManagedRootAdmissionUnavailableError);
+  } finally {
+    vi.resetModules();
+  }
+});
+
 interface ResizeCall {
   cols: number;
   rows: number;

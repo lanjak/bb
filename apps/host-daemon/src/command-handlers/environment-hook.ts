@@ -1,3 +1,4 @@
+import { internal_DO_NOT_USE_beginManagedRootEffect } from "@bb/config/file-lock";
 import type {
   CommandDispatchOptions,
   CommandOf,
@@ -43,6 +44,8 @@ export async function runEnvironmentHook(
   command: CommandOf<"environment.hook.run">,
   options: CommandDispatchOptions,
 ): Promise<Record<string, never>> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("runEnvironmentHook");
+  try {
   const active = controllers(options);
   const existing = active.get(command.operationId);
   if (existing === "cancelled")
@@ -59,8 +62,8 @@ export async function runEnvironmentHook(
     throw new Error("Environment hook outcome is unknown after daemon restart");
   const controller = new AbortController();
   const outcome: HookOutcome = { terminationUnverified: false, active: true };
-  const done = Promise.resolve().then(
-    async (): Promise<Record<string, never>> => {
+  const done = effect.runOriginal(() => Promise.resolve().then(
+    () => effect.runOriginal(async (): Promise<Record<string, never>> => {
       const run = command.kind === "setup" ? runSetupScript : runTeardownScript;
       try {
         await run({
@@ -90,8 +93,8 @@ export async function runEnvironmentHook(
         outcome.active = false;
       }
       return {};
-    },
-  );
+    }),
+  ));
   active.set(command.operationId, {
     controller,
     done,
@@ -99,7 +102,10 @@ export async function runEnvironmentHook(
     path: command.path,
     kind: command.kind,
   });
-  return done;
+  return await done;
+  } finally {
+    effect.complete();
+  }
 }
 
 export async function cancelEnvironmentHooks(

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import { resolveDataDirSkillsRootPath } from "@bb/config/skill-storage-paths";
 import { getRelativeHostPathSegments } from "@bb/domain";
 import type { AgentRuntimeSkillRoot } from "@bb/agent-runtime";
@@ -213,9 +214,14 @@ function resolveStageRootPath(dataDir: string, catalogHash: string): string {
 export async function ensureDataDirSkillsRootPath(
   dataDir: string,
 ): Promise<string> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("ensureDataDirSkillsRootPath");
+  try {
   const dataDirSkillsRootPath = resolveDataDirSkillsRootPath(dataDir);
-  await fs.mkdir(dataDirSkillsRootPath, { recursive: true });
+  await effect.runOriginal(() => fs.mkdir(dataDirSkillsRootPath, { recursive: true }));
   return dataDirSkillsRootPath;
+  } finally {
+    effect.complete();
+  }
 }
 
 function normalizeRelativePath(relativePath: string): string {
@@ -304,7 +310,7 @@ async function walkSkillTree(args: WalkSkillTreeArgs): Promise<void> {
         depth: args.depth + 1,
         rootPath: args.rootPath,
         state: args.state,
-      });
+      }));
       continue;
     }
     if (!entryStat.isFile()) {
@@ -435,6 +441,9 @@ async function collectSkillTree(
       skillFilePath: args.skillFilePath,
     }),
   );
+  } finally {
+    effect.complete();
+  }
 }
 
 function storedTreeMemoKey(
@@ -448,14 +457,16 @@ export function scheduleSkillStoreGc(
   dataDir: string,
   logger: InjectedSkillsLogger,
 ): void {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("scheduleSkillStoreGc");
   if (scheduledSkillStoreGcs.has(dataDir)) {
+    effect.complete();
     return;
   }
   scheduledSkillStoreGcs.add(dataDir);
-  void runInSerialLane(skillStoreQueues, dataDir, () => {
+  void effect.runOriginal(() => runInSerialLane(skillStoreQueues, dataDir, () => effect.runOriginal(() => {
     scheduledSkillStoreGcs.delete(dataDir);
     return gcSkillStore(dataDir);
-  }).catch((error: unknown) => {
+  }))).finally(() => { scheduledSkillStoreGcs.delete(dataDir); effect.complete(); }).catch((error: unknown) => {
     logger.warn(
       {
         reason:
@@ -526,6 +537,9 @@ async function copyCollectedTree(args: StageTreeArgs): Promise<void> {
 export async function copyInjectedSkillSource(
   args: CopyInjectedSkillSourceArgs,
 ): Promise<void> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("cleanupInjectedSkillStagingDirs");
+  try {
+  internal_DO_NOT_USE_assertManagedRootAdmission("copyInjectedSkillSource");
   const tree = await collectSkillDirectory({
     boundaryPath: null,
     name: args.name,
@@ -635,20 +649,30 @@ async function isStageRootComplete(stageRootPath: string): Promise<boolean> {
 }
 
 async function writeStageRoot(args: WriteStageRootArgs): Promise<string> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("writeStageRoot");
+  let ownedTempRootPath: string | undefined;
+  const cleanup = effect.reserveOriginalCleanup(async () => {
+    if (ownedTempRootPath !== undefined) await fs.rm(ownedTempRootPath, { recursive: true, force: true });
+  });
+  let failed = false;
+  try {
   const stagingRootPath = resolveStagingRootPath(args.dataDir);
   const stageRootPath = resolveStageRootPath(args.dataDir, args.catalogHash);
   if (await isStageRootComplete(stageRootPath)) {
     return stageRootPath;
   }
 
-  await fs.mkdir(stagingRootPath, { recursive: true });
+  await effect.runOriginal(() => fs.mkdir(stagingRootPath, { recursive: true }));
   const tempRootPath = path.join(
     stagingRootPath,
     `.tmp-${args.catalogHash}-${process.pid}-${Date.now()}-${randomUUID()}`,
   );
 
-  try {
-    await fs.mkdir(path.join(tempRootPath, "skills"), { recursive: true });
+    await effect.runOriginal(async () => {
+      await fs.mkdir(tempRootPath);
+      ownedTempRootPath = tempRootPath;
+    });
+    await effect.runOriginal(() => fs.mkdir(path.join(tempRootPath, "skills"), { recursive: true }));
     for (const tree of args.trees) {
       if (tree.source.kind === "tree") {
         if (args.skillTreeTransport === undefined) {
@@ -683,11 +707,16 @@ async function writeStageRoot(args: WriteStageRootArgs): Promise<string> {
       isComplete: isStageRootComplete,
       tempRootPath,
     });
-  } finally {
-    await fs.rm(tempRootPath, { recursive: true, force: true });
-  }
-
   return stageRootPath;
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    try {
+      if (failed) await cleanup().catch(() => undefined);
+      else await cleanup();
+    } finally { effect.complete(); }
+  }
 }
 
 function stageRootWriteKey(args: WriteStageRootArgs): string {
@@ -695,17 +724,22 @@ function stageRootWriteKey(args: WriteStageRootArgs): string {
 }
 
 async function writeStageRootOnce(args: WriteStageRootArgs): Promise<string> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("writeStageRootOnce");
+  try {
   const key = stageRootWriteKey(args);
   const pending = pendingStageRootWrites.get(key);
   if (pending) {
     return pending;
   }
 
-  const write = writeStageRoot(args).finally(() => {
+  const write = effect.runOriginal(() => writeStageRoot(args)).finally(() => {
     pendingStageRootWrites.delete(key);
   });
   pendingStageRootWrites.set(key, write);
-  return write;
+  return await write;
+  } finally {
+    effect.complete();
+  }
 }
 
 function buildSkillRoots(args: BuildSkillRootsArgs): AgentRuntimeSkillRoot[] {
@@ -806,6 +840,7 @@ async function isStoredTreeComplete(treeRootPath: string): Promise<boolean> {
 }
 
 async function touchStoredTree(treeRootPath: string): Promise<void> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("touchStoredTree");
   await fs.writeFile(path.join(treeRootPath, STORE_LAST_USED_MARKER), "");
 }
 
@@ -855,10 +890,10 @@ async function gcSkillStore(dataDir: string): Promise<void> {
     evictionCandidates
       .slice(Math.max(0, evictionCandidates.length - removalCount))
       .map((entry) =>
-        fs.rm(path.join(storeRootPath, entry.name), {
+        { internal_DO_NOT_USE_assertManagedRootAdmission("gcSkillStore.remove"); return fs.rm(path.join(storeRootPath, entry.name), {
           recursive: true,
           force: true,
-        }),
+        }); },
       ),
   );
 }
@@ -962,6 +997,9 @@ async function pullTreeIntoStore(args: {
   skillTreeTransport: SkillTreeTransport;
   treeHash: string;
 }): Promise<string> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("ensureStoredSkillTree");
+  try {
+  internal_DO_NOT_USE_assertManagedRootAdmission("ensureStoredSkillTree");
   const manifest = await args.skillTreeTransport.fetchManifest(args.treeHash);
   const files = validatedManifestFiles(manifest, args.treeHash);
 
@@ -1082,16 +1120,19 @@ export async function ensureStoredSkillTree(args: {
   if (pending) {
     return pending;
   }
-  const pull = runInSerialLane(skillStoreQueues, args.dataDir, async () => {
+  const pull = effect.runOriginal(() => runInSerialLane(skillStoreQueues, args.dataDir, () => effect.runOriginal(async () => {
     const treeRootPath = resolveStoredTreeRootPath(args.dataDir, args.treeHash);
     if (await isStoredTreeComplete(treeRootPath)) {
       await touchStoredTree(treeRootPath);
       return path.join(treeRootPath, STORE_CONTENT_DIR);
     }
     return pullTreeIntoStore(args);
-  }).finally(() => pendingSkillTreePulls.delete(key));
+  }))).finally(() => pendingSkillTreePulls.delete(key));
   pendingSkillTreePulls.set(key, pull);
-  return pull;
+  return await pull;
+  } finally {
+    effect.complete();
+  }
 }
 
 async function collectInjectedSkillTrees(
@@ -1188,6 +1229,7 @@ async function stageCollectedTrees(
   logger: InjectedSkillsLogger,
   trees: CollectedSkillTree[],
 ): Promise<StagedInjectedSkills> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("stageInjectedSkillSources");
   const sortedTrees = firstPerIdentity(trees.sort(sortTreesByName), (tree) =>
     JSON.stringify([
       tree.source.name,
@@ -1312,11 +1354,11 @@ export async function cleanupInjectedSkillStagingDirs(
         if (Date.now() - mtimeMs < STALE_TEMP_STAGING_DIR_AGE_MS) {
           return;
         }
-        await fs.rm(entryPath, { recursive: true, force: true });
+        await effect.runOriginal(() => fs.rm(entryPath, { recursive: true, force: true }));
         return;
       }
       if (!entry.isDirectory()) {
-        await fs.rm(entryPath, { recursive: true, force: true });
+        await effect.runOriginal(() => fs.rm(entryPath, { recursive: true, force: true }));
         return;
       }
       if (keep.has(entry.name)) {
@@ -1329,7 +1371,7 @@ export async function cleanupInjectedSkillStagingDirs(
         },
         "Removing unused injected skill staging directory",
       );
-      await fs.rm(entryPath, {
+      await effect.runOriginal(() => fs.rm(entryPath, {
         recursive: true,
         force: true,
       });

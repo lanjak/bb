@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/file-lock";
 import { isFsErrorWithCode } from "./fs-errors.js";
 import {
   publishFileWithoutReplacing,
@@ -53,9 +54,10 @@ function writtenResult(contents: Buffer): ReplaceFileResult {
 async function publishTemporaryFile(
   args: ReplaceFileArgs,
   temporaryPath: string,
+  effect: ManagedRootEffect,
 ): Promise<ReplaceFileResult> {
   if (args.expectedSha256 === null) {
-    if (!(await publishFileWithoutReplacing(temporaryPath, args.path))) {
+    if (!(await effect.runOriginal(() => publishFileWithoutReplacing(temporaryPath, args.path)))) {
       return {
         outcome: "conflict",
         currentSha256: await readCurrentSha256(args.path),
@@ -67,13 +69,31 @@ async function publishTemporaryFile(
   if (conflict !== null) {
     return conflict;
   }
-  await fs.rename(temporaryPath, args.path);
+  await effect.runOriginal(() => fs.rename(temporaryPath, args.path));
   return writtenResult(args.contents);
 }
 
 export async function replaceFile(
   args: ReplaceFileArgs,
 ): Promise<ReplaceFileResult> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("replaceFile");
+  try {
+    return await effect.runOriginal(() => replaceAdmittedFile(args, effect));
+  } finally {
+    effect.complete();
+  }
+}
+
+async function replaceAdmittedFile(
+  args: ReplaceFileArgs,
+  effect: ManagedRootEffect,
+): Promise<ReplaceFileResult> {
+  const temporaryPath = path.join(path.dirname(args.path), `.bb-write-${randomUUID()}`);
+  let temporaryStarted = false;
+  const cleanup = effect.reserveOriginalCleanup(async () => {
+    if (temporaryStarted) await fs.rm(temporaryPath, { force: true });
+  });
+  try {
   let currentContents: Buffer | null = null;
   let currentMode: number | undefined;
   try {
@@ -102,13 +122,9 @@ export async function replaceFile(
       ? (preservedMode ?? requestedMode)
       : (requestedMode ?? preservedMode)) ??
     ({ kind: "create", mode: DEFAULT_CREATE_MODE } as const);
-  const temporaryPath = path.join(
-    path.dirname(args.path),
-    `.bb-write-${randomUUID()}`,
-  );
-  try {
     try {
-      await writeVerifiedFile({
+      await effect.runOriginal(() => {
+        return writeVerifiedFile({
         destinationPath: temporaryPath,
         durable: true,
         expected: {
@@ -119,7 +135,9 @@ export async function replaceFile(
         label: `File ${args.path}`,
         mode,
         source: [args.contents],
+        });
       });
+      temporaryStarted = true;
     } catch (error) {
       if (
         currentContents !== null &&
@@ -127,13 +145,13 @@ export async function replaceFile(
         (isFsErrorWithCode(error, "EACCES") ||
           isFsErrorWithCode(error, "EPERM"))
       ) {
-        await fs.writeFile(args.path, args.contents);
+        await effect.runOriginal(() => fs.writeFile(args.path, args.contents));
         return writtenResult(args.contents);
       }
       throw error;
     }
-    return await publishTemporaryFile(args, temporaryPath);
+    return await publishTemporaryFile(args, temporaryPath, effect);
   } finally {
-    await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+    await cleanup().catch(() => undefined);
   }
 }

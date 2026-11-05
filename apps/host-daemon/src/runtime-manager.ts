@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   createAgentRuntime,
   type AgentRuntime,
@@ -890,6 +891,7 @@ export class RuntimeManager {
   async ensureProviderMaintenanceRuntime(args: {
     dataDir: string;
   }): Promise<AgentRuntime> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("ensureProviderMaintenanceRuntime");
     return this.currentProviderMaintenanceSlot(args).runtime;
   }
 
@@ -897,6 +899,7 @@ export class RuntimeManager {
     args: { dataDir: string },
     request: (runtime: AgentRuntime) => Promise<TResult>,
   ): Promise<TResult> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("withProviderMaintenanceRuntime");
     this.clearProviderMaintenanceIdleTimer();
     const slot = this.currentProviderMaintenanceSlot(args);
     slot.activeRequests += 1;
@@ -911,6 +914,7 @@ export class RuntimeManager {
   }
 
   async ensureEnvironment(args: EnsureEnvironmentArgs): Promise<RuntimeEntry> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("ensureEnvironment");
     const pending = this.pendingEnvironmentEnsures.get(args.environmentId);
     if (pending) {
       await pending;
@@ -929,6 +933,7 @@ export class RuntimeManager {
   private async ensureEnvironmentOnce(
     args: EnsureEnvironmentArgs,
   ): Promise<RuntimeEntry> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("ensureEnvironmentOnce");
     const skillConfig = await this.resolveRuntimeSkillConfig(args);
     const existing = this.entries.get(args.environmentId);
     if (existing) {

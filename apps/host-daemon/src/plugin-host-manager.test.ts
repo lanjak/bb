@@ -24,6 +24,21 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...actual, rm: vi.fn(actual.rm) };
 });
 
+it("refuses selected plugin calls before artifact acquisition", async () => {
+  vi.resetModules();
+  const admission = await import("@bb/config/file-lock");
+  const { PluginHostManager: Manager } = await import("./plugin-host-manager.js");
+  const fetchArtifact = vi.fn(async () => artifactBody(artifactSource));
+  const manager = new Manager({ dataDir: "/unresolved/data", logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() }, fetchArtifact });
+  admission.internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    await expect(manager.call(callCommand())).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+    expect(fetchArtifact).not.toHaveBeenCalled();
+  } finally {
+    vi.resetModules();
+  }
+});
+
 async function* artifactBody(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
   yield bytes;
 }

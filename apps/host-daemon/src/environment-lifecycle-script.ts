@@ -1,4 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
+import { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_assertManagedRootAdmission, ManagedRootAdmissionUnavailableError, type ManagedRootEffect } from "@bb/config/file-lock";
 import {
   DEFAULT_ENV_SETUP_SCRIPT_NAME,
   DEFAULT_ENV_TEARDOWN_SCRIPT_NAME,
@@ -158,9 +159,20 @@ async function resolveLifecycleScriptPath(
   return scriptPath;
 }
 
-async function runLifecycleScript(
+async function runLifecycleScript(args: RunLifecycleScriptArgs): Promise<{ ran: boolean }> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("runLifecycleScript");
+  try {
+    return await effect.runOriginal(() => runAdmittedLifecycleScript(args, effect));
+  } finally {
+    effect.complete();
+  }
+}
+
+async function runAdmittedLifecycleScript(
   args: RunLifecycleScriptArgs,
+  effect: ManagedRootEffect,
 ): Promise<{ ran: boolean }> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("runTeardownScript");
   throwIfProvisionAborted(args.signal);
   const scriptPath = await resolveLifecycleScriptPath(
     args.workspacePath,
@@ -180,6 +192,7 @@ async function runLifecycleScript(
     },
     true,
   );
+  effect.assertOriginalAtDequeue();
   const windowsBashPath =
     process.platform === "win32"
       ? await resolveWindowsBashPath(env, args.signal)
@@ -208,6 +221,7 @@ async function runLifecycleScript(
           ...env,
           PATH: [...command.pathPrefix, env.PATH ?? ""].join(path.delimiter),
         };
+  effect.assertOriginalAtDequeue();
   const child = spawnPortableOutputProcess({
     command: command.command,
     args: command.args,
@@ -389,6 +403,7 @@ export async function runTeardownScript(
       scriptName: DEFAULT_ENV_TEARDOWN_SCRIPT_NAME,
     });
   } catch (error) {
+    if (error instanceof ManagedRootAdmissionUnavailableError) throw error;
     if (args.signal?.aborted) throw error;
     if (!failureReported) {
       emitStep({

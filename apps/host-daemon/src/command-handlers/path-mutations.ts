@@ -1,3 +1,4 @@
+import { internal_DO_NOT_USE_beginManagedRootEffect } from "@bb/config/file-lock";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
@@ -74,70 +75,99 @@ async function requireDestinationWithin(
 export async function mkdirHostPath(
   command: CommandOf<"host.mkdir">,
 ): Promise<HostDaemonOnlineRpcResult<"host.mkdir">> {
-  assertAbsolute(command.path, "Path");
-  const root = await requireRoot(command.rootPath);
-  const target = await resolveWriteTarget(command.path, command.path);
-  if (root !== null && !isPathWithinDirectory(root, target.writePath)) {
-    throw new CommandDispatchError(
-      "invalid_path",
-      `Path "${command.path}" escapes root`,
-    );
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("mkdirHostPath");
+  const run = async (): Promise<HostDaemonOnlineRpcResult<"host.mkdir">> => {
+    assertAbsolute(command.path, "Path");
+    const root = await requireRoot(command.rootPath);
+    const target = await resolveWriteTarget(command.path, command.path);
+    if (root !== null && !isPathWithinDirectory(root, target.writePath)) {
+      throw new CommandDispatchError(
+        "invalid_path",
+        `Path "${command.path}" escapes root`,
+      );
+    }
+    effect.assertOriginalAtDequeue();
+    await effect.runOriginal(() => fs.mkdir(target.writePath, { recursive: command.recursive }));
+    return { ok: true };
+  };
+  try {
+    return await effect.runOriginal(run);
+  } finally {
+    effect.complete();
   }
-  await fs.mkdir(target.writePath, { recursive: command.recursive });
-  return { ok: true };
 }
 
 export async function moveHostPath(
   command: CommandOf<"host.move_path">,
 ): Promise<HostDaemonOnlineRpcResult<"host.move_path">> {
-  const { target: source } = await requireExistingWithin(
-    command.sourcePath,
-    command.rootPath,
-  );
-  const destination = await requireDestinationWithin(
-    command.destinationPath,
-    command.rootPath,
-  );
-  try {
-    await fs.lstat(destination);
-    throw new CommandDispatchError(
-      "path_exists",
-      `Destination already exists: ${command.destinationPath}`,
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("moveHostPath");
+  const run = async (): Promise<HostDaemonOnlineRpcResult<"host.move_path">> => {
+    const { target: source } = await requireExistingWithin(
+      command.sourcePath,
+      command.rootPath,
     );
-  } catch (error) {
-    if (
-      !(error instanceof Error) ||
-      !("code" in error) ||
-      error.code !== "ENOENT"
-    ) {
-      throw error;
+    const destination = await requireDestinationWithin(
+      command.destinationPath,
+      command.rootPath,
+    );
+    try {
+      await fs.lstat(destination);
+      throw new CommandDispatchError(
+        "path_exists",
+        `Destination already exists: ${command.destinationPath}`,
+      );
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !("code" in error) ||
+        error.code !== "ENOENT"
+      ) {
+        throw error;
+      }
     }
+    effect.assertOriginalAtDequeue();
+    await effect.runOriginal(() => fs.rename(source, destination));
+    return { ok: true };
+  };
+  try {
+    return await effect.runOriginal(run);
+  } finally {
+    effect.complete();
   }
-  await fs.rename(source, destination);
-  return { ok: true };
 }
 
 export async function removeHostPath(
   command: CommandOf<"host.remove_path">,
 ): Promise<HostDaemonOnlineRpcResult<"host.remove_path">> {
-  const { target, root } = await requireExistingWithin(
-    command.path,
-    command.rootPath,
-  );
-  if (root !== null && target === root) {
-    throw new CommandDispatchError(
-      "invalid_path",
-      "Cannot remove the declared root",
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("removeHostPath");
+  const run = async (): Promise<HostDaemonOnlineRpcResult<"host.remove_path">> => {
+    const { target, root } = await requireExistingWithin(
+      command.path,
+      command.rootPath,
     );
+    if (root !== null && target === root) {
+      throw new CommandDispatchError(
+        "invalid_path",
+        "Cannot remove the declared root",
+      );
+    }
+    const targetInfo = await fs.lstat(target);
+    if (targetInfo.isDirectory() && command.recursive) {
+      effect.assertOriginalAtDequeue();
+      await effect.runOriginal(() => killProcessesWithCwdUnder({ directories: [target] }));
+    }
+    if (targetInfo.isDirectory() && !command.recursive) {
+      effect.assertOriginalAtDequeue();
+      await effect.runOriginal(() => fs.rmdir(target));
+    } else {
+      effect.assertOriginalAtDequeue();
+      await effect.runOriginal(() => fs.rm(target, { recursive: command.recursive, force: false }));
+    }
+    return { ok: true };
+  };
+  try {
+    return await effect.runOriginal(run);
+  } finally {
+    effect.complete();
   }
-  const targetInfo = await fs.lstat(target);
-  if (targetInfo.isDirectory() && command.recursive) {
-    await killProcessesWithCwdUnder({ directories: [target] });
-  }
-  if (targetInfo.isDirectory() && !command.recursive) {
-    await fs.rmdir(target);
-  } else {
-    await fs.rm(target, { recursive: command.recursive, force: false });
-  }
-  return { ok: true };
 }

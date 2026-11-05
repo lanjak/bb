@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { makeTempDir } from "@bb/test-helpers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   archiveExistingServerData,
   discardImportBackups,
@@ -33,6 +33,19 @@ import {
   SERVER_OWNED_FIXTURE_PATHS,
   writeFixtureFile,
 } from "./data-dir-fixtures.js";
+
+it("refuses standalone archive and rollback before unresolved native access when selected", async () => {
+  vi.resetModules();
+  const admission = await import("@bb/config/file-lock");
+  const archive = await import("../src/import.js");
+  admission.internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    await expect(archive.archiveExistingServerData({ dataDir: "/unresolved/data", now: 0 })).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+    await expect(archive.rollBackServerImport("/unresolved/data")).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+  } finally {
+    vi.resetModules();
+  }
+});
 
 async function writeDataFile(
   dataDir: string,

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import fs, { type FileHandle } from "node:fs/promises";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/file-lock";
 import { isFsErrorWithCode } from "./fs-errors.js";
 
 export interface VerifiedFileExpectation {
@@ -45,13 +46,14 @@ function assertWithinLimits(
 async function writeFully(
   handle: FileHandle,
   chunk: Uint8Array,
+  effect: ManagedRootEffect,
 ): Promise<void> {
   for (let offset = 0; offset < chunk.byteLength; ) {
-    const { bytesWritten } = await handle.write(
+    const { bytesWritten } = await effect.runOriginal(() => handle.write(
       chunk,
       offset,
       chunk.byteLength - offset,
-    );
+    ));
     if (bytesWritten === 0) {
       throw new Error("File write made no progress");
     }
@@ -73,7 +75,13 @@ export async function writeVerifiedFile(args: {
   mode: VerifiedFileMode;
   source: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
 }): Promise<WrittenFile> {
-  const handle = await fs.open(args.destinationPath, "wx", args.mode.mode);
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("writeVerifiedFile");
+  let handle: FileHandle | undefined;
+  const close = effect.reserveOriginalCleanup(async () => { if (handle !== undefined) await handle.close(); });
+  const remove = effect.reserveOriginalCleanup(async () => { if (handle !== undefined) await fs.rm(args.destinationPath, { force: true }); });
+  try {
+  handle = await effect.runOriginal(() => fs.open(args.destinationPath, "wx", args.mode.mode));
+  const originalHandle = handle;
   const hash = createHash("sha256");
   let sizeBytes = 0;
   try {
@@ -81,7 +89,7 @@ export async function writeVerifiedFile(args: {
       sizeBytes += chunk.byteLength;
       assertWithinLimits(args.label, args.expected, sizeBytes);
       hash.update(chunk);
-      await writeFully(handle, chunk);
+      await writeFully(originalHandle, chunk, effect);
     }
     if (
       args.expected.sizeBytes !== null &&
@@ -98,17 +106,27 @@ export async function writeVerifiedFile(args: {
       );
     }
     if (args.mode.kind === "exact") {
-      await handle.chmod(args.mode.mode);
+      await effect.runOriginal(() => originalHandle.chmod(args.mode.mode));
     }
     if (args.durable) {
-      await handle.sync();
+      await effect.runOriginal(() => originalHandle.sync());
     }
-    await handle.close();
+    await close();
+    handle = undefined;
+    await remove();
     return { sha256, sizeBytes };
   } catch (error) {
-    await handle.close().catch(() => undefined);
-    await fs.rm(args.destinationPath, { force: true });
+    await close().catch(() => undefined);
+    await remove().catch(() => undefined);
     throw error;
+  }
+  } finally {
+    try {
+      await close().catch(() => undefined);
+      await remove().catch(() => undefined);
+    } finally {
+      effect.complete();
+    }
   }
 }
 
@@ -144,8 +162,12 @@ export async function publishFileWithoutReplacing(
   sourcePath: string,
   destinationPath: string,
 ): Promise<boolean> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("publishFileWithoutReplacing");
+  let copyStarted = false;
+  const cleanup = effect.reserveOriginalCleanup(async () => { if (copyStarted) await fs.rm(destinationPath, { force: true }); });
   try {
-    await fs.link(sourcePath, destinationPath);
+  try {
+    await effect.runOriginal(() => fs.link(sourcePath, destinationPath));
     return true;
   } catch (error) {
     if (isFsErrorWithCode(error, "EEXIST")) return false;
@@ -158,12 +180,18 @@ export async function publishFileWithoutReplacing(
     }
   }
   try {
-    await fs.copyFile(sourcePath, destinationPath, fs.constants.COPYFILE_EXCL);
+    await effect.runOriginal(() => { copyStarted = true; return fs.copyFile(sourcePath, destinationPath, fs.constants.COPYFILE_EXCL); });
+    copyStarted = false;
     return true;
   } catch (error) {
     if (isFsErrorWithCode(error, "EEXIST")) return false;
-    await fs.rm(destinationPath, { force: true }).catch(() => undefined);
+    await cleanup().catch(() => undefined);
     throw error;
+  }
+  } finally {
+    copyStarted = false;
+    await cleanup();
+    effect.complete();
   }
 }
 

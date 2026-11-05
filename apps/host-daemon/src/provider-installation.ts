@@ -1,4 +1,5 @@
 import { PassThrough, type Readable } from "node:stream";
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   prepareHostPtyCommand,
   hostToolchain,
@@ -100,6 +101,7 @@ export function streamProviderInstallation(args: {
   env?: NodeJS.ProcessEnv;
   processSpawner?: ProviderInstallationProcessSpawner;
 }): ReadableStream<Uint8Array> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("streamProviderInstallation");
   if (activeProviderId !== null) {
     throw new ProviderInstallationInProgressError(activeProviderId);
   }
@@ -130,6 +132,7 @@ export function streamProviderInstallation(args: {
         command: args.plan.displayCommand,
       });
       try {
+        internal_DO_NOT_USE_assertManagedRootAdmission("providerInstallation.spawn");
         child = (
           args.processSpawner ?? createPtyProviderInstallationProcessSpawner()
         ).spawn({

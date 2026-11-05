@@ -17,6 +17,9 @@
     "test": "vitest run --config vitest.config.ts",
     "lint": "oxlint src"
   },
+  "dependencies": {
+    "@bb/config": "workspace:*"
+  },
   "devDependencies": {
     "@bb/tsconfig": "workspace:*",
     "tsrs": "0.18.0-ts7.1.0-dev.20260929",

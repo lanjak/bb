@@ -20,6 +20,21 @@ import {
 } from "./runtime-manager.js";
 import { createRuntimeShellEnvCache } from "./runtime-shell-env-cache.js";
 
+it("refuses selected maintenance runtime before invoking its factory", async () => {
+  vi.resetModules();
+  const admission = await import("@bb/config/file-lock");
+  const { RuntimeManager: Manager } = await import("./runtime-manager.js");
+  const createRuntime = vi.fn<NonNullable<NonNullable<ConstructorParameters<typeof Manager>[0]>["createRuntime"]>>();
+  const manager = new Manager({ createRuntime });
+  admission.internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    await expect(manager.ensureProviderMaintenanceRuntime({ dataDir: "/unresolved/data" })).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+    expect(createRuntime).not.toHaveBeenCalled();
+  } finally {
+    vi.resetModules();
+  }
+});
+
 type GetCurrentBranchArgs = Parameters<HostWorkspace["getCurrentBranch"]>;
 type GetLocalStateFingerprintResult = Awaited<
   ReturnType<HostWorkspace["getLocalStateSnapshot"]>

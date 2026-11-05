@@ -32,6 +32,20 @@ afterEach(async () => {
 });
 
 describe("core environment scripts", () => {
+  it("refuses setup and teardown before script discovery in selected mode", async () => {
+    vi.resetModules();
+    const admission = await import("@bb/config/file-lock");
+    const scripts = await import("./environment-lifecycle-script.js");
+    admission.internal_DO_NOT_USE_enrollManagedRoot({});
+    try {
+      for (const run of [scripts.runSetupScript, scripts.runTeardownScript]) {
+        await expect(Promise.resolve().then(() => run({ workspacePath: "/unresolved/workspace", timeoutMs: 100, env: {} }))).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+      }
+    } finally {
+      vi.resetModules();
+    }
+  });
+
   it.each(["setup", "teardown"] as const)(
     "supplies stdin EOF so %s continues to completion",
     async (kind) => {

@@ -35,6 +35,24 @@ interface WriteSkillArgs {
   rootPath: string;
 }
 
+it("refuses skill store startup and GC before queue or filesystem admission when selected", async () => {
+  vi.resetModules();
+  const admission = await import("@bb/config/file-lock");
+  const skills = await import("./injected-skills.js");
+  const mkdir = vi.spyOn(fs, "mkdir").mockRejectedValue(new Error("Unexpected mkdir"));
+  const readdir = vi.spyOn(fs, "readdir").mockRejectedValue(new Error("Unexpected readdir"));
+  admission.internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    await expect(skills.ensureDataDirSkillsRootPath("/unresolved/data")).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+    expect(() => skills.scheduleSkillStoreGc("/unresolved/data", { debug() {}, warn() {} })).toThrow(admission.ManagedRootAdmissionUnavailableError);
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(readdir).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  }
+});
+
 interface StageSourceArgs {
   dataDir: string;
   skillRootPath: string;

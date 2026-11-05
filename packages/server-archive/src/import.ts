@@ -9,6 +9,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { basename, dirname, join, posix, resolve } from "node:path";
+import { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   type BbAppManagedConfig,
   type BbAppManagedEnvFile,
@@ -161,6 +162,7 @@ async function assertStagedFiles(
   filesDir: string,
   manifest: ServerArchiveManifest,
 ): Promise<void> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("removeImportedServerFiles");
   for (const entry of manifest.entries) {
     const stats = await lstatOrNull(resolveRelativePath(filesDir, entry.path));
     if (stats?.isFile() !== true || stats.size !== entry.size) {
@@ -314,6 +316,7 @@ async function journalPlannedEntries(
 export async function installImportedServerFiles(
   args: InstallImportedServerFilesArgs,
 ): Promise<InstallImportedServerFilesResult> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("installImportedServerFiles");
   const dataDir = resolve(args.dataDir);
   const filesDir = join(
     resolve(args.stagingDir),
@@ -532,6 +535,7 @@ export async function removeImportedServerFiles(
 export async function rollBackServerImport(
   dataDir: string,
 ): Promise<ServerImportJournalFile | null> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("rollBackServerImport");
   const root = resolve(dataDir);
   const status = await readServerImportJournalStatus(root);
   if (status.kind === "none") {
@@ -564,6 +568,7 @@ export async function rollBackServerImport(
 }
 
 export async function discardImportBackups(dataDir: string): Promise<void> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("discardImportBackups");
   const backupDir = join(resolve(dataDir), SERVER_IMPORT_BACKUP_DIR_NAME);
   const stats = await lstatOrNull(backupDir);
   if (stats === null) {
@@ -588,6 +593,8 @@ function formatArchiveTimestamp(now: number): string {
 export async function archiveExistingServerData(
   args: ArchiveExistingServerDataArgs,
 ): Promise<string> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("archiveExistingServerData");
+  try {
   const dataDir = resolve(args.dataDir);
   const basePath = `${dataDir}.before-move-${formatArchiveTimestamp(args.now)}`;
   for (let attempt = 1; attempt <= MAX_ARCHIVE_NAME_ATTEMPTS; attempt += 1) {
@@ -597,7 +604,7 @@ export async function archiveExistingServerData(
       continue;
     }
     try {
-      await rename(dataDir, archivedPath);
+      await effect.runOriginal(() => rename(dataDir, archivedPath));
       return archivedPath;
     } catch (error) {
       if (!hasErrorCode(error, "EEXIST") && !hasErrorCode(error, "ENOTEMPTY")) {
@@ -606,4 +613,7 @@ export async function archiveExistingServerData(
     }
   }
   throw new Error(`Could not choose an archive path for ${dataDir}`);
+  } finally {
+    effect.complete();
+  }
 }

@@ -42,6 +42,20 @@ function createTreePayload(name: string, body: string) {
 }
 
 describe("install global skills", () => {
+  it("refuses selected installation before requesting skill content", async () => {
+    vi.resetModules();
+    const admission = await import("@bb/config/file-lock");
+    const { installGlobalSkills: install } = await import("./install-global-skills.js");
+    const fetchManifest = vi.fn();
+    admission.internal_DO_NOT_USE_enrollManagedRoot({});
+    try {
+      await expect(install({ type: "host.install_global_skills", skills: [] }, { dataDir: "/unresolved/data", homeDir: "/unresolved/home", logger, skillTreeTransport: { fetchManifest, fetchContent: vi.fn() } })).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+      expect(fetchManifest).not.toHaveBeenCalled();
+    } finally {
+      vi.resetModules();
+    }
+  });
+
   it("writes the skill into both global agent roots", async () => {
     const dataDir = await makeTempDir();
     const homeDir = await makeTempDir();

@@ -1,3 +1,4 @@
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   hostToolchain,
   sanitizeInheritedChildProcessEnv,
@@ -422,6 +423,7 @@ export class ServerMoveService {
   async prepare(
     command: CommandOf<"server_move.prepare">,
   ): Promise<HostDaemonOnlineRpcResult<"server_move.prepare">> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.prepare");
     const moveId = requireMoveIdSegment(command.moveId);
     const activating =
       this.activation?.moveId ??
@@ -481,6 +483,7 @@ export class ServerMoveService {
   async activate(
     command: CommandOf<"server_move.activate">,
   ): Promise<HostDaemonOnlineRpcResult<"server_move.activate">> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.activate");
     const moveId = requireMoveIdSegment(command.moveId);
     const { dataDir } = this.options;
     const state = await readIncomingMoveState(dataDir, moveId);
@@ -559,6 +562,7 @@ export class ServerMoveService {
   async deleteOldCopy(): Promise<
     HostDaemonOnlineRpcResult<"server_move.delete_old_copy">
   > {
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.deleteOldCopy");
     const { dataDir } = this.options;
     const marker = await readServerMovedFile(dataDir);
     if (marker === null) {
@@ -578,14 +582,16 @@ export class ServerMoveService {
   }
 
   handleServerMoved(notice: ServerMovedNotice): Promise<void> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.handleServerMoved");
     const task = this.serverMovedLane.then(() =>
-      this.processServerMoved(notice),
+      { internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.processServerMoved"); return this.processServerMoved(notice); },
     );
     this.serverMovedLane = task.catch(() => undefined);
     return task;
   }
 
   async resumeActivation(): Promise<void> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("serverMove.resumeActivation");
     if (this.activation !== null) {
       return this.activation.promise;
     }

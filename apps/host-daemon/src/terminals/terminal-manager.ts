@@ -1,3 +1,4 @@
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   prepareHostPtyCommand,
   hostToolchain,
@@ -339,6 +340,8 @@ function pathIsExecutableSync(filePath: string): boolean {
 export function ensureNodePtySpawnHelpersExecutableInPackage(
   args: EnsureNodePtySpawnHelperExecutableInPackageArgs,
 ): void {
+  internal_DO_NOT_USE_assertManagedRootAdmission("ensureNodePtySpawnHelperExecutable");
+  internal_DO_NOT_USE_assertManagedRootAdmission("ensureNodePtySpawnHelpersExecutableInPackage");
   const helperPaths = resolveNodePtySpawnHelperPaths({
     packageDirectory: args.packageDirectory,
   });
@@ -541,6 +544,9 @@ export class TerminalManager {
   }
 
   async handleMessage(message: HostDaemonServerTerminalMessage): Promise<void> {
+    if (message.type === "terminal.open" || message.type === "terminal.input" || message.type === "terminal.resize") {
+      internal_DO_NOT_USE_assertManagedRootAdmission(message.type);
+    }
     await this.runTerminalOperation({
       operation: () => this.handleSerializedMessage(message),
       terminalId: message.terminalId,
@@ -550,6 +556,9 @@ export class TerminalManager {
   private async handleSerializedMessage(
     message: HostDaemonServerTerminalMessage,
   ): Promise<void> {
+    if (message.type === "terminal.open" || message.type === "terminal.input" || message.type === "terminal.resize") {
+      internal_DO_NOT_USE_assertManagedRootAdmission(message.type);
+    }
     switch (message.type) {
       case "terminal.open":
         await this.openTerminal(message);
@@ -614,6 +623,7 @@ export class TerminalManager {
     try {
       const target = await this.resolveTerminalOpenTarget(message);
       const shell = await this.resolveShell();
+      internal_DO_NOT_USE_assertManagedRootAdmission("terminal.spawn");
       const pty = this.ptyAdapter.spawn({
         args: terminalShellArgs({ shell, start: message.start }),
         cols: message.cols,

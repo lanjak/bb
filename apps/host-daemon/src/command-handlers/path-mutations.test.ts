@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   mkdirHostPath,
   moveHostPath,
@@ -9,6 +9,29 @@ import {
 } from "./path-mutations.js";
 
 const roots: string[] = [];
+
+it("refuses direct path mutations before filesystem access when a managed root is selected", async () => {
+  vi.resetModules();
+  const { internal_DO_NOT_USE_enrollManagedRoot, ManagedRootAdmissionUnavailableError } =
+    await import("@bb/config/file-lock");
+  const mutations = await import("./path-mutations.js");
+  const unexpectedNative = new Error("Unexpected filesystem access");
+  const lstat = vi.spyOn(fs, "lstat").mockRejectedValue(unexpectedNative);
+  const realpath = vi.spyOn(fs, "realpath").mockRejectedValue(unexpectedNative);
+  const mkdir = vi.spyOn(fs, "mkdir").mockRejectedValue(unexpectedNative);
+  const rename = vi.spyOn(fs, "rename").mockRejectedValue(unexpectedNative);
+  const rm = vi.spyOn(fs, "rm").mockRejectedValue(unexpectedNative);
+  internal_DO_NOT_USE_enrollManagedRoot({});
+  try {
+    await expect(mutations.mkdirHostPath({ type: "host.mkdir", path: "/unresolved/child", recursive: true })).rejects.toBeInstanceOf(ManagedRootAdmissionUnavailableError);
+    await expect(mutations.moveHostPath({ type: "host.move_path", sourcePath: "/unresolved/source", destinationPath: "/unresolved/destination" })).rejects.toBeInstanceOf(ManagedRootAdmissionUnavailableError);
+    await expect(mutations.removeHostPath({ type: "host.remove_path", path: "/unresolved/child", recursive: true })).rejects.toBeInstanceOf(ManagedRootAdmissionUnavailableError);
+    for (const native of [lstat, realpath, mkdir, rename, rm]) expect(native).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
+    vi.resetModules();
+  }
+});
 
 async function makeRoot(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "bb-path-mutations-"));

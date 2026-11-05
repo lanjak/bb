@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import type { HostDaemonOnlineRpcResult } from "@bb/host-daemon-contract";
 import {
   CommandDispatchError,
@@ -88,6 +89,7 @@ export async function installGlobalSkills(
   command: CommandOf<"host.install_global_skills">,
   options: InstallGlobalSkillsOptions,
 ): Promise<HostDaemonOnlineRpcResult<"host.install_global_skills">> {
+  internal_DO_NOT_USE_assertManagedRootAdmission("installGlobalSkills");
   const { skillTreeTransport } = options;
   if (skillTreeTransport === undefined) {
     throw new CommandDispatchError(

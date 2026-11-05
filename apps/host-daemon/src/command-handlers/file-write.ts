@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/file-lock";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { replaceFile } from "@bb/file-transfer";
@@ -59,6 +60,18 @@ export async function resolveWriteTarget(
 export async function writeHostFile(
   command: CommandOf<"host.write_file">,
 ): Promise<HostDaemonOnlineRpcResult<"host.write_file">> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("writeHostFile");
+  try {
+    return await effect.runOriginal(() => writeAdmittedHostFile(command, effect));
+  } finally {
+    effect.complete();
+  }
+}
+
+async function writeAdmittedHostFile(
+  command: CommandOf<"host.write_file">,
+  effect: ManagedRootEffect,
+): Promise<HostDaemonOnlineRpcResult<"host.write_file">> {
   if (!path.isAbsolute(command.path)) {
     throw new CommandDispatchError("invalid_path", "Path must be absolute");
   }
@@ -77,14 +90,15 @@ export async function writeHostFile(
   const resolvedPath = path.resolve(command.path);
   const target = await resolveWriteTarget(resolvedPath, command.path);
 
-  const write = () => writeResolvedHostFile(command, contents, target);
-  return runInSerialLane(guardedWriteTails, target.writePath, write);
+  const write = () => effect.runOriginal(() => writeResolvedHostFile(command, contents, target, effect));
+  return effect.runOriginal(() => runInSerialLane(guardedWriteTails, target.writePath, write));
 }
 
 async function writeResolvedHostFile(
   command: CommandOf<"host.write_file">,
   contents: Buffer,
   target: ResolvedWriteTarget,
+  effect: ManagedRootEffect,
 ): Promise<HostDaemonOnlineRpcResult<"host.write_file">> {
   if (command.rootPath !== undefined) {
     let realRootPath: string;
@@ -113,16 +127,16 @@ async function writeResolvedHostFile(
 
   try {
     if (command.createParents) {
-      await fs.mkdir(path.dirname(target.writePath), { recursive: true });
+      await effect.runOriginal(() => fs.mkdir(path.dirname(target.writePath), { recursive: true }));
     }
-    return await replaceFile({
+    return await effect.runOriginal(() => replaceFile({
       contents,
       ...(command.expectedSha256 !== undefined
         ? { expectedSha256: command.expectedSha256 }
         : {}),
       ...(command.mode !== undefined ? { mode: command.mode } : {}),
       path: target.writePath,
-    });
+    }));
   } catch (error) {
     if (isFsErrorWithCode(error, "ENOENT")) {
       throw createMissingTargetError(path.dirname(command.path));

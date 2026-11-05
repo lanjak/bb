@@ -10,6 +10,35 @@ function sha256(content: string): string {
 }
 
 describe("replaceFile", () => {
+  it("does not remove a temporary path when exclusive creation reports EEXIST", async () => {
+    const stat = vi.spyOn(fs, "stat").mockRejectedValue(Object.assign(new Error("Missing target"), { code: "ENOENT" }));
+    const open = vi.spyOn(fs, "open").mockRejectedValue(Object.assign(new Error("Existing temporary file"), { code: "EEXIST" }));
+    const rm = vi.spyOn(fs, "rm").mockRejectedValue(new Error("Unexpected removal"));
+    try {
+      await expect(replaceFile({ path: "/unresolved/file", contents: Buffer.from("new") })).rejects.toMatchObject({ code: "EEXIST" });
+      expect(rm).not.toHaveBeenCalled();
+    } finally {
+      stat.mockRestore();
+      open.mockRestore();
+      rm.mockRestore();
+    }
+  });
+
+  it("refuses direct replacement before filesystem access in selected mode", async () => {
+    vi.resetModules();
+    const admission = await import("@bb/config/file-lock");
+    const { replaceFile: replace } = await import("../src/replace-file.js");
+    const stat = vi.spyOn(fs, "stat").mockRejectedValue(new Error("Unexpected stat"));
+    admission.internal_DO_NOT_USE_enrollManagedRoot({});
+    try {
+      await expect(replace({ path: "/unresolved/file", contents: Buffer.from("new") })).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+      expect(stat).not.toHaveBeenCalled();
+    } finally {
+      stat.mockRestore();
+      vi.resetModules();
+    }
+  });
+
   it("leaves the original file intact when a write fails midway", async () => {
     const dir = await makeTempDir("bb-replace-file-");
     const target = path.join(dir, "note.md");

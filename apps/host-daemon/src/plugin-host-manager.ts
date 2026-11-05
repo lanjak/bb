@@ -5,7 +5,7 @@ import {
   sanitizeInheritedChildProcessEnv,
 } from "@bb/process-utils";
 import { operationEnvironment } from "./operation-environment.js";
-import { internal_DO_NOT_USE_acquireDirectoryLease } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_acquireDirectoryLease, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
@@ -473,6 +473,7 @@ export class PluginHostManager {
   }
 
   private ensureWorker(command: PluginHostCallCommand): Promise<WorkerState> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.ensureWorker");
     return this.enqueueWorkerMutation(command.pluginId, () =>
       this.ensureWorkerNow(command),
     );
@@ -481,6 +482,7 @@ export class PluginHostManager {
   private async ensureWorkerNow(
     command: PluginHostCallCommand,
   ): Promise<WorkerState> {
+    internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.ensureWorkerNow");
     if (
       this.retiredGenerations.get(command.pluginId)?.has(command.generation)
     ) {
@@ -1162,6 +1164,7 @@ export class PluginHostManager {
     callKey: string;
     callState: ActiveCallState;
   } {
+    internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.admitCall");
     const callKey = this.callKey(command);
     if (this.activeCalls.has(callKey)) {
       throw new Error(`duplicate host plugin call ${command.callId}`);

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { internal_DO_NOT_USE_beginManagedRootEffect } from "@bb/config/file-lock";
 import type { AgentRuntimeBridgeLaunch } from "@bb/agent-runtime";
 import { flattenPromptInputGroups } from "@bb/domain";
 import { killProcessesWithCwdUnder } from "@bb/process-utils";
@@ -60,13 +61,18 @@ export async function deleteThreadStorage(
   command: CommandOf<"thread.storage.delete">,
   options: CommandDispatchOptions,
 ): Promise<void> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("deleteThreadStorage");
+  try {
   const storagePath = requireContainedPath(
     options.threadStorageRootPath,
     path.join(options.threadStorageRootPath, command.threadId),
     "Thread storage path escapes the storage root",
   );
-  await killProcessesWithCwdUnder({ directories: [storagePath] });
-  await fs.rm(storagePath, { recursive: true, force: true });
+  await effect.runOriginal(() => killProcessesWithCwdUnder({ directories: [storagePath] }));
+  await effect.runOriginal(() => fs.rm(storagePath, { recursive: true, force: true }));
+  } finally {
+    effect.complete();
+  }
 }
 
 type ThreadStartRuntimeCommand =
