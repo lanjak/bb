@@ -25,8 +25,9 @@ import {
   ExpectedCommandDispatchError,
   resolveRuntimeBridgeLaunch,
   type CommandOf,
-  type CommandDispatchOptions,
+  type CommandDispatchOptions as BaseCommandDispatchOptions,
 } from "./command-dispatch-support.js";
+import type { PluginHostManager } from "./plugin-host-manager.js";
 import {
   cancelEnvironmentProvision,
   provisionEnvironment,
@@ -134,10 +135,11 @@ async function stopThreadRuntime(
   return { providerCheckpointId };
 }
 
-export {
-  getErrorCode,
-  type CommandDispatchOptions,
-} from "./command-dispatch-support.js";
+export { getErrorCode } from "./command-dispatch-support.js";
+
+export type CommandDispatchOptions = BaseCommandDispatchOptions & {
+  pluginHostManager?: PluginHostManager;
+};
 
 type CommandHandlerMap = {
   [TType in HostDaemonSettledCommandType]: (
@@ -590,6 +592,14 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
     path: resolveProjectCloneDefaultPath(options.dataDir, command.projectSlug),
   }),
   "host.pick_folder": pickHostFolder,
+  "plugin.host.preflight": async (command, options, signal) => {
+    if (!options.pluginHostManager) {
+      return { status: "refused", reason: "managed-generation-unavailable" };
+    }
+    return options.pluginHostManager.preflight(command, signal);
+  },
+  "plugin.host.preflight.cancel": async (command, options) =>
+    options.pluginHostManager?.cancelPreflight(command) ?? { cancelled: false },
   "plugin.host.call": async () => {
     throw new Error("plugin.host.call must be routed by CommandRouter");
   },
