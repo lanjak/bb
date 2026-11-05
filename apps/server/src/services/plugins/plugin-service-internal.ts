@@ -1,4 +1,6 @@
 import type { TunnelIngressLease } from "../connect-next/tunnel-ingress.js";
+import type { IncomingMessage } from "node:http";
+import type { PluginService } from "./plugin-service.js";
 import type { EnvironmentRemoval } from "@bb/domain";
 import type { MachineEnrollmentService } from "../machines/machine-services.js";
 import type { AiServiceRegistry } from "../ai/ai-service-registry.js";
@@ -35,6 +37,46 @@ import type { ProviderRegistryService } from "../providers/provider-registry.js"
 import type { PluginHostArtifactRegistry } from "./plugin-host-artifact-registry.js";
 
 type PluginServiceState = "running" | "backoff" | "stopped";
+
+export interface ManagedPluginGenerationIntent {
+  action: "request-managed-generation";
+  computeChildRssAdmissionBytes: number;
+  attemptKey: string;
+}
+
+type ManagedPluginGenerationControl = (args: {
+  pluginId: string;
+  intent: ManagedPluginGenerationIntent;
+  incoming: IncomingMessage | null;
+  request: Request;
+}) => Promise<{ ok: false; error: string; status: 403 | 409 | 422 }>;
+
+const managedGenerationControls = new WeakMap<
+  PluginService,
+  ManagedPluginGenerationControl
+>();
+
+export function registerPluginManagedGenerationControl(
+  service: PluginService,
+  control: ManagedPluginGenerationControl,
+): void {
+  managedGenerationControls.set(service, control);
+}
+
+export async function requestPluginManagedGeneration(
+  service: PluginService,
+  args: Parameters<ManagedPluginGenerationControl>[0],
+): ReturnType<ManagedPluginGenerationControl> {
+  const control = managedGenerationControls.get(service);
+  if (control === undefined) {
+    return {
+      ok: false,
+      error: "managed generation is unavailable",
+      status: 409,
+    };
+  }
+  return control(args);
+}
 
 export interface ServiceRuntime {
   record: PluginBackgroundServiceRecord;

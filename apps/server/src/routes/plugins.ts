@@ -1,6 +1,7 @@
 import { HOST_TAILWIND_VERSION } from "@bb/plugin-build/host-tailwind-version";
 import type { PluginUpdateJobs } from "../services/plugins/plugin-update-jobs.js";
 import { timingSafeEqual } from "node:crypto";
+import { IncomingMessage } from "node:http";
 import { promisify } from "node:util";
 import { brotliCompress, constants as zlibConstants, gzip } from "node:zlib";
 import type { Context, Hono } from "hono";
@@ -21,7 +22,11 @@ import type {
   PluginService,
   PluginWireLookup,
 } from "../services/plugins/plugin-service.js";
-import type { LoadedPlugin } from "../services/plugins/plugin-service-internal.js";
+import {
+  requestPluginManagedGeneration,
+  type LoadedPlugin,
+  type ManagedPluginGenerationIntent,
+} from "../services/plugins/plugin-service-internal.js";
 import type {
   PluginMentionTrigger,
   PluginWebSocketRouteRecord,
@@ -57,6 +62,35 @@ import {
 interface PluginRoutesDeps {
   config: Pick<ServerRuntimeConfig, "serverPort" | "appUrl" | "devAppPort">;
   db: import("@bb/db").DbConnection;
+}
+
+function parseManagedGenerationIntent(
+  value: unknown,
+): ManagedPluginGenerationIntent | null {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== 3 ||
+    !("action" in value) ||
+    value.action !== "request-managed-generation" ||
+    !("computeChildRssAdmissionBytes" in value) ||
+    typeof value.computeChildRssAdmissionBytes !== "number" ||
+    !Number.isSafeInteger(value.computeChildRssAdmissionBytes) ||
+    value.computeChildRssAdmissionBytes <= 0 ||
+    !("attemptKey" in value) ||
+    typeof value.attemptKey !== "string" ||
+    value.attemptKey.length === 0 ||
+    value.attemptKey.length > 128 ||
+    /[^A-Za-z0-9_-]/.test(value.attemptKey)
+  ) {
+    return null;
+  }
+  return {
+    action: value.action,
+    computeChildRssAdmissionBytes: value.computeChildRssAdmissionBytes,
+    attemptKey: value.attemptKey,
+  };
 }
 
 type WireAuthProblem = BrowserRequestProblem | { status: 401; error: string };
@@ -797,6 +831,34 @@ export function registerPluginRoutes(
   });
 
   app.post("/plugins/:id/enable", async (context) => {
+    const body: unknown = await context.req.json().catch(() => null);
+    if (
+      typeof body === "object" &&
+      body !== null &&
+      Object.hasOwn(body, "operatorIntent")
+    ) {
+      const intent = parseManagedGenerationIntent(
+        "operatorIntent" in body ? body.operatorIntent : undefined,
+      );
+      if (intent === null) {
+        return context.json({ ok: false, error: "invalid operatorIntent" }, 400);
+      }
+      const env: unknown = context.env;
+      const incoming =
+        typeof env === "object" &&
+        env !== null &&
+        "incoming" in env &&
+        env.incoming instanceof IncomingMessage
+          ? env.incoming
+          : null;
+      const result = await requestPluginManagedGeneration(plugins, {
+        pluginId: context.req.param("id"),
+        intent,
+        incoming,
+        request: context.req.raw,
+      });
+      return context.json({ ok: result.ok, error: result.error }, result.status);
+    }
     const plugin = await plugins.setEnabled(context.req.param("id"), true);
     if (!plugin)
       return context.json({ ok: false, error: "unknown plugin" }, 404);
