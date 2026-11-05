@@ -1,5 +1,6 @@
 import { createPluginUpdateJobs } from "../../../src/services/plugins/plugin-update-jobs.js";
 import * as managedAdmission from "@bb/config/file-lock";
+import { createPluginApi } from "../../../src/services/plugins/plugin-api.js";
 import {
   mkdtemp,
   mkdir,
@@ -73,6 +74,61 @@ async function writePlugin(
   return rootDir;
 }
 
+
+it("refuses retained direct API logging before logger and plugin log publication", async () => {
+  const cleanups: Array<() => void | Promise<void>> = [];
+  let primaryPresent = false;
+  let primary: unknown;
+  try {
+    const connection = createMigratedConnection();
+    cleanups.push(() => { connection.$client.close(); });
+    const root = await mkdtemp(join(tmpdir(), "bb-retained-log-direct-"));
+    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    const directLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const unexpected = () => { throw new Error("Unexpected retained-log dependency call"); };
+    const handle = createPluginApi({
+      recordPluginUse: unexpected, pluginId: "retained-log", logger: directLogger,
+      db: connection, dataDir: root, getSdk: () => undefined,
+      getMachineEnrollments: unexpected, getAppUrl: () => null,
+      getLoopbackBaseUrl: () => undefined, openTunnelIngress: unexpected,
+      rpcCaller: { token: "retained-log-test", revoke: () => undefined },
+      invalidateRpc: unexpected, publishSignal: unexpected, settingsChanged: unexpected,
+      reportNeedsConfiguration: unexpected, isAgentToolNameTaken: unexpected,
+      isEnvironmentProviderIdTaken: unexpected, isMachineProviderIdTaken: unexpected,
+      reportAgentToolProblem: unexpected, requestQueueDrain: unexpected,
+      declaredIconNames: new Set<string>(), brandingIcon: undefined,
+      requestInteraction: unexpected, ensureSharedPortTunnel: unexpected,
+      validateSharedPortDeclaration: unexpected, declareSharedPorts: unexpected,
+      setNextTunnels: unexpected, nextTunnelStatuses: unexpected,
+      onNextTunnelStatusChange: unexpected, replaceDeclaredSharedPorts: unexpected,
+      callPluginHost: unexpected,
+    });
+    const retainedLog = handle.api.log.info;
+    retainedLog("original line");
+    const path = join(root, "plugins", "retained-log", "logs", "plugin.log");
+    const original = await readFile(path, "utf8");
+    expect(original).toContain("original line");
+    expect(directLogger.info).toHaveBeenCalledTimes(1);
+    directLogger.info.mockClear();
+    const refused = new managedAdmission.ManagedRootAdmissionUnavailableError("retained log");
+    const admission = vi.spyOn(managedAdmission, "internal_DO_NOT_USE_assertManagedRootAdmission").mockImplementation(() => { throw refused; });
+    cleanups.push(() => { admission.mockRestore(); });
+    expect(() => retainedLog("refused line")).toThrow(refused);
+    expect(directLogger.info).not.toHaveBeenCalled();
+    expect(await readFile(path, "utf8")).toBe(original);
+  } catch (error) {
+    primaryPresent = true;
+    primary = error;
+  } finally {
+    for (const cleanup of [...cleanups].reverse()) {
+      try { await cleanup(); } catch (error) {
+        if (!primaryPresent) { primaryPresent = true; primary = error; }
+      }
+    }
+  }
+  if (primaryPresent) throw primary;
+});
+
 describe("plugin settings + storage", () => {
   let db: DbConnection;
   let workDir: string;
@@ -111,30 +167,6 @@ describe("plugin settings + storage", () => {
   });
 
   describe("settings", () => {
-    it("refuses retained logging before logger and plugin log publication", async () => {
-      const rootDir = await writePlugin(workDir, {
-        name: "bb-plugin-retained-log",
-        serverSource: `export default function plugin() {}`,
-      });
-      await service.installPath(rootDir);
-      const api = service.getApi("retained-log");
-      expect(api).toBeDefined();
-      if (!api) throw new Error("Missing retained plugin API");
-      api.log.info("original line");
-      const logPath = join(dataDir, "plugins", "retained-log", "logs", "plugin.log");
-      const original = await readFile(logPath, "utf8");
-      const logged = vi.spyOn(logger, "info");
-      const refused = new managedAdmission.ManagedRootAdmissionUnavailableError("retained log");
-      const admission = vi.spyOn(managedAdmission, "internal_DO_NOT_USE_assertManagedRootAdmission").mockImplementation(() => { throw refused; });
-      try {
-        expect(() => api.log.info("refused line")).toThrow(refused);
-        expect(logged).not.toHaveBeenCalled();
-        expect(await readFile(logPath, "utf8")).toBe(original);
-      } finally {
-        admission.mockRestore();
-        logged.mockRestore();
-      }
-    });
 
     async function installConfigurable(): Promise<void> {
       const rootDir = await writePlugin(workDir, {
