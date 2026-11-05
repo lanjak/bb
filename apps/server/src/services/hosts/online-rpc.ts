@@ -10,6 +10,7 @@ import {
 import { randomUUID } from "node:crypto";
 import {
   hostDaemonSupportsEnvironmentCleanupInspection,
+  hostDaemonSupportsPluginHostPreflight,
   type HostDaemonOnlineRpcResponseMessage,
   type HostDaemonOnlineRpcResultForCommand,
   type HostDaemonRetryableOnlineRpcCommand,
@@ -32,6 +33,41 @@ import { traceTurnRpc } from "../system/turn-trace.js";
 
 const HOST_DAEMON_REGISTRATION_WAIT_MS = 1_000;
 const HOST_DAEMON_RECONNECT_WAIT_MS = 5_000;
+
+export async function callPinnedPluginHostPreflight(
+  deps: Pick<WorkSessionDeps, "db">,
+  args: {
+    pin: NonNullable<ReturnType<WorkSessionDeps["hub"]["pinDaemonConnection"]>>;
+    command: Extract<HostDaemonRpcCommand, { type: "plugin.host.preflight" }>;
+    preflightAbortSignal: AbortSignal;
+    reauthorize: () => void;
+  },
+) {
+  const validate = (): void => {
+    const host = getHost(deps.db, args.command.hostId);
+    const session = getSessionById(deps.db, { sessionId: args.pin.sessionId });
+    if (
+      args.preflightAbortSignal.aborted ||
+      !args.pin.isCurrent() ||
+      host === null || host.phase !== "active" || host.destroyedAt !== null ||
+      session === null || session.status !== "active" ||
+      session.hostId !== args.command.hostId ||
+      args.command.sessionId !== args.pin.sessionId ||
+      !hostDaemonSupportsPluginHostPreflight(session.protocolVersion)
+    ) throw new HostOnlineRpcUnavailableError();
+    args.reauthorize();
+  };
+  validate();
+  const response = await args.pin.request({
+    message: { type: "host-rpc.request", requestId: randomUUID(), command: args.command },
+    signal: args.preflightAbortSignal,
+    timeoutMs: args.command.timeoutMs,
+  });
+  validate();
+  if (!response.ok) throw new ApiError(502, response.errorCode, response.errorMessage, false);
+  if (response.commandType !== args.command.type) throw new Error("Host preflight result type mismatch");
+  return parseHostDaemonRpcResultForCommand(args.command, response.result);
+}
 
 interface CallHostOnlineRpcArgs<TCommand extends HostDaemonRpcCommand> {
   command: TCommand;

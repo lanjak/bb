@@ -42,6 +42,7 @@ export interface ManagedPluginGenerationIntent {
   action: "request-managed-generation";
   computeChildRssAdmissionBytes: number;
   attemptKey: string;
+  hostId: string;
 }
 
 type ManagedPluginGenerationControl = (args: {
@@ -146,6 +147,7 @@ export interface PluginServiceDeps {
   hub: Pick<
     NotificationHub,
     | "getDaemonSessionIdForHost"
+    | "pinDaemonConnection"
     | "notifyPluginSignal"
     | "notifySystem"
     | "notifyPluginChanged"

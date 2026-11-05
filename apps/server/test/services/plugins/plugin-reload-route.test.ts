@@ -203,6 +203,7 @@ describe("POST /plugins/reload outcome", () => {
           action: "request-managed-generation",
           computeChildRssAdmissionBytes: 1048576,
           attemptKey: "test_attempt-1",
+          hostId: "host_selected",
         },
       }),
       async (response) => {
@@ -213,6 +214,30 @@ describe("POST /plugins/reload outcome", () => {
         expect(response.body).toMatchObject({ ok: false });
       },
     );
+  });
+
+  it.each([
+    undefined,
+    null,
+    "",
+    " host_selected",
+    "host_selected ",
+    "host_selected\n",
+    42,
+  ])("rejects signed managed intent with invalid host selection %j", async (hostId) => {
+    await harness.pluginService.setEnabled("keeper", false);
+    await signedEnable(JSON.stringify({
+      operatorIntent: {
+        action: "request-managed-generation",
+        computeChildRssAdmissionBytes: 1048576,
+        attemptKey: "host_selection",
+        hostId,
+      },
+    }), async (response) => {
+      expect(response.status).toBe(400);
+      expect(getInstalledPlugin(harness.db, "keeper")?.enabled).toBe(false);
+      expect(harness.pluginService.getApi("keeper")).toBeUndefined();
+    });
   });
 
   it.each(["{}", "{malformed"])(
@@ -259,6 +284,7 @@ describe("POST /plugins/reload outcome", () => {
         action: "request-managed-generation",
         computeChildRssAdmissionBytes: 1048576,
         attemptKey: "unverified",
+        hostId: "host_selected",
       } }),
     });
     expect(response.status).toBe(403);
@@ -272,6 +298,7 @@ describe("POST /plugins/reload outcome", () => {
       action: "request-managed-generation" as const,
       computeChildRssAdmissionBytes: 1048576,
       attemptKey: "warm_attempt",
+      hostId: "host_selected",
     };
     await signedEnable(JSON.stringify({ operatorIntent: intent }), async (response) => {
       expect(response.status).toBe(409);

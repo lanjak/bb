@@ -17,6 +17,69 @@ function appendRawChangeKind(changes: string[], kind: string): void {
 }
 
 describe("NotificationHub", () => {
+  it("invalidates an original connection pin on same-session replacement without rebinding", async () => {
+    const hub = new NotificationHub();
+    const original = createMockHubSocket();
+    const replacement = createMockHubSocket();
+    const foreign = createMockHubSocket();
+    hub.registerDaemon("session", "host", original);
+    hub.registerDaemon("foreign-session", "foreign", foreign);
+    const pin = hub.pinDaemonConnection("host");
+    const foreignPin = hub.pinDaemonConnection("foreign");
+    expect(pin).not.toBeNull();
+    expect(foreignPin).not.toBeNull();
+    hub.registerDaemon("session", "host", replacement);
+    expect(pin?.signal.aborted).toBe(true);
+    expect(pin?.isCurrent()).toBe(false);
+    expect(foreignPin?.isCurrent()).toBe(true);
+    if (pin === null) throw new Error("Missing original pin");
+    await expect(pin.request({
+      message: { type: "host-rpc.request", requestId: "old", command: { type: "plugin.host.dispose", pluginId: "plugin", generation: "generation" } },
+      signal: new AbortController().signal,
+      timeoutMs: 100,
+    })).rejects.toThrow("not connected");
+    expect(replacement.messages).toHaveLength(0);
+    hub.unregisterDaemon("session");
+    hub.unregisterDaemon("foreign-session");
+    expect(foreignPin?.signal.aborted).toBe(true);
+  });
+
+  it("rejects an in-flight pinned response after replacement while preserving a foreign ordinary RPC", async () => {
+    const hub = new NotificationHub();
+    const socket = createMockHubSocket();
+    const foreign = createMockHubSocket();
+    hub.registerDaemon("session", "host", socket);
+    hub.registerDaemon("foreign-session", "foreign", foreign);
+    const pin = hub.pinDaemonConnection("host");
+    if (pin === null) throw new Error("Missing pin");
+    const command = { type: "plugin.host.dispose", pluginId: "plugin", generation: "generation" } as const;
+    const pinned = pin.request({
+      message: { type: "host-rpc.request", requestId: "pinned", command },
+      signal: new AbortController().signal,
+      timeoutMs: 1000,
+    });
+    const rejected = expect(pinned).rejects.toThrow();
+    const ordinary = hub.requestHostOnlineRpc({
+      hostId: "foreign",
+      message: { type: "host-rpc.request", requestId: "ordinary", command },
+      timeoutMs: 1000,
+    });
+    hub.registerDaemon("session", "host", createMockHubSocket());
+    await rejected;
+    const late = hub.recordHostOnlineRpcResponse({
+      sessionId: "session",
+      message: { type: "host-rpc.response", requestId: "pinned", commandType: command.type, ok: true, result: { disposed: false } },
+    });
+    expect(late.handled).toBe(false);
+    hub.recordHostOnlineRpcResponse({
+      sessionId: "foreign-session",
+      message: { type: "host-rpc.response", requestId: "ordinary", commandType: command.type, ok: true, result: { disposed: false } },
+    });
+    await expect(ordinary).resolves.toMatchObject({ ok: true });
+    hub.unregisterDaemon("session");
+    hub.unregisterDaemon("foreign-session");
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });

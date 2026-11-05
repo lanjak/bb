@@ -271,6 +271,7 @@ export class NotificationHub implements DbNotifier {
     string,
     {
       connectedAt: number;
+      invalidation: AbortController;
       heardSinceLivenessCheck: boolean;
       hostId: string;
       localApiPort: number | null;
@@ -749,6 +750,7 @@ export class NotificationHub implements DbNotifier {
 
   registerDaemon(sessionId: string, hostId: string, socket: HubSocket): void {
     this.cancelPendingDaemonDisconnect(sessionId);
+    this.daemonSessions.get(sessionId)?.invalidation.abort();
     const existingSessionId = this.daemonSessionIdsByHost.get(hostId);
     if (existingSessionId && existingSessionId !== sessionId) {
       this.cancelPendingDaemonDisconnect(existingSessionId);
@@ -756,6 +758,7 @@ export class NotificationHub implements DbNotifier {
     }
     this.daemonSessions.set(sessionId, {
       connectedAt: Date.now(),
+      invalidation: new AbortController(),
       heardSinceLivenessCheck: true,
       hostId,
       localApiPort:
@@ -776,6 +779,7 @@ export class NotificationHub implements DbNotifier {
       return;
     }
     this.daemonSessions.delete(sessionId);
+    entry.invalidation.abort();
     this.daemonSessionLocalApiPortsBySessionId.delete(sessionId);
     this.daemonSessionPlatformsBySessionId.delete(sessionId);
     this.rejectHostOnlineRpcWaitersForSession(sessionId);
@@ -834,6 +838,36 @@ export class NotificationHub implements DbNotifier {
       return null;
     }
     return sessionId;
+  }
+
+  pinDaemonConnection(hostId: string) {
+    const sessionId = this.daemonSessionIdsByHost.get(hostId);
+    if (sessionId === undefined) return null;
+    const entry = this.daemonSessions.get(sessionId);
+    if (entry === undefined || entry.hostId !== hostId) return null;
+    const isCurrent = (): boolean =>
+      !entry.invalidation.signal.aborted &&
+      this.daemonSessionIdsByHost.get(hostId) === sessionId &&
+      this.daemonSessions.get(sessionId) === entry;
+    return Object.freeze({
+      sessionId,
+      signal: entry.invalidation.signal,
+      isCurrent,
+      request: async (args: {
+        message: HostDaemonOnlineRpcRequestMessage;
+        signal: AbortSignal;
+        timeoutMs: number;
+      }): Promise<HostDaemonOnlineRpcResponseMessage> => {
+        if (!isCurrent()) throw new HostOnlineRpcUnavailableError();
+        const response = await this.requestHostOnlineRpc({
+          ...args,
+          hostId,
+          signal: AbortSignal.any([args.signal, entry.invalidation.signal]),
+        });
+        if (!isCurrent()) throw new HostOnlineRpcUnavailableError();
+        return response;
+      },
+    });
   }
 
   getDaemonPlatformForHost(hostId: string): HostPlatform | null {

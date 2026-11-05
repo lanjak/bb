@@ -73,6 +73,8 @@ import {
   forgetPluginProviders,
   getDisabledPluginProviderCatalog,
   getInstalledPlugin,
+  getHost,
+  getSessionById,
   getInstalledPluginRegistration,
   getPluginSafeMode,
   getThread,
@@ -201,6 +203,8 @@ import type {
 } from "./plugin-service-internal.js";
 import type { PluginMachineProviderBridge } from "./plugin-machine-provider-registry.js";
 import { registerPluginManagedGenerationControl } from "./plugin-service-internal.js";
+import { callPinnedPluginHostPreflight } from "../hosts/online-rpc.js";
+import { randomUUID } from "node:crypto";
 import { readVerifiedTunnelIngress } from "../connect-next/tunnel-ingress.js";
 import { fillPluginPresentation } from "./plugin-presentation.js";
 export type {
@@ -2800,6 +2804,14 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
 
   const consumedAttempts = new WeakMap<Request, Set<string>>();
   registerPluginManagedGenerationControl(service, async (args) => {
+    const pin = deps.hub.pinDaemonConnection(args.intent.hostId);
+    const hostIsCurrent = (): boolean => {
+      if (pin === null || !pin.isCurrent()) return false;
+      const host = getHost(deps.db, args.intent.hostId);
+      const session = getSessionById(deps.db, { sessionId: pin.sessionId });
+      return host !== null && host.phase === "active" && host.destroyedAt === null &&
+        session !== null && session.status === "active" && session.hostId === host.id;
+    };
     const hasOwnerProof = (): boolean => {
       if (args.incoming === null) return false;
       const proof = readVerifiedTunnelIngress(args.incoming, args.request);
@@ -2841,6 +2853,53 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
             status: 422 as const,
             error: `unknown plugin "${args.pluginId}"`,
           };
+        }
+        if (!hostIsCurrent()) return {
+          ok: false as const,
+          status: 409 as const,
+          error: "managed generation selected host is unavailable",
+        };
+        const artifact = hostArtifacts.get(args.pluginId);
+        if (pin !== null && artifact !== undefined && hasOwnerProof()) {
+          const controller = new AbortController();
+          const abort = (): void => controller.abort();
+          args.incoming?.once("aborted", abort);
+          const preflightAbortSignal = AbortSignal.any([
+            args.request.signal, pin.signal, controller.signal,
+          ]);
+          try {
+            await callPinnedPluginHostPreflight(deps, {
+              pin,
+              command: {
+                type: "plugin.host.preflight",
+                pluginId: args.pluginId,
+                generation: artifact.generation,
+                artifact: { digest: artifact.digest, byteLength: artifact.byteLength },
+                hostId: args.intent.hostId,
+                sessionId: pin.sessionId,
+                attemptId: randomUUID(),
+                timeoutMs: 10_000,
+              },
+              preflightAbortSignal,
+              reauthorize: () => {
+                if (!hasOwnerProof() || hostArtifacts.get(args.pluginId) !== artifact) {
+                  throw new Error("Managed generation authorization expired");
+                }
+              },
+            });
+          } catch (error) {
+            if (!hasOwnerProof()) return proofRefusal;
+            if (!hostIsCurrent()) return {
+              ok: false as const,
+              status: 409 as const,
+              error: "managed generation selected host is unavailable",
+            };
+            throw error;
+          } finally {
+            controller.abort();
+            args.incoming?.off("aborted", abort);
+          }
+          if (!hasOwnerProof()) return proofRefusal;
         }
         if (loaded.has(args.pluginId)) {
           return {

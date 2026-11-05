@@ -71,7 +71,12 @@ function parseManagedGenerationIntent(
     typeof value !== "object" ||
     value === null ||
     Array.isArray(value) ||
-    Object.keys(value).length !== 3 ||
+    Object.keys(value).length !== 4 ||
+    !("hostId" in value) ||
+    typeof value.hostId !== "string" ||
+    value.hostId.length === 0 ||
+    value.hostId.length > 128 ||
+    /[^A-Za-z0-9_-]/.test(value.hostId) ||
     !("action" in value) ||
     value.action !== "request-managed-generation" ||
     !("computeChildRssAdmissionBytes" in value) ||
@@ -90,6 +95,7 @@ function parseManagedGenerationIntent(
     action: value.action,
     computeChildRssAdmissionBytes: value.computeChildRssAdmissionBytes,
     attemptKey: value.attemptKey,
+    hostId: value.hostId,
   };
 }
 
