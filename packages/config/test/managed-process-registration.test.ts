@@ -1,6 +1,10 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import { internal_DO_NOT_USE_registerManagedProcess } from "../src/managed-process-registration.js";
+import {
+  internal_DO_NOT_USE_assertManagedRootAdmission,
+  internal_DO_NOT_USE_beginManagedRootEffect,
+} from "@bb/config/internal-managed-root-admission";
 
 class ParentPort extends EventEmitter {
   connected = true;
@@ -16,6 +20,21 @@ class ParentPort extends EventEmitter {
 }
 
 describe("managed process bootstrap control, not native custody", () => {
+  it("shares registration admission and revocation state with the canonical owner", async () => {
+    expect(() => internal_DO_NOT_USE_assertManagedRootAdmission("before process registration")).not.toThrow();
+    const originalEffect = internal_DO_NOT_USE_beginManagedRootEffect("before process registration");
+    const port = new ParentPort();
+    const pending = internal_DO_NOT_USE_registerManagedProcess("server", port);
+    expect(() => internal_DO_NOT_USE_assertManagedRootAdmission("after process registration")).toThrow();
+    expect(() => originalEffect.assertOriginalAtDequeue()).toThrow();
+    expect(originalEffect.complete().status).toBe("PINNED");
+    port.emit("message", { channel: "bb-managed-process", type: "continue", role: "server" });
+    const registration = await pending;
+    registration.revoke();
+    expect(() => registration.assertBootstrapActive()).toThrow();
+    expect(() => internal_DO_NOT_USE_assertManagedRootAdmission("after process revocation")).toThrow();
+  });
+
   it("rejects delayed acknowledgement after revocation", async () => {
     const port = new ParentPort();
     port.delayed = true;
