@@ -98,6 +98,11 @@
       "types": "./src/file-lock.ts",
       "default": "./src/file-lock.ts"
     },
+    "./internal-managed-root-admission": {
+      "source": "./src/managed-root-admission.ts",
+      "types": "./src/managed-root-admission.ts",
+      "default": "./src/managed-root-admission.ts"
+    },
     "./client-config": {
       "source": "./src/client-config.ts",
       "types": "./src/client-config.ts",

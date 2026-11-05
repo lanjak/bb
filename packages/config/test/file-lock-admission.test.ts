@@ -24,7 +24,7 @@ it.each(["unlock", "close", "both", "unlock undefined"])("rejects successful wor
   if (failure !== "close") controls.unlock.mockImplementationOnce(() => { throw failure === "unlock undefined" ? undefined : first; });
   if (failure === "close" || failure === "both") controls.close.mockRejectedValueOnce(second);
   const { withFileLock } = await import("../src/file-lock.js");
-  const admission = await vi.importActual<typeof import("../src/managed-root-admission.js")>("../src/managed-root-admission.js");
+  const admission = await vi.importActual<typeof import("@bb/config/internal-managed-root-admission")>("@bb/config/internal-managed-root-admission");
   const effect = admission.internal_DO_NOT_USE_beginManagedRootEffect("successful original work");
   const work = vi.fn(async () => 17);
   const result = withFileLock({ path: "/synthetic/lock", timeoutMs: 1, work, managedRootEffect: effect });
@@ -40,10 +40,26 @@ it("preserves an undefined original body rejection while joining both failed cle
   controls.unlock.mockReset().mockImplementationOnce(() => { throw unlockFailure; });
   controls.close.mockReset().mockRejectedValueOnce(new Error("close failure"));
   const { withFileLock } = await import("../src/file-lock.js");
-  const admission = await vi.importActual<typeof import("../src/managed-root-admission.js")>("../src/managed-root-admission.js");
+  const admission = await vi.importActual<typeof import("@bb/config/internal-managed-root-admission")>("@bb/config/internal-managed-root-admission");
   const effect = admission.internal_DO_NOT_USE_beginManagedRootEffect("failed original work");
   await expect(withFileLock({ path: "/synthetic/lock", timeoutMs: 1, managedRootEffect: effect, work: async () => { throw undefined; } })).rejects.toBeUndefined();
   expect(controls.unlock).toHaveBeenCalledTimes(1);
   expect(controls.close).toHaveBeenCalledTimes(1);
   expect(effect.complete()).toEqual({ status: "PINNED", failures: [undefined, unlockFailure] });
+});
+
+it("shares original enrollment across the canonical entry and file-lock re-export", async () => {
+  const admission = await vi.importActual<typeof import("@bb/config/internal-managed-root-admission")>("@bb/config/internal-managed-root-admission");
+  const locks = await import("@bb/config/file-lock");
+  expect(locks.internal_DO_NOT_USE_enrollManagedRoot).toBe(admission.internal_DO_NOT_USE_enrollManagedRoot);
+  const original = Object.freeze({});
+  const registration = admission.internal_DO_NOT_USE_enrollManagedRoot(original);
+  expect(locks.internal_DO_NOT_USE_enrollManagedRoot(original)).toBe(registration);
+  expect(() => locks.internal_DO_NOT_USE_beginManagedRootEffect("shared enrollment")).toThrow(admission.ManagedRootAdmissionUnavailableError);
+  const fs = await import("node:fs/promises");
+  const opened = vi.mocked(fs.open).mock.calls.length;
+  const work = vi.fn(async () => undefined);
+  await expect(locks.withFileLock({ path: "/synthetic/lock", timeoutMs: 1, work })).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+  expect(vi.mocked(fs.open).mock.calls.length).toBe(opened);
+  expect(work).not.toHaveBeenCalled();
 });

@@ -38,7 +38,7 @@ it("refuses publication when serialization enrolls a root synchronously", async 
     vi.mocked(fs.writeFile).mockClear();
     vi.mocked(fs.rename).mockClear();
     const { mutateManagedJsonFile } = await import("../src/managed-json-file.js");
-    const { internal_DO_NOT_USE_enrollManagedRoot } = await import("../src/managed-root-admission.js");
+    const { internal_DO_NOT_USE_enrollManagedRoot } = await import("@bb/config/internal-managed-root-admission");
     const value = { toJSON() {
       internal_DO_NOT_USE_enrollManagedRoot(Object.freeze({}));
       return {};
@@ -56,7 +56,7 @@ it("rechecks the same original effect after read awaits and allows only preowned
   vi.mocked(fs.writeFile).mockClear();
   vi.mocked(fs.rename).mockClear();
   const { mutateManagedJsonFile } = await import("../src/managed-json-file.js");
-  const { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_enrollManagedRoot } = await import("../src/managed-root-admission.js");
+  const { internal_DO_NOT_USE_beginManagedRootEffect, internal_DO_NOT_USE_enrollManagedRoot } = await import("@bb/config/internal-managed-root-admission");
   const effect = internal_DO_NOT_USE_beginManagedRootEffect("JSON caller");
   let finishRead!: (value: object) => void;
   let observedRead!: () => void;

@@ -22,7 +22,7 @@ vi.mock("ws", () => ({ WebSocket: { OPEN: 1 }, WebSocketServer: class {
   constructor() { controls.wsConstructor(); }
   on = vi.fn(); close = controls.wsClose;
 } }));
-vi.mock("@bb/config/file-lock", async () => vi.importActual("../../../packages/config/src/managed-root-admission.js"));
+vi.mock("@bb/config/file-lock", async () => vi.importActual("@bb/config/internal-managed-root-admission"));
 vi.mock("@bb/host-daemon-contract", () => {
   const schema = { parse: (value: unknown) => value };
   return { DESKTOP_BROWSER_BROKER_DESCRIPTOR_FILE: "broker.json", desktopBrowserBrokerDescriptorSchema: schema,
@@ -64,7 +64,7 @@ it("blocks publication after enrollment at an await and refuses later constructo
   const fs = await import("node:fs/promises");
   const http = await import("node:http");
   const { startDesktopBrowserBroker } = await import("./desktop-browser-broker.js");
-  const admission = await vi.importActual<typeof import("../../../packages/config/src/managed-root-admission.js")>("../../../packages/config/src/managed-root-admission.js");
+  const admission = await vi.importActual<typeof import("@bb/config/internal-managed-root-admission")>("@bb/config/internal-managed-root-admission");
   vi.mocked(fs.writeFile).mockClear();
   vi.mocked(fs.rename).mockClear();
   vi.mocked(fs.mkdir).mockImplementationOnce(async () => {

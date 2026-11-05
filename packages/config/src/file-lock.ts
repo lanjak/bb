@@ -3,7 +3,7 @@ import { lstat, mkdir, open, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "./managed-root-admission.js";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/internal-managed-root-admission";
 
 export {
   internal_DO_NOT_USE_enrollManagedRoot,
@@ -12,7 +12,7 @@ export {
   ManagedRootAdmissionUnavailableError,
   type ManagedRootRegistration,
   type ManagedRootEffect,
-} from "./managed-root-admission.js";
+} from "@bb/config/internal-managed-root-admission";
 
 const LOCK_RETRY_MS = 25;
 interface NativeFileLocks {

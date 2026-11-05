@@ -1,7 +1,7 @@
 import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { FileLockTimeoutError, withFileLock } from "./file-lock.js";
-import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "./managed-root-admission.js";
+import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/internal-managed-root-admission";
 
 const LOCK_TIMEOUT_MS = 5_000;
 
