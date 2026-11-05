@@ -69,10 +69,7 @@ export function createManagedCohortController(
         if (child === undefined || closed === undefined) return;
         child.kill("SIGTERM");
         await closed;
-        });
-      } finally {
-        settleAttempt();
-      }
+      });
       cleanups.add(cleanup);
       const sanitizedEnv: NodeJS.ProcessEnv = {};
       for (const key of ["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP", "BB_DATA_DIR", "BB_SERVER_URL", "BB_HOST_ID", "BB_HOST_KEY"]) {
@@ -97,7 +94,10 @@ export function createManagedCohortController(
         originalChild.on("error", (reason: unknown) => { failures.push(reason); revoke(); });
         controller.attachOriginal(role, originalChild);
         return originalChild;
-      });
+        });
+      } finally {
+        settleAttempt();
+      }
     },
     beginOriginalEffect(effect: string): ManagedRootEffect {
       if (pinned) throw new Error("Managed cohort no longer accepts effects.");

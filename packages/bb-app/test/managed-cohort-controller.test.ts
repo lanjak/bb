@@ -2,9 +2,27 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { createManagedCohortController } from "../src/managed-cohort-controller.js";
 
-const native = vi.hoisted(() => ({ spawn: vi.fn() }));
+const native = vi.hoisted(() => ({ spawn: vi.fn(), delayed: false, resume: undefined as (() => void) | undefined }));
 vi.mock("../src/logged-process.js", () => ({ spawnLoggedProcess: native.spawn }));
-vi.mock("@bb/config/file-lock", async () => await import("../../config/src/managed-root-admission.js"));
+vi.mock("@bb/config/file-lock", async () => {
+  const owner = await import("../../config/src/managed-root-admission.js");
+  return {
+    ...owner,
+    internal_DO_NOT_USE_beginManagedRootEffect(effect: string) {
+      const original = owner.internal_DO_NOT_USE_beginManagedRootEffect(effect);
+      return {
+        ...original,
+        runOriginal<T>(body: () => Promise<T>): Promise<T> {
+          if (!native.delayed) return original.runOriginal(body);
+          return original.runOriginal(async () => {
+            await new Promise<void>((resolve) => { native.resume = resolve; });
+            return body();
+          });
+        },
+      };
+    },
+  };
+});
 
 class OriginalChild extends EventEmitter {
   connected = true;
@@ -21,6 +39,32 @@ class OriginalChild extends EventEmitter {
 }
 
 describe("managed cohort original-channel control, not native custody", () => {
+  it("joins the queued spawn attempt and denies its body after drain starts", async () => {
+    native.spawn.mockClear();
+    native.delayed = true;
+    const controller = createManagedCohortController(["server"], undefined, {
+      serverEntry: "/fixed/server.js", daemonEntry: "/fixed/daemon.js", logDir: "/fixed/logs", env: {},
+    });
+    try {
+      const spawning = controller.spawnFixedOriginal("server");
+      const rejection = expect(spawning).rejects.toThrow();
+      let finished = false;
+      const draining = controller.drain().then(() => { finished = true; });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(finished).toBe(false);
+      expect(native.spawn).not.toHaveBeenCalled();
+      expect(native.resume).toBeTypeOf("function");
+      native.resume?.();
+      await rejection;
+      await draining;
+      expect(native.spawn).not.toHaveBeenCalled();
+    } finally {
+      native.delayed = false;
+      native.resume = undefined;
+    }
+  });
+
   it("refuses missing and duplicate roles before simulated spawn", async () => {
     native.spawn.mockClear();
     const config = { serverEntry: "/fixed/server.js", daemonEntry: "/fixed/daemon.js", logDir: "/fixed/logs", env: {} };
