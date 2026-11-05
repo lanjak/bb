@@ -6,6 +6,10 @@ import {
 } from "@bb/process-utils";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { createManagedCohortController } from "./managed-cohort-controller.js";
+
+let selectedCohort: ReturnType<typeof createManagedCohortController> | undefined;
 import { relayDesktopAppUpdates } from "@bb/config/desktop-app-update";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { spawnLoggedProcess } from "./logged-process.js";
@@ -3155,6 +3159,10 @@ function logManagedProcessStartupFailureContext(
 export async function startFullStackServerProcess(
   args: StartFullStackServerProcessArgs,
 ): Promise<ManagedProcessRun> {
+  if (selectedCohort !== undefined) {
+    await selectedCohort.spawnFixedOriginal("server");
+    throw new Error("Selected server cannot become healthy while cohort is NOT_ESTABLISHED.");
+  }
   await args.beforeStart?.();
 
   const launchId = randomUUID();
@@ -3194,6 +3202,10 @@ export async function startFullStackServerProcess(
 async function startDaemonProcess(
   args: StartDaemonProcessArgs,
 ): Promise<ManagedProcessRun> {
+  if (selectedCohort !== undefined) {
+    await selectedCohort.spawnFixedOriginal("host-daemon");
+    throw new Error("Selected daemon cannot become healthy while cohort is NOT_ESTABLISHED.");
+  }
   const daemonRun = spawnNamedManagedProcess({
     args: [...nodeNetworkArgs(args.env), args.context.daemonEntry],
     command: process.execPath,
@@ -4388,7 +4400,16 @@ export async function runBbApp(
 }
 
 export function runLauncherEntry(entry: () => Promise<void>): void {
-  void entry().catch((error) => {
+  const run = async (): Promise<void> => {
+    if (process.argv.includes("--bb-managed-bootstrap")) {
+      const controller = createManagedCohortController(["server", "host-daemon"]);
+      selectedCohort = controller;
+      internal_DO_NOT_USE_enrollManagedRoot(controller);
+      internal_DO_NOT_USE_assertManagedRootAdmission("launcher runtime resolution and child creation");
+    }
+    await entry();
+  };
+  void run().catch((error) => {
     const message =
       error instanceof Error ? (error.stack ?? error.message) : String(error);
     process.stderr.write(`${message}\n`);

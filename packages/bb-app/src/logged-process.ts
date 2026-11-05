@@ -2,6 +2,7 @@ import { spawnHostProcess as spawn } from "@bb/process-utils";
 import type { ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 
 const MAX_STDIO_LOG_BYTES_AT_SPAWN = 10 * 1024 * 1024;
 
@@ -15,6 +16,7 @@ interface SpawnLoggedProcessArgs {
 }
 
 export function spawnLoggedProcess(args: SpawnLoggedProcessArgs): ChildProcess {
+  internal_DO_NOT_USE_assertManagedRootAdmission("launcher log directory and inherited log descriptor");
   mkdirSync(args.logDir, { recursive: true });
   const logPath = join(args.logDir, `${args.logName}-stdio.log`);
   if (

@@ -9,6 +9,7 @@ import {
   writeSafeProcessDiagnosticReport,
 } from "@bb/process-utils";
 import { hasMachineSuspensionMarker } from "./suspension-marker.js";
+import { internal_DO_NOT_USE_registerManagedProcess, type ManagedProcessRegistration } from "@bb/config/managed-process-registration";
 
 interface ReportStartupFailureArgs {
   diagnosticsLogsDir: string;
@@ -48,14 +49,18 @@ function reportStartupFailure(args: ReportStartupFailureArgs): void {
   process.stderr.write(`${message}\n`, () => process.exit(1));
 }
 
-async function runHostDaemonEntrypoint(): Promise<void> {
+async function runHostDaemonEntrypoint(registration: ManagedProcessRegistration | undefined): Promise<void> {
+  registration?.assertBootstrapActive();
   const hostDaemonEntrypointConfig = loadHostDaemonEntrypointConfig();
   const hostDaemonStartConfig = loadHostDaemonStartConfig({});
   if (await hasMachineSuspensionMarker(hostDaemonStartConfig.dataDir)) {
     return;
   }
+  registration?.assertBootstrapActive();
   const hostDaemonModule = await import("./start-host-daemon.js");
+  registration?.assertBootstrapActive();
   const daemon = await hostDaemonModule.startHostDaemon({
+    managedRoot: registration,
     bbExecutableDirectory: hostDaemonEntrypointConfig.BB_CLI_DIR,
     bridgeBundleDir:
       hostDaemonEntrypointConfig.BB_BRIDGE_DIR ??
@@ -74,7 +79,16 @@ const isMainModule =
   typeof entrypointPath === "string" &&
   fileURLToPath(import.meta.url) === entrypointPath;
 
-if (isMainModule) {
+async function runMain(): Promise<void> {
+  const registration = process.argv.includes("--bb-managed-bootstrap")
+    ? await internal_DO_NOT_USE_registerManagedProcess("host-daemon", process)
+    : undefined;
+  registration?.assertBootstrapActive();
+  if (registration !== undefined) {
+    const { internal_DO_NOT_USE_assertManagedRootAdmission } = await import("@bb/config/file-lock");
+    registration.assertBootstrapActive();
+    internal_DO_NOT_USE_assertManagedRootAdmission("host daemon bootstrap diagnostics");
+  }
   const diagnosticsLogsDir = resolveDiagnosticsLogsDir();
   installSafeProcessDiagnostics({
     logsDir: diagnosticsLogsDir,
@@ -82,7 +96,16 @@ if (isMainModule) {
   });
   installSocketTypeOfServiceGuard();
   const handleMainFailure: MainFailureHandler = (error) => {
+    if (registration !== undefined) throw error;
     reportStartupFailure({ diagnosticsLogsDir, error });
   };
-  void runHostDaemonEntrypoint().catch(handleMainFailure);
+  registration?.assertBootstrapActive();
+  await runHostDaemonEntrypoint(registration).catch(handleMainFailure);
+}
+
+if (isMainModule) {
+  void runMain().catch((error: unknown) => {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
 }

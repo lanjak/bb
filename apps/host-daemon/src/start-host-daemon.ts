@@ -2,6 +2,7 @@ import { hostToolchain } from "@bb/process-utils";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { loadHostDaemonStartConfig } from "@bb/config/host-daemon";
+import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import {
   createHostWatcher,
   createSubprocessParcelWatcherBackend,
@@ -32,6 +33,7 @@ import {
 } from "./machine-auth-proxy.js";
 
 interface StartHostDaemonOptions {
+  managedRoot?: object;
   enrollKey?: string;
   hostId?: string;
   bbExecutableDirectory?: string;
@@ -44,6 +46,10 @@ interface StartHostDaemonOptions {
 export async function startHostDaemon(
   options: StartHostDaemonOptions = {},
 ): Promise<HostDaemon> {
+  if (options.managedRoot !== undefined) {
+    internal_DO_NOT_USE_enrollManagedRoot(options.managedRoot);
+    internal_DO_NOT_USE_assertManagedRootAdmission("host daemon startup");
+  }
   const resolvedConfig = loadHostDaemonStartConfig({});
   const dataDir = resolvedConfig.dataDir;
   const hostDaemonConfig = resolvedConfig.connectionConfig;
@@ -166,6 +172,7 @@ export async function startHostDaemon(
     const runtimeShellEnv = await resolveRuntimeShellEnv();
     const runtimeShellEnvResolvedAtMs = Date.now();
     app = await createHostDaemonApp({
+      managedRoot: options.managedRoot,
       dataDir,
       serverUrl,
       hostKey,

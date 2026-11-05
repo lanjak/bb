@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "type": "module",
   "exports": {
+    "./managed-process-registration": {
+      "source": "./src/managed-process-registration.ts",
+      "types": "./src/managed-process-registration.ts",
+      "default": "./src/managed-process-registration.ts"
+    },
     "./server": {
       "source": "./src/server.ts",
       "types": "./src/server.ts",
