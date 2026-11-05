@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getPluginSettingsValues,
   setPluginSettingsValues,
@@ -112,8 +112,8 @@ describe("plugin settings + storage", () => {
 
   describe("settings", () => {
     it("refuses retained logging before logger and plugin log publication", async () => {
-      const rootDir = await writeFixturePluginRoot(workDir, {
-        id: "retained-log",
+      const rootDir = await writePlugin(workDir, {
+        name: "bb-plugin-retained-log",
         serverSource: `export default function plugin() {}`,
       });
       await service.installPath(rootDir);
