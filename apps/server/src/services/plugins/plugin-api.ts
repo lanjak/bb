@@ -1,4 +1,4 @@
-import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_assertManagedRootAdmission, internal_DO_NOT_USE_beginManagedRootEffect } from "@bb/config/file-lock";
 import {
   rpcInvalidationTags,
   type ContractTagDeclarations,
@@ -1471,7 +1471,11 @@ export function createPluginApi(options: {
     },
     onDispose(hook) {
       assertLive();
-      disposeHooks.push(hook);
+      const effect = internal_DO_NOT_USE_beginManagedRootEffect("server plugin original disposal");
+      const cleanup = effect.reserveOriginalCleanup(async () => { await hook(); });
+      disposeHooks.push(async () => {
+        try { await cleanup(); } finally { effect.complete(); }
+      });
     },
     onInstall(handler) {
       assertLive();

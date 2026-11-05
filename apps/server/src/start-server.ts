@@ -1,5 +1,5 @@
 import { createDesktopAppUpdateService } from "./services/system/desktop-app-update.js";
-import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission, internal_DO_NOT_USE_beginManagedRootEffect } from "@bb/config/file-lock";
 import { createDesktopUpdateChannel } from "./services/system/desktop-update-channel.js";
 import { serve } from "@hono/node-server";
 import { existsSync } from "node:fs";
@@ -115,6 +115,19 @@ export function startServerPlugins(
 export async function runServer(serverConfig: ServerConfig, selection?: { managedRoot: object }): Promise<void> {
   if (selection !== undefined) internal_DO_NOT_USE_enrollManagedRoot(selection.managedRoot);
   internal_DO_NOT_USE_assertManagedRootAdmission("server startup");
+  const startupEffect = internal_DO_NOT_USE_beginManagedRootEffect("server startup ownership");
+  const startupCleanups: Array<() => Promise<void>> = [];
+  const cleanupStartup = startupEffect.reserveOriginalCleanup(async () => {
+    let failed = false;
+    let primary: unknown;
+    for (const cleanup of startupCleanups.reverse()) {
+      try { await cleanup(); } catch (error) {
+        if (!failed) { failed = true; primary = error; }
+      }
+    }
+    if (failed) throw primary;
+  });
+  try {
   const logger = createLogger({
     component: "server",
     dataDir: serverConfig.BB_DATA_DIR,
@@ -165,6 +178,7 @@ export async function runServer(serverConfig: ServerConfig, selection?: { manage
         })
       : null;
   const hub = new NotificationHub();
+  startupCleanups.push(async () => { hub.stopClientChangeNotifications(); });
   internal_DO_NOT_USE_assertManagedRootAdmission("server coordinator initialization");
   const watchInterests = new WatchInterestCoordinator({ db, hub });
   const sharedPorts = new HostSharedPortCoordinator({ db, hub });
@@ -386,10 +400,12 @@ export async function runServer(serverConfig: ServerConfig, selection?: { manage
     logger,
   });
   diagnosticsEnabled = performanceDiagnostics.isEnabled;
+  startupCleanups.push(() => performanceDiagnostics.stop());
   const eventLoopStallMonitor = startEventLoopStallMonitor({
     logger,
     thresholdMs: () => (diagnosticsEnabled() ? 100 : 500),
   });
+  startupCleanups.push(async () => { eventLoopStallMonitor.stop(); });
   const stopDaemonLivenessChecks = startDaemonLivenessChecks({
     config: runtimeConfig,
     db,
@@ -407,6 +423,7 @@ export async function runServer(serverConfig: ServerConfig, selection?: { manage
     terminalSessions,
   });
 
+  startupCleanups.push(async () => { stopDaemonLivenessChecks(); });
   const sweepDeps = {
     config: runtimeConfig,
     db,
@@ -558,4 +575,10 @@ export async function runServer(serverConfig: ServerConfig, selection?: { manage
   process.once("SIGTERM", () => {
     void runShutdown().finally(() => process.exit(0));
   });
+  } catch (primary) {
+    try { await cleanupStartup(); } catch {}
+    throw primary;
+  } finally {
+    startupEffect.complete();
+  }
 }

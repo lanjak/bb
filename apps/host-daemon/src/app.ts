@@ -552,6 +552,7 @@ export async function createHostDaemonApp(
       });
     },
   });
+  startupCleanups.push(() => watchManager.shutdown());
   const connectTunnel = new ConnectTunnelClient({
     serverUrl: options.serverUrl,
     hostName: options.hostName,
@@ -571,6 +572,7 @@ export async function createHostDaemonApp(
       );
     },
   });
+  startupCleanups.push(async () => { connectTunnel.shutdown(); });
   const machineNextTunnel = new MachineNextTunnel({
     frpDir: machineNextFrpDir(options.dataDir),
     trustedBaseDomain: () => {
@@ -593,6 +595,7 @@ export async function createHostDaemonApp(
       sendServerMessage({ type: "connect-next.status", status });
     },
   });
+  startupCleanups.push(() => machineNextTunnel.shutdown());
   const skillTreeTransport: SkillTreeTransport = {
     fetchManifest: (treeHash) =>
       runSessionRequest({
@@ -746,6 +749,7 @@ export async function createHostDaemonApp(
     },
     threadStorageRootPath,
   });
+  startupCleanups.push(() => runtimeManager.shutdownAll());
   const nowMs = options.nowMs ?? Date.now;
   const runtimeShellEnvCache = createRuntimeShellEnvCache({
     applyShellEnv: (shellEnv) => runtimeManager.replaceBaseShellEnv(shellEnv),
@@ -798,6 +802,7 @@ export async function createHostDaemonApp(
     sendMessage: (message) => sendServerMessage(message),
   });
   internal_DO_NOT_USE_assertManagedRootAdmission("host daemon plugin manager creation");
+  startupCleanups.push(() => terminalManager.shutdownAll());
   const pluginHostManager = new PluginHostManager({
     dataDir: options.dataDir,
     hostWatcher: options.hostWatcher,
@@ -822,9 +827,6 @@ export async function createHostDaemonApp(
     },
   });
 
-  startupCleanups.push(() => watchManager.shutdown());
-  startupCleanups.push(() => runtimeManager.shutdownAll());
-  startupCleanups.push(() => terminalManager.shutdownAll());
   startupCleanups.push(() => pluginHostManager.shutdown());
   startupEffect.assertOriginalAtDequeue();
   const desktopBrowserBroker = await startDesktopBrowserBroker({
