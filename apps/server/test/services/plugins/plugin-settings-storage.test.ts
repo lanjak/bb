@@ -80,6 +80,7 @@ it("refuses retained direct API logging before logger and plugin log publication
   const cleanups: Array<() => void | Promise<void>> = [];
   let primaryPresent = false;
   let primary: unknown;
+  const cleanupFailures: unknown[] = [];
   let dbClosed = false;
   let rootGone = false;
   let spyRestored = false;
@@ -141,9 +142,12 @@ it("refuses retained direct API logging before logger and plugin log publication
   } finally {
     for (const cleanup of [...cleanups].reverse()) {
       try { await cleanup(); } catch (error) {
-        if (!primaryPresent) { primaryPresent = true; primary = error; }
+        cleanupFailures.push(error);
       }
     }
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(primaryPresent ? [primary, ...cleanupFailures] : cleanupFailures, "Retained log cleanup failed");
   }
   if (primaryPresent) throw primary;
   expect({ dbClosed, rootGone, spyRestored }).toEqual({ dbClosed: true, rootGone: true, spyRestored: true });
