@@ -36,6 +36,7 @@ import {
 const PLUGIN_SDK_HOST_RUNTIME_NAMESPACE = "bb-host-sdk-runtime";
 const HOST_STAGE_DIRECTORY_PREFIX = ".host-stage-";
 const HOST_STAGE_STALE_AFTER_MS = 60 * 60 * 1_000;
+const PRIVATE_MANAGED_ROOT_VERIFIER = "bb-internal:original-managed-root-verifier";
 
 const PLUGIN_SDK_DEFINE_HOST_ENTRY_RUNTIME = `
 export function experimental_defineHostEntry(args) {
@@ -176,9 +177,13 @@ export async function buildPluginHost(
   rootDir: string,
   bbVersion: string,
   toolchain: PluginBuildToolchain,
+  selectedHost?: "firstparty-roam-managed",
 ): Promise<PluginHostBuildResult> {
   const { hostEntry, packageName, pluginVersion } =
     await readPluginHostConfig(rootDir);
+  if (selectedHost !== undefined && packageName !== "bb-plugin-roam") {
+    throw new Error("The selected managed host build requires bb-plugin-roam");
+  }
   const workingDir = await realpath(rootDir);
   const distDir = join(rootDir, "dist");
   await mkdir(distDir, { recursive: true });
@@ -285,6 +290,12 @@ export async function buildPluginHost(
         {
           name: "reject-private-bb-host-imports",
           setup(build) {
+            build.onResolve({ filter: /^bb-internal:/ }, (args) => {
+              if (selectedHost === "firstparty-roam-managed" && args.path === PRIVATE_MANAGED_ROOT_VERIFIER) {
+                return { path: args.path, external: true };
+              }
+              return { errors: [{ text: `Private host import is not approved: ${args.path}` }] };
+            });
             build.onResolve({ filter: /^@bb(?:\/|$)/ }, (args) => ({
               errors: [{ text: privateBbImportError(args.path) }],
             }));
@@ -303,6 +314,10 @@ export async function buildPluginHost(
                 (entry) => entry.specifier,
               );
               for (const specifier of specifiers) {
+                if (specifier.startsWith("bb-internal:") &&
+                    (selectedHost !== "firstparty-roam-managed" || specifier !== PRIVATE_MANAGED_ROOT_VERIFIER)) {
+                  return { errors: [{ text: `Private host import is not approved: ${specifier}` }] };
+                }
                 if (specifier === "@bb" || specifier.startsWith("@bb/")) {
                   return {
                     errors: [{ text: privateBbImportError(specifier) }],
@@ -318,7 +333,7 @@ export async function buildPluginHost(
       target: "node22",
       sourcemap: true,
       sourcesContent: false,
-      banner: { js: NODE_ESM_REQUIRE_BANNER },
+      banner: selectedHost === undefined ? { js: NODE_ESM_REQUIRE_BANNER } : {},
       logLevel: "error",
     });
     const skippedImports = new Map<
@@ -327,6 +342,13 @@ export async function buildPluginHost(
     >();
     if (bundle.metafile === undefined)
       throw new Error("Missing host build import graph");
+    if (selectedHost === "firstparty-roam-managed") {
+      for (const output of Object.values(bundle.metafile.outputs)) {
+        if (output.imports.some((entry) => entry.path !== PRIVATE_MANAGED_ROOT_VERIFIER || !entry.external)) {
+          throw new Error("Selected managed host graph has an unapproved external import");
+        }
+      }
+    }
     for (const [input, metadata] of Object.entries(bundle.metafile.inputs)) {
       const importer = resolve(workingDir, input);
       const owner = await owningPackageName(importer, packageNameByDirectory);

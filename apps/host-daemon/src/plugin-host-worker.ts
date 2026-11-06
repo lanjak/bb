@@ -2,6 +2,8 @@ import { z } from "zod";
 import { internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createManagedRootWorkerWitness } from "./managed-root-worker-witness.js";
+import { createManagedRootWorkerLoader } from "./managed-root-worker-loader.js";
 
 const HOST_WORKER_PROTOCOL_VERSION = 2;
 function createOperationEnvironmentScope(target: NodeJS.ProcessEnv) {
@@ -361,6 +363,7 @@ const [
   dataDir,
   tempDir,
   disposeTimeoutArg,
+  selectedHost,
 ] = process.argv.slice(2);
 const disposeTimeoutMs =
   disposeTimeoutArg === undefined
@@ -376,7 +379,8 @@ if (
   tempDir === undefined ||
   !isAbsolute(tempDir) ||
   !Number.isSafeInteger(disposeTimeoutMs) ||
-  disposeTimeoutMs <= 0
+  disposeTimeoutMs <= 0 ||
+  (selectedHost !== undefined && selectedHost !== "firstparty-roam-managed")
 ) {
   throw new Error("invalid host worker arguments");
 }
@@ -389,6 +393,7 @@ let nextWatchId = 1;
 let nextLeaseId = 1;
 let entry: HostEntry | null = null;
 let disposing = false;
+const managedWitness = createManagedRootWorkerWitness(generation);
 
 function startWatch(
   options: HostWatchOptions,
@@ -489,6 +494,7 @@ function handleWatchEvent(
 async function dispose(): Promise<void> {
   if (disposing) return;
   disposing = true;
+  managedWitness.revoke();
   setTimeout(() => process.exit(1), disposeTimeoutMs);
   lifecycleController.abort();
   for (const controller of activeCalls.values()) controller.abort();
@@ -534,6 +540,7 @@ async function handleCall(
   activeCalls.set(message.callId, controller);
   let contextOpen = true;
   let releaseEnvironment: (() => void) | undefined;
+  let unregisterContext: (() => void) | undefined;
   const releaseCallEnvironment = (): void => {
     callEnvironmentReleases.delete(message.callId);
     const release = releaseEnvironment;
@@ -545,7 +552,7 @@ async function handleCall(
     callEnvironmentReleases.set(message.callId, releaseCallEnvironment);
     controller.signal.throwIfAborted();
     const input = await validate(method.input, message.input);
-    const result = await handler(input, {
+    const context: HostContext = {
       signal: controller.signal,
       lifecycle: { signal: lifecycleController.signal },
       experimental_paths: { dataDir, tempDir },
@@ -583,7 +590,9 @@ async function handleCall(
           },
         };
       },
-    });
+    };
+    unregisterContext = managedWitness.registerContext(context);
+    const result = await handler(input, context);
     const output = normalizeJson(
       await validate(method.output, result),
       `host output for ${message.method}`,
@@ -597,6 +606,7 @@ async function handleCall(
       error: errorMessage(error),
     });
   } finally {
+    unregisterContext?.();
     contextOpen = false;
     activeCalls.delete(message.callId);
     releaseCallEnvironment();
@@ -608,8 +618,11 @@ if (!process.connected) void dispose();
 
 try {
   internal_DO_NOT_USE_assertManagedRootAdmission("pluginHostWorker.artifactImport");
-  const imported = await import(pathToFileURL(artifactPath).href);
+  const imported: unknown = selectedHost === "firstparty-roam-managed"
+    ? await createManagedRootWorkerLoader(managedWitness).load(artifactPath)
+    : await import(pathToFileURL(artifactPath).href);
   if (disposing) process.exit(0);
+  if (!isRecord(imported)) throw new Error("Invalid host module namespace");
   entry = parseEntry(imported.default);
   process.on("message", (raw: unknown) => {
     const message = parseParentMessage(raw);

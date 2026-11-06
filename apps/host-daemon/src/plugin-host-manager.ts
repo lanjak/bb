@@ -5,6 +5,7 @@ import {
   sanitizeInheritedChildProcessEnv,
 } from "@bb/process-utils";
 import { operationEnvironment } from "./operation-environment.js";
+import { createManagedRootWorkerWitness } from "./managed-root-worker-witness.js";
 import { internal_DO_NOT_USE_acquireDirectoryLease, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
 import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -103,6 +104,7 @@ interface ActiveCallAdmission {
 }
 
 interface PluginHostManagerOptions {
+  selectedHost?: "firstparty-roam-managed";
   dataDir: string;
   logger: Pick<HostDaemonLogger, "debug" | "info" | "warn">;
   fetchArtifact: FetchPluginHostArtifact;
@@ -309,6 +311,9 @@ export class PluginHostManager {
   }
 
   async call(command: PluginHostCallCommand): Promise<PluginHostCallResult> {
+    if (this.options.selectedHost === "firstparty-roam-managed") {
+      createManagedRootWorkerWitness(command.generation).assertProducerAvailable();
+    }
     if (this.shuttingDown) {
       throw new Error("host plugin manager is shutting down");
     }
@@ -482,6 +487,9 @@ export class PluginHostManager {
   private async ensureWorkerNow(
     command: PluginHostCallCommand,
   ): Promise<WorkerState> {
+    if (this.options.selectedHost === "firstparty-roam-managed") {
+      createManagedRootWorkerWitness(command.generation).assertProducerAvailable();
+    }
     internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.ensureWorkerNow");
     if (
       this.retiredGenerations.get(command.pluginId)?.has(command.generation)
@@ -572,9 +580,13 @@ export class PluginHostManager {
       internal_DO_NOT_USE_assertManagedRootAdmission("pluginHost.fork");
       child = fork(
         workerPath,
-        [artifactPath, command.pluginId, command.generation, dataDir, tempDir],
+        [artifactPath, command.pluginId, command.generation, dataDir, tempDir,
+          ...(this.options.selectedHost === "firstparty-roam-managed" ? ["2000", "firstparty-roam-managed"] : [])],
         {
           env,
+          ...(this.options.selectedHost === "firstparty-roam-managed"
+            ? { execArgv: [...process.execArgv, "--experimental-vm-modules"] }
+            : {}),
           stdio: ["ignore", "ignore", "pipe", "ipc", lease.fd],
         },
       );

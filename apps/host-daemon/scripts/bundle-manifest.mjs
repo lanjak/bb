@@ -43,6 +43,7 @@ export const bundleTargets = [
     banner: NODE_ESM_REQUIRE_BANNER,
     entryPoint: resolve(packageRoot, "src", "plugin-host-worker.ts"),
     label: "plugin host worker",
+    splitting: false,
     outfile: resolve(packageRoot, "dist", "bb-plugin-host-worker.mjs"),
   },
   {

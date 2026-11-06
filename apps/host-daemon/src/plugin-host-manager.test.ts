@@ -24,6 +24,27 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   return { ...actual, rm: vi.fn(actual.rm) };
 });
 
+it("refuses explicit managed loader selection before any directory or artifact effects", async () => {
+  const mkdir = vi.spyOn(fs, "mkdir");
+  const open = vi.spyOn(fs, "open");
+  const fetchArtifact = vi.fn(async () => artifactBody(artifactSource));
+  const manager = new PluginHostManager({
+    selectedHost: "firstparty-roam-managed",
+    dataDir: "/unresolved/data",
+    logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn() },
+    fetchArtifact,
+  });
+  try {
+    await expect(manager.call(callCommand())).rejects.toThrow("native producer");
+    expect(mkdir).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    expect(fetchArtifact).not.toHaveBeenCalled();
+  } finally {
+    mkdir.mockRestore();
+    open.mockRestore();
+  }
+});
+
 it("refuses selected plugin calls before artifact acquisition", async () => {
   vi.resetModules();
   const admission = await import("@bb/config/file-lock");

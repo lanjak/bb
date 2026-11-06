@@ -24,6 +24,24 @@ function testToolchain() {
 describe("plugin host build", () => {
   const tempDirs: string[] = [];
 
+  it.each([undefined, "firstparty-roam-managed"] as const)("restricts the private verifier to explicit selected first-party builds (%s)", async (selectedHost) => {
+    const dir = await mkdtemp(join(tmpdir(), "bb-private-host-build-test-"));
+    tempDirs.push(dir);
+    await writeFile(join(dir, "package.json"), JSON.stringify({
+      name: "bb-plugin-roam", version: "1.0.0", engines: { bb: ">=0.0" },
+      bb: { name: "Host", description: "Private host fixture.", branding: { icon: "Cpu" }, server: "./server.ts", host: "./host.ts" },
+    }));
+    await writeFile(join(dir, "server.ts"), "export default () => {};");
+    await writeFile(join(dir, "host.ts"), 'import { verifyOriginalManagedRootContext } from "bb-internal:original-managed-root-verifier"; export default verifyOriginalManagedRootContext;');
+    const result = buildPluginHost(dir, "0.9.0-test", await testToolchain(), selectedHost);
+    if (selectedHost === undefined) {
+      await expect(result).rejects.toThrow("Private host import is not approved");
+    } else {
+      const built = await result;
+      expect(await readFile(built.jsPath, "utf8")).toContain("bb-internal:original-managed-root-verifier");
+    }
+  });
+
   afterEach(async () => {
     await Promise.all(
       tempDirs
