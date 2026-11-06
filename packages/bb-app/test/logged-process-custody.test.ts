@@ -9,9 +9,11 @@ vi.mock("@bb/process-utils", () => ({ spawnHostProcess: fake.spawn }));
 vi.mock("node:child_process", () => ({ spawn: fake.nativeSpawn }));
 vi.mock("node:fs", () => ({ closeSync: fake.close, openSync: fake.open, mkdirSync: fake.mkdir, statSync: fake.stat, renameSync: fake.rename }));
 vi.mock("@bb/config/file-lock", () => ({ internal_DO_NOT_USE_assertManagedRootAdmission: () => undefined }));
-import { getOriginalProcessCustody, spawnLoggedProcess, type OriginalProcessSpawnFailure } from "../src/logged-process.js";
+import { getOriginalProcessCustody, spawnLoggedProcess, waitForOriginalLoggedProcess, type OriginalProcessSpawnFailure } from "../src/logged-process.js";
 
 class OriginalChild extends EventEmitter {
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   kill = vi.fn(() => true);
   stdout = { destroy: vi.fn() };
   stderr = { destroy: vi.fn() };
@@ -22,6 +24,33 @@ beforeEach(() => {
   vi.clearAllMocks();
   fake.spawn.mockReset();
   fake.close.mockReset();
+});
+
+it("rejects original ERROR followed by CLOSE without waiting for nonexistent EXIT", async () => {
+  const child = new OriginalChild();
+  fake.spawn.mockReturnValue(child);
+  const originalChild = spawnLoggedProcess(args);
+  const failure = new Error("injected EACCES");
+  const outcome = waitForOriginalLoggedProcess(originalChild);
+  const rejection = expect(outcome).rejects.toBe(failure);
+  child.exitCode = -13;
+  child.emit("error", failure);
+  child.emit("close", -13, null);
+  await rejection;
+});
+
+it("does not treat EXIT as original CLOSE completion", async () => {
+  const child = new OriginalChild();
+  fake.spawn.mockReturnValue(child);
+  const outcome = waitForOriginalLoggedProcess(spawnLoggedProcess(args));
+  let finished = false;
+  void outcome.then(() => { finished = true; });
+  child.exitCode = 0;
+  child.emit("exit", 0, null);
+  await Promise.resolve();
+  expect(finished).toBe(false);
+  child.emit("close", 0, null);
+  await expect(outcome).resolves.toEqual({ code: 0, signal: null });
 });
 
 it("installs completion before reentrant kill and joins CLOSE once", async () => {

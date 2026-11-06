@@ -54,6 +54,14 @@ export function getOriginalProcessCustody(child: ChildProcess): OriginalProcessC
   return originals.get(child);
 }
 
+export async function waitForOriginalLoggedProcess(child: ChildProcess): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  const original = originals.get(child);
+  if (original === undefined) throw new Error("Cannot join a process without original issuance custody.");
+  await original.closed;
+  if (original.failures.length !== 0) throw original.failures[0];
+  return { code: child.exitCode, signal: child.signalCode };
+}
+
 function retainOriginal(child: ChildProcess): OriginalProcessCustody {
   const failures: unknown[] = [];
   const kill = child.kill.bind(child);

@@ -12,7 +12,7 @@ import { createManagedCohortController } from "./managed-cohort-controller.js";
 let selectedCohort: ReturnType<typeof createManagedCohortController> | undefined;
 import { relayDesktopAppUpdates } from "@bb/config/desktop-app-update";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { spawnLoggedProcess } from "./logged-process.js";
+import { spawnLoggedProcess, waitForOriginalLoggedProcess } from "./logged-process.js";
 import {
   formatServerMovedNotice,
   startMovedResponder,
@@ -2479,7 +2479,7 @@ async function waitForNamedProcessExit(
 ): Promise<NamedProcessExitResult> {
   return {
     processName: args.processName,
-    result: await waitForProcessExit(args.childProcess),
+    result: await waitForOriginalLoggedProcess(args.childProcess),
   };
 }
 
@@ -2881,7 +2881,7 @@ Exits with code 3 without starting when the server on this data directory moved 
       }),
     }),
   });
-  process.exitCode = toExitCode(await waitForProcessExit(childProcess));
+  process.exitCode = toExitCode(await waitForOriginalLoggedProcess(childProcess));
 }
 
 async function runHostDaemonOnly(args: RunHostDaemonOnlyArgs): Promise<void> {
