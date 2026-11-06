@@ -6,7 +6,7 @@ import {
 } from "@bb/process-utils";
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { internal_DO_NOT_USE_enrollManagedRoot, internal_DO_NOT_USE_assertManagedRootAdmission } from "@bb/config/file-lock";
+import { internal_DO_NOT_USE_enrollManagedRoot } from "@bb/config/file-lock";
 import { createManagedCohortController } from "./managed-cohort-controller.js";
 
 let selectedCohort: ReturnType<typeof createManagedCohortController> | undefined;
@@ -4419,7 +4419,8 @@ export function runLauncherEntry(entry: () => Promise<void>): void {
       });
       selectedCohort = controller;
       internal_DO_NOT_USE_enrollManagedRoot(controller);
-      internal_DO_NOT_USE_assertManagedRootAdmission("launcher runtime resolution and child creation");
+      await controller.continueFixedBootstrap();
+      return;
     }
     await entry();
   };

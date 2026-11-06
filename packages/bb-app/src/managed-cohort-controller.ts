@@ -54,6 +54,13 @@ export function createManagedCohortController(
     }
   };
   const controller = Object.freeze({
+    async continueFixedBootstrap(): Promise<void> {
+      if (fixedLaunch === undefined || pinned) throw new Error("Managed bootstrap has no current fixed launch configuration.");
+      for (const role of ["server", "host-daemon"] as const) {
+        if (!required.has(role)) continue;
+        await controller.spawnFixedOriginal(role);
+      }
+    },
     async spawnFixedOriginal(
       role: "server" | "host-daemon",
     ) {
