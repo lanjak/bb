@@ -26,6 +26,7 @@ vi.mock("@bb/config/file-lock", async () => {
   return {
     ...owner,
     internal_DO_NOT_USE_enrollManagedRoot(root: object) {
+      expect(root).toBe(state.controller);
       state.stages.push("enroll");
       return owner.internal_DO_NOT_USE_enrollManagedRoot(root);
     },
@@ -43,13 +44,7 @@ vi.mock("../src/managed-cohort-controller.js", async () => {
       expect(args[1]).toBeUndefined();
       const original = actual.createManagedCohortController(...args);
       state.controller = original;
-      return {
-        ...original,
-        async continueFixedBootstrap() {
-          state.stages.push("fixed:server,host-daemon");
-          return original.continueFixedBootstrap();
-        },
-      };
+      return original;
     },
   };
 });
@@ -95,7 +90,7 @@ it("runs only the fixed control continuation after enrollment and denies physica
     const { runLauncherEntry } = await import("../src/launcher.js");
     runLauncherEntry(arbitraryEntry);
     await vi.waitFor(() => expect(stderr).toHaveBeenCalled());
-    expect(state.stages).toEqual(["enroll", "fixed:server,host-daemon", "deny:fixed server bootstrap spawn"]);
+    expect(state.stages).toEqual(["enroll", "deny:fixed server bootstrap spawn"]);
     expect(arbitraryEntry).not.toHaveBeenCalled();
     expect(state.forbidden).not.toHaveBeenCalled();
     expect(state.controller?.snapshot()).toMatchObject({ cohort: "NOT_ESTABLISHED", predecessor: "UNKNOWN", attached: 0 });
