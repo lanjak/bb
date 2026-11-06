@@ -976,7 +976,7 @@ export function resolveWorktreeRuntimePolicy(
     dataDir: parseDataDirEnvValue({
       homeDir: args.homeDir,
       rawDataDir,
-    })),
+    }),
     hostDaemonPort: parsePortValue({
       name: "BB_HOST_DAEMON_PORT",
       rawPort: rawHostDaemonPort,
@@ -2463,7 +2463,7 @@ function spawnNamedManagedProcess(
     exit: observeOriginalProcessOutcome(waitForNamedProcessExit({
       childProcess,
       processName: args.processName,
-    }),
+    })),
     async terminate(signal): Promise<void> {
       await terminateProcessIfRunning({
         childProcess,
