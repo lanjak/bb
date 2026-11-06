@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { spawnLoggedProcess } from "../src/logged-process.js";
+import { getOriginalProcessCustody, spawnLoggedProcess } from "../src/logged-process.js";
 
 const scratchDirs: string[] = [];
 
@@ -44,6 +44,25 @@ function waitForExit(child: ChildProcess): Promise<number | null> {
 }
 
 describe("spawnLoggedProcess", () => {
+  it("captures the original before closing the parent log descriptor and joins actual CLOSE", async () => {
+    const logDir = scratchDir();
+    let original: ReturnType<typeof getOriginalProcessCustody>;
+    const child = spawnLoggedProcess({
+      args: ["-e", "process.stdout.write('original-log');"],
+      command: process.execPath,
+      env: {},
+      logDir,
+      logName: "server",
+      onOriginal: (issued) => { original = issued; },
+    });
+    expect(original?.child).toBe(child);
+    expect(getOriginalProcessCustody(child)).toBe(original);
+    if (original === undefined) throw new Error("Original log process custody was not captured.");
+    await original.closed;
+    expect(readFileSync(join(logDir, "server-stdio.log"), "utf8")).toBe("original-log");
+    expect(original.failures).toEqual([]);
+  });
+
   it.each(["server", "host-daemon"] as const)(
     "captures %s stdout and stderr bursts without a parent stream reader",
     async (logName) => {

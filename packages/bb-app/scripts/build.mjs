@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, copyFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +60,10 @@ await buildNodeEsmEntry({
   packageRoot,
 });
 await buildPublicSdkDeclarations();
+await copyFile(
+  resolve(packageRoot, "src", "managed-bootstrap-entry.mjs"),
+  resolve(packageRoot, "dist", "managed-bootstrap-entry.mjs"),
+);
 await buildNodeEsmEntry({
   cleanDist: false,
   entryPoint: resolve(scriptsDir, "prune-bb-chunks.mjs"),
