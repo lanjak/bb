@@ -2,6 +2,7 @@ import { createPluginUpdateJobs } from "../../../src/services/plugins/plugin-upd
 import * as managedAdmission from "@bb/config/file-lock";
 import { createPluginApi } from "../../../src/services/plugins/plugin-api.js";
 import {
+  access,
   mkdtemp,
   mkdir,
   readFile,
@@ -79,11 +80,22 @@ it("refuses retained direct API logging before logger and plugin log publication
   const cleanups: Array<() => void | Promise<void>> = [];
   let primaryPresent = false;
   let primary: unknown;
+  let dbClosed = false;
+  let rootGone = false;
+  let spyRestored = false;
   try {
     const connection = createMigratedConnection();
-    cleanups.push(() => { connection.$client.close(); });
+    cleanups.push(() => {
+      connection.$client.close();
+      expect(connection.$client.open).toBe(false);
+      dbClosed = true;
+    });
     const root = await mkdtemp(join(tmpdir(), "bb-retained-log-direct-"));
-    cleanups.push(() => rm(root, { recursive: true, force: true }));
+    cleanups.push(async () => {
+      await rm(root, { recursive: true, force: true });
+      await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+      rootGone = true;
+    });
     const directLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
     const unexpected = () => { throw new Error("Unexpected retained-log dependency call"); };
     const handle = createPluginApi({
@@ -111,8 +123,13 @@ it("refuses retained direct API logging before logger and plugin log publication
     expect(directLogger.info).toHaveBeenCalledTimes(1);
     directLogger.info.mockClear();
     const refused = new managedAdmission.ManagedRootAdmissionUnavailableError("retained log");
+    const originalAdmission = managedAdmission.internal_DO_NOT_USE_assertManagedRootAdmission;
     const admission = vi.spyOn(managedAdmission, "internal_DO_NOT_USE_assertManagedRootAdmission").mockImplementation(() => { throw refused; });
-    cleanups.push(() => { admission.mockRestore(); });
+    cleanups.push(() => {
+      admission.mockRestore();
+      expect(managedAdmission.internal_DO_NOT_USE_assertManagedRootAdmission).toBe(originalAdmission);
+      spyRestored = true;
+    });
     expect(() => retainedLog("refused line")).toThrow(refused);
     expect(directLogger.info).not.toHaveBeenCalled();
     expect(await readFile(path, "utf8")).toBe(original);
@@ -127,6 +144,8 @@ it("refuses retained direct API logging before logger and plugin log publication
     }
   }
   if (primaryPresent) throw primary;
+  expect({ dbClosed, rootGone, spyRestored }).toEqual({ dbClosed: true, rootGone: true, spyRestored: true });
+  console.log(JSON.stringify({ decision79RetainedLogCleanup: { dbClosed, rootGone, spyRestored } }));
 });
 
 describe("plugin settings + storage", () => {
