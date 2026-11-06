@@ -36,21 +36,23 @@ fs.readFile = async function (path, ...args) {
   return result;
 };
 
-const writeFile = fs.writeFile;
-fs.writeFile = async function (path, ...args) {
-  const isTemp = String(path).endsWith(".tmp");
-  if (isTemp) {
-    await checkpoint("write");
-    if (process.env.BB_TEST_FAIL === "partial-write") {
-      await writeFile.call(this, path, "partial synthetic data", {
-        mode: 0o600,
-      });
-      await checkpoint("partial-write");
-    }
+const open = fs.open;
+fs.open = async function (path, ...args) {
+  const handle = await open.call(this, path, ...args);
+  if (String(path).endsWith(".tmp")) {
+    const writeFile = handle.writeFile.bind(handle);
+    handle.writeFile = async function (...values) {
+      await checkpoint("write");
+      if (process.env.BB_TEST_FAIL === "partial-write") {
+        await writeFile("partial synthetic data");
+        await checkpoint("partial-write");
+      }
+      const result = await writeFile(...values);
+      await checkpoint("after-write");
+      return result;
+    };
   }
-  const result = await writeFile.call(this, path, ...args);
-  if (isTemp) await checkpoint("after-write");
-  return result;
+  return handle;
 };
 
 const rename = fs.rename;

@@ -10,6 +10,8 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
+  lstatSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -195,8 +197,8 @@ async function compete(
   await Promise.all([success(first), success(second)]);
 }
 
-function cleanAndPrivate(dir: string, kind: string) {
-  expect(readdirSync(dir).filter((file) => file.endsWith(".tmp"))).toEqual([]);
+function cleanAndPrivate(dir: string, kind: string, preserved: string[] = []) {
+  expect(readdirSync(dir).filter((file) => file.endsWith(".tmp")).sort()).toEqual([...preserved].sort());
   if (process.platform === "win32") return;
   expect(statSync(join(dir, `${kind}.json`)).mode & 0o777).toBe(0o600);
   expect(statSync(join(dir, `.${kind}.json.lock`)).mode & 0o777).toBe(0o600);
@@ -333,10 +335,10 @@ describe("managed JSON CLI process transactions", options, () => {
         expect(read(path)).toEqual({
           [kind]: { [a]: va, ...(stage === "after-rename" ? { [b]: vb } : {}) },
         });
+        const orphaned = readdirSync(dir).filter((file) => file.endsWith(".tmp"));
+        expect(orphaned).toHaveLength(stage === "after-write" ? 1 : 0);
         if (stage === "after-write" && process.platform !== "win32")
-          expect(statSync(join(dir, `.${kind}.json.tmp`)).mode & 0o777).toBe(
-            0o600,
-          );
+          expect(statSync(join(dir, orphaned[0]!)).mode & 0o777).toBe(0o600);
         const remove = start(dir, [kind, "unset", a]);
         const add = start(dir, [kind, "set", b, vb]);
         await Promise.all([remove.event("blocked"), add.event("blocked")]);
@@ -344,7 +346,7 @@ describe("managed JSON CLI process transactions", options, () => {
         expect((await owner.done).signal).toBe("SIGKILL");
         await Promise.all([success(remove), success(add)]);
         expect(read(path)).toEqual({ [kind]: { [b]: vb } });
-        cleanAndPrivate(dir, kind);
+        cleanAndPrivate(dir, kind, orphaned);
       });
     }
   }
@@ -405,6 +407,8 @@ describe("managed JSON CLI process transactions", options, () => {
       pause: "after-write",
     });
     await owner.event("paused");
+    const ownerTemps = readdirSync(dir).filter((file) => file.endsWith(".tmp"));
+    expect(ownerTemps).toHaveLength(1);
     const lockPath = join(dir, ".env.json.lock");
     const lockInode = statSync(lockPath).ino;
     const old = new Date(0);
@@ -417,7 +421,7 @@ describe("managed JSON CLI process transactions", options, () => {
     expect(result.stderr).toContain(`Timed out waiting to update ${path}`);
     expect(result.stdout).not.toContain("Unset");
     expect(statSync(lockPath).ino).toBe(lockInode);
-    expect(existsSync(join(dir, ".env.json.tmp"))).toBe(true);
+    expect(readdirSync(dir).filter((file) => file.endsWith(".tmp"))).toEqual(ownerTemps);
     expect(read(path)).toEqual({ env: { SYNTHETIC_A: "synthetic" } });
     if (process.platform !== "win32") owner.child.kill("SIGCONT");
     owner.release();
@@ -446,7 +450,7 @@ describe("managed JSON CLI process transactions", options, () => {
     }
   });
 
-  it("cleans crash leftovers without reusing their permissions or contents", async () => {
+  it("preserves foreign crash leftovers without reusing their permissions or contents", async () => {
     const dir = directory();
     const path = seed(dir, "env", { env: { SYNTHETIC_A: "synthetic" } });
     const temp = join(dir, ".env.json.tmp");
@@ -454,7 +458,9 @@ describe("managed JSON CLI process transactions", options, () => {
     chmodSync(temp, 0o644);
     await success(start(dir, ["env", "unset", "SYNTHETIC_A"]));
     expect(read(path)).toEqual({});
-    cleanAndPrivate(dir, "env");
+    expect(readFileSync(temp, "utf8")).toBe('{"env":{"REMOVED_SECRET":"synthetic"}}');
+    if (process.platform !== "win32") expect(statSync(temp).mode & 0o777).toBe(0o644);
+    cleanAndPrivate(dir, "env", [".env.json.tmp"]);
   });
 
   for (const remove of [false, true]) {
@@ -503,6 +509,18 @@ describe("managed JSON CLI process transactions", options, () => {
       cleanAndPrivate(dir, "client");
     });
   }
+
+  it.skipIf(process.platform === "win32")("preserves a foreign temporary symlink and its target", async () => {
+    const dir = directory();
+    const target = join(dir, "foreign-secret");
+    writeFileSync(target, "foreign bytes", { mode: 0o600 });
+    const temp = join(dir, ".env.json.tmp");
+    symlinkSync(target, temp);
+    await success(start(dir, ["env", "set", "EMPTY", "value"]));
+    expect(lstatSync(temp).isSymbolicLink()).toBe(true);
+    expect(readFileSync(target, "utf8")).toBe("foreign bytes");
+    cleanAndPrivate(dir, "env", [".env.json.tmp"]);
+  });
 
   it("serializes machine enrollment with launcher config changes", async () => {
     const dir = directory();
