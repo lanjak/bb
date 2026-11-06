@@ -16,7 +16,20 @@ interface SpawnLoggedProcessArgs {
   logDir: string;
   logName: "server" | "host-daemon";
   onOriginal?: (original: OriginalProcessCustody) => void;
+  onIssuanceFailure?: (failure: OriginalProcessSpawnFailure) => void;
 }
+
+export class OriginalProcessSpawnFailure extends Error {
+  constructor(
+    readonly primary: unknown,
+    readonly original: OriginalProcessCustody | undefined,
+    readonly descriptor: { readonly fd: number; readonly attempted: boolean; readonly closed: boolean; readonly failures: readonly unknown[] },
+  ) {
+    super("Original process issuance remains uncertain.");
+  }
+}
+
+const uncertainIssuances = new Set<OriginalProcessSpawnFailure>();
 
 export interface OriginalProcessCustody {
   readonly child: ChildProcess;
@@ -40,16 +53,23 @@ function retainOriginal(child: ChildProcess): OriginalProcessCustody {
   const original = Object.freeze({
     child, closed, failures,
     cleanup() {
-      cleanup ??= (async () => {
+      if (cleanup !== undefined) return cleanup;
+      let resolve: () => void = () => undefined;
+      let reject: (reason: unknown) => void = () => undefined;
+      cleanup = new Promise<void>((accept, refuse) => { resolve = accept; reject = refuse; });
+      void (async () => {
         let failurePresent = false;
         let failure: unknown;
         try { kill("SIGTERM"); } catch (reason) { failurePresent = true; failure = reason; failures.push(reason); }
         await closed;
         for (const pipe of [child.stdout, child.stderr]) {
-          try { pipe?.destroy(); } catch (reason) { failures.push(reason); }
+          try { pipe?.destroy(); } catch (reason) {
+            failures.push(reason);
+            if (!failurePresent) { failurePresent = true; failure = reason; }
+          }
         }
         if (failurePresent) throw failure;
-      })();
+      })().then(resolve, reject);
       return cleanup;
     },
   });
@@ -84,6 +104,7 @@ export function spawnLoggedProcess(args: SpawnLoggedProcessArgs): ChildProcess {
     renameSync(logPath, join(args.logDir, `${args.logName}-stdio.1.log`));
   }
   const fd = openSync(logPath, "a", 0o600);
+  const descriptor = { fd, attempted: false, closed: false, failures: [] as unknown[] };
   let original: OriginalProcessCustody | undefined;
   let primaryPresent = false;
   let primary: unknown;
@@ -99,15 +120,20 @@ export function spawnLoggedProcess(args: SpawnLoggedProcessArgs): ChildProcess {
     primary = reason;
     original?.failures.push(reason);
   }
-  try { closeSync(fd); }
+  try { descriptor.attempted = true; closeSync(fd); descriptor.closed = true; }
   catch (reason) {
+    descriptor.failures.push(reason);
     if (original !== undefined) original.failures.push(reason);
-    else if (!primaryPresent) { primaryPresent = true; primary = reason; }
+    if (!primaryPresent) { primaryPresent = true; primary = reason; }
   }
-  if (original !== undefined) {
-    if (primaryPresent) void original.cleanup().catch((reason: unknown) => { original.failures.push(reason); });
-    return original.child;
+  if (primaryPresent) {
+    const failure = new OriginalProcessSpawnFailure(primary, original, descriptor);
+    uncertainIssuances.add(failure);
+    if (original !== undefined) void original.cleanup().catch((reason: unknown) => { original.failures.push(reason); });
+    try { args.onIssuanceFailure?.(failure); }
+    catch (reason) { descriptor.failures.push(reason); }
+    throw primary;
   }
-  if (primaryPresent) throw primary;
+  if (original !== undefined) return original.child;
   throw new Error("Native spawn did not return an original child.");
 }
