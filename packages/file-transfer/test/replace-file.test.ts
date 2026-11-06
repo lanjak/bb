@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Stats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { makeTempDir } from "@bb/test-helpers";
@@ -10,6 +11,42 @@ function sha256(content: string): string {
 }
 
 describe("replaceFile", () => {
+  it("keeps the original target when the caller mutates its request during stat", async () => {
+    const args = { path: "/original/file", contents: Buffer.from("new") };
+    const failure = new Error("Stop before publication");
+    const stat = vi.spyOn(fs, "stat").mockImplementation(async () => {
+      args.path = "/foreign/ancestor";
+      return new Stats();
+    });
+    const read = vi.spyOn(fs, "readFile").mockRejectedValue(failure);
+    try {
+      await expect(replaceFile(args)).rejects.toBe(failure);
+      expect(read).toHaveBeenCalledExactlyOnceWith("/original/file");
+    } finally {
+      stat.mockRestore();
+      read.mockRestore();
+    }
+  });
+
+  it("refuses the next read when enrollment occurs during the original stat", async () => {
+    vi.resetModules();
+    const admission = await import("@bb/config/file-lock");
+    const { replaceFile: replace } = await import("../src/replace-file.js");
+    const stat = vi.spyOn(fs, "stat").mockImplementation(async () => {
+      admission.internal_DO_NOT_USE_enrollManagedRoot({});
+      return new Stats();
+    });
+    const read = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected read"));
+    try {
+      await expect(replace({ path: "/original/file", contents: Buffer.from("new") })).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      stat.mockRestore();
+      read.mockRestore();
+      vi.resetModules();
+    }
+  });
+
   it("does not remove a temporary path when exclusive creation reports EEXIST", async () => {
     const stat = vi.spyOn(fs, "stat").mockRejectedValue(Object.assign(new Error("Missing target"), { code: "ENOENT" }));
     const open = vi.spyOn(fs, "open").mockRejectedValue(Object.assign(new Error("Existing temporary file"), { code: "EEXIST" }));

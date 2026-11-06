@@ -78,7 +78,13 @@ export async function replaceFile(
 ): Promise<ReplaceFileResult> {
   const effect = internal_DO_NOT_USE_beginManagedRootEffect("replaceFile");
   try {
-    return await effect.runOriginal(() => replaceAdmittedFile(args, effect));
+    const originalArgs: ReplaceFileArgs = {
+      path: args.path,
+      contents: Buffer.from(args.contents),
+      ...(args.mode === undefined ? {} : { mode: args.mode }),
+      ...(args.expectedSha256 === undefined ? {} : { expectedSha256: args.expectedSha256 }),
+    };
+    return await effect.runOriginal(() => replaceAdmittedFile(originalArgs, effect));
   } finally {
     effect.complete();
   }
@@ -97,8 +103,8 @@ async function replaceAdmittedFile(
   let currentContents: Buffer | null = null;
   let currentMode: number | undefined;
   try {
-    currentMode = (await fs.stat(args.path)).mode & 0o777;
-    currentContents = await fs.readFile(args.path);
+    currentMode = (await effect.runOriginal(() => fs.stat(args.path))).mode & 0o777;
+    currentContents = await effect.runOriginal(() => fs.readFile(args.path));
   } catch (error) {
     if (!isFsErrorWithCode(error, "ENOENT")) {
       throw error;
