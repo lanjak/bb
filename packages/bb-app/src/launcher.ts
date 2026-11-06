@@ -12,7 +12,7 @@ import { createManagedCohortController } from "./managed-cohort-controller.js";
 let selectedCohort: ReturnType<typeof createManagedCohortController> | undefined;
 import { relayDesktopAppUpdates } from "@bb/config/desktop-app-update";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { spawnLoggedProcess, waitForOriginalLoggedProcess } from "./logged-process.js";
+import { observeOriginalProcessOutcome, spawnLoggedProcess, waitForOriginalLoggedProcess } from "./logged-process.js";
 import {
   formatServerMovedNotice,
   startMovedResponder,
@@ -976,7 +976,7 @@ export function resolveWorktreeRuntimePolicy(
     dataDir: parseDataDirEnvValue({
       homeDir: args.homeDir,
       rawDataDir,
-    }),
+    })),
     hostDaemonPort: parsePortValue({
       name: "BB_HOST_DAEMON_PORT",
       rawPort: rawHostDaemonPort,
@@ -2460,7 +2460,7 @@ function spawnNamedManagedProcess(
   });
   return {
     childProcess,
-    exit: waitForNamedProcessExit({
+    exit: observeOriginalProcessOutcome(waitForNamedProcessExit({
       childProcess,
       processName: args.processName,
     }),

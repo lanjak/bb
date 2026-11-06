@@ -45,6 +45,14 @@ export interface OriginalProcessCustody {
 
 const originals = new WeakMap<ChildProcess, OriginalProcessCustody>();
 const originalFailures = new WeakMap<OriginalProcessCustody, unknown[]>();
+const observedOutcomes = new WeakMap<Promise<unknown>, { failed: boolean; reason: unknown }>();
+
+export function observeOriginalProcessOutcome<T>(original: Promise<T>): Promise<T> {
+  const outcome = { failed: false, reason: undefined as unknown };
+  observedOutcomes.set(original, outcome);
+  void original.then(undefined, (reason: unknown) => { outcome.failed = true; outcome.reason = reason; });
+  return original;
+}
 
 function retainFailure(original: OriginalProcessCustody, reason: unknown): void {
   originalFailures.get(original)?.push(reason);

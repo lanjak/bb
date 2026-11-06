@@ -9,7 +9,7 @@ vi.mock("@bb/process-utils", () => ({ spawnHostProcess: fake.spawn }));
 vi.mock("node:child_process", () => ({ spawn: fake.nativeSpawn }));
 vi.mock("node:fs", () => ({ closeSync: fake.close, openSync: fake.open, mkdirSync: fake.mkdir, statSync: fake.stat, renameSync: fake.rename }));
 vi.mock("@bb/config/file-lock", () => ({ internal_DO_NOT_USE_assertManagedRootAdmission: () => undefined }));
-import { getOriginalProcessCustody, spawnLoggedProcess, waitForOriginalLoggedProcess, type OriginalProcessSpawnFailure } from "../src/logged-process.js";
+import { getOriginalProcessCustody, observeOriginalProcessOutcome, spawnLoggedProcess, waitForOriginalLoggedProcess, type OriginalProcessSpawnFailure } from "../src/logged-process.js";
 
 class OriginalChild extends EventEmitter {
   exitCode: number | null = null;
@@ -18,6 +18,25 @@ class OriginalChild extends EventEmitter {
   stdout = { destroy: vi.fn() };
   stderr = { destroy: vi.fn() };
 }
+
+it("owns early rejection while preserving the original promise for a delayed consumer", async () => {
+  const unhandled = vi.fn();
+  process.on("unhandledRejection", unhandled);
+  try {
+    const child = new OriginalChild();
+    fake.spawn.mockReturnValue(child);
+    const original = waitForOriginalLoggedProcess(spawnLoggedProcess(args));
+    const observed = observeOriginalProcessOutcome(original);
+    expect(observed).toBe(original);
+    child.emit("error", undefined);
+    child.emit("close", -13, null);
+    await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+    expect(unhandled).not.toHaveBeenCalled();
+    await expect(observed).rejects.toBeUndefined();
+  } finally {
+    process.removeListener("unhandledRejection", unhandled);
+  }
+});
 const args = { command: "/inert/node", args: [], env: {}, logDir: "/unopened", logName: "server" as const };
 
 beforeEach(() => {
