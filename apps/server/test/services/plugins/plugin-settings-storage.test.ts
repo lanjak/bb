@@ -114,6 +114,8 @@ it("refuses retained direct API logging before logger and plugin log publication
       setNextTunnels: unexpected, nextTunnelStatuses: unexpected,
       onNextTunnelStatusChange: unexpected, replaceDeclaredSharedPorts: unexpected,
       callPluginHost: unexpected,
+      registerProvider: unexpected, registerAiService: unexpected,
+      isProviderIdTaken: unexpected, assertProviderRegistrable: unexpected,
     });
     const retainedLog = handle.api.log.info;
     retainedLog("original line");
