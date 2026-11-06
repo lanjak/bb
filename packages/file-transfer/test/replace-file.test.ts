@@ -21,6 +21,71 @@ async function withRestoredMocks(body: () => Promise<void>, restores: (() => voi
 }
 
 describe("replaceFile", () => {
+  it("keeps the original target and bytes through a denied temporary creation", async () => {
+    const args = { path: "/original/file", contents: Buffer.from("new") };
+    const stat = vi.spyOn(fs, "stat").mockResolvedValue(new Stats());
+    const read = vi.spyOn(fs, "readFile").mockResolvedValue(Buffer.from("old"));
+    const open = vi.spyOn(fs, "open").mockImplementation(async () => {
+      args.path = "/foreign/ancestor";
+      args.contents.fill(0);
+      throw Object.assign(new Error("Permission denied"), { code: "EACCES" });
+    });
+    const write = vi.spyOn(fs, "writeFile").mockResolvedValue(undefined);
+    const rm = vi.spyOn(fs, "rm").mockRejectedValue(new Error("Unexpected removal"));
+    await withRestoredMocks(async () => {
+      await expect(replaceFile(args)).resolves.toEqual({
+        outcome: "written",
+        sha256: sha256("new"),
+        sizeBytes: 3,
+      });
+      expect(write).toHaveBeenCalledExactlyOnceWith("/original/file", Buffer.from("new"));
+      expect(rm).not.toHaveBeenCalled();
+    }, [() => stat.mockRestore(), () => read.mockRestore(), () => open.mockRestore(), () => write.mockRestore(), () => rm.mockRestore()]);
+  });
+
+  it.each(["revision", "create-only"] as const)(
+    "refuses the final %s hash read after enrollment without turning denial into a conflict",
+    async (kind) => {
+      vi.resetModules();
+      const admission = await import("@bb/config/file-lock");
+      const { replaceFile: replace } = await import("../src/replace-file.js");
+      const enroll = () => { admission.internal_DO_NOT_USE_enrollManagedRoot({}); };
+      const stat = vi.spyOn(fs, "stat");
+      if (kind === "revision") stat.mockResolvedValue(new Stats());
+      else stat.mockRejectedValue(Object.assign(new Error("Missing target"), { code: "ENOENT" }));
+      const read = vi.spyOn(fs, "readFile").mockResolvedValue(Buffer.from("old"));
+      const close = vi.fn(async () => {});
+      const sync = vi.fn(async () => { if (kind === "revision") enroll(); });
+      const chmod = vi.fn(async () => {});
+      const write = vi.fn(async () => ({ bytesWritten: 3 }));
+      type Handle = Awaited<ReturnType<typeof fs.open>>;
+      const open = vi.spyOn(fs, "open").mockResolvedValue({ close, sync, chmod, write } as Handle);
+      const link = vi.spyOn(fs, "link").mockImplementation(async () => {
+        enroll();
+        throw Object.assign(new Error("Target appeared"), { code: "EEXIST" });
+      });
+      const rename = vi.spyOn(fs, "rename").mockRejectedValue(new Error("Unexpected rename"));
+      const rm = vi.spyOn(fs, "rm").mockResolvedValue(undefined);
+      await withRestoredMocks(async () => {
+        await expect(replace({
+          path: "/original/file",
+          contents: Buffer.from("new"),
+          expectedSha256: kind === "revision" ? sha256("old") : null,
+        })).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+        expect(read).toHaveBeenCalledTimes(kind === "revision" ? 1 : 0);
+        if (kind === "revision") expect(read).toHaveBeenCalledExactlyOnceWith("/original/file");
+        expect(write).toHaveBeenCalledOnce();
+        expect(sync).toHaveBeenCalledOnce();
+        expect(close).toHaveBeenCalledOnce();
+        expect(link).toHaveBeenCalledTimes(kind === "revision" ? 0 : 1);
+        expect(rename).not.toHaveBeenCalled();
+        const temporaryPath = open.mock.calls[0]?.[0];
+        expect(temporaryPath).toEqual(expect.stringMatching(/^\/original\/\.bb-write-/));
+        expect(rm).toHaveBeenCalledExactlyOnceWith(temporaryPath, { force: true });
+      }, [() => stat.mockRestore(), () => read.mockRestore(), () => open.mockRestore(), () => link.mockRestore(), () => rename.mockRestore(), () => rm.mockRestore(), () => vi.resetModules()]);
+    },
+  );
+
   it("keeps the original target when the caller mutates its request during stat", async () => {
     const args = { path: "/original/file", contents: Buffer.from("new") };
     const failure = new Error("Stop before publication");

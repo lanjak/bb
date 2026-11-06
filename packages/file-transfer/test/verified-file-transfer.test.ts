@@ -6,6 +6,37 @@ import { describe, expect, it, vi } from "vitest";
 import { copyVerifiedFile } from "../src/index.js";
 
 describe("copyVerifiedFile", () => {
+  it.each(["revoked", "opaque failure"] as const)(
+    "destroys only the original hash stream after %s without replacing the primary failure",
+    async (kind) => {
+      vi.resetModules();
+      const admission = await import("@bb/config/file-lock");
+      const transfer = await import("../src/verified-file-transfer.js");
+      const next = vi.fn(async () => {
+        admission.internal_DO_NOT_USE_enrollManagedRoot({});
+        if (kind === "opaque failure") throw undefined;
+        return { done: false as const, value: Buffer.from("original") };
+      });
+      const destroy = vi.fn(() => { throw new Error("Cleanup failed"); });
+      const stream = { destroy, [Symbol.asyncIterator]: () => ({ next }) } as ReturnType<typeof nodeFs.createReadStream>;
+      const createReadStream = vi.spyOn(nodeFs, "createReadStream").mockReturnValue(stream);
+      let failed = false;
+      let reason: unknown;
+      try {
+        try { await transfer.hashFile("/original/file"); }
+        catch (error) { failed = true; reason = error; }
+        expect(failed).toBe(true);
+        if (kind === "revoked") expect(reason).toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+        else expect(reason).toBeUndefined();
+        expect(createReadStream).toHaveBeenCalledExactlyOnceWith("/original/file");
+        expect(next).toHaveBeenCalledOnce();
+        expect(destroy).toHaveBeenCalledOnce();
+      } finally {
+        try { createReadStream.mockRestore(); } finally { vi.resetModules(); }
+      }
+    },
+  );
+
   it("refuses direct hash reads before stream creation after root enrollment", async () => {
     vi.resetModules();
     const admission = await import("@bb/config/file-lock");
