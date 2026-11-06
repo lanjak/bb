@@ -69,17 +69,14 @@ export function createManagedCohortController(
       spawning.add(role);
       const effect = controller.beginOriginalEffect(`fixed ${role} bootstrap spawn`);
       let child: ReturnType<typeof spawnLoggedProcess> | undefined;
-      let closed: Promise<void> | undefined;
+      let custody: OriginalProcessCustody | undefined;
+
       let settleAttempt: () => void = () => undefined;
       const attemptSettled = new Promise<void>((resolve) => { settleAttempt = resolve; });
       const cleanup = effect.reserveOriginalCleanup(async () => {
         await attemptSettled;
-        if (child === undefined || closed === undefined) return;
-        try {
-          child.kill("SIGTERM");
-        } finally {
-          await closed;
-        }
+        if (custody !== undefined) { await custody.cleanup(); return; }
+        if (child !== undefined) throw new Error("Issued child has no original custody receipt.");
       });
       cleanups.add(cleanup);
       const sanitizedEnv: NodeJS.ProcessEnv = {};
@@ -98,19 +95,16 @@ export function createManagedCohortController(
           logDir: fixedLaunch.logDir,
           logName: role,
           onOriginal(original) {
+            custody = original;
             originalCustodies.add(original);
             child = original.child;
-            closed = original.closed;
+
             original.child.on("error", (reason: unknown) => { failures.push(reason); revoke(); });
             controller.attachOriginal(role, original.child);
           },
         });
         const originalChild = child;
-        if (closed === undefined) closed = new Promise<void>((resolve) => {
-          originalChild.once("close", () => resolve());
-        });
-        originalChild.on("error", (reason: unknown) => { failures.push(reason); revoke(); });
-        if (!children.has(originalChild)) controller.attachOriginal(role, originalChild);
+        if (custody === undefined) { revoke(); throw new Error("Spawn did not associate original custody at issuance."); }
         for (const original of originalCustodies) {
           if (original.failures.length !== 0) { revoke(); throw original.failures[0]; }
         }

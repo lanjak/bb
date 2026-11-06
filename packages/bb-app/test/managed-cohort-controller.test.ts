@@ -3,7 +3,32 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createManagedCohortController } from "../src/managed-cohort-controller.js";
 
 const native = vi.hoisted(() => ({ spawn: vi.fn(), delayed: false, wrappers: 0, resume: undefined as (() => void) | undefined }));
-vi.mock("../src/logged-process.js", () => ({ spawnLoggedProcess: native.spawn }));
+vi.mock("../src/logged-process.js", () => ({
+  spawnLoggedProcess(options: { onOriginal(original: { child: OriginalChild; closed: Promise<void>; readonly failures: readonly unknown[]; cleanup(): Promise<void> }): void }) {
+    const child: OriginalChild = native.spawn(options);
+    const kill = child.kill.bind(child);
+    const failures: unknown[] = [];
+    const closed = new Promise<void>((resolve) => { child.once("close", resolve); });
+    child.on("error", (reason: unknown) => { failures.push(reason); });
+    let cleanup: Promise<void> | undefined;
+    options.onOriginal({
+      child, closed,
+      get failures() { return Object.freeze([...failures]); },
+      cleanup() {
+        cleanup ??= Promise.resolve().then(async () => {
+          try { kill("SIGTERM"); } catch (reason) { failures.push(reason); }
+          await closed;
+          for (const pipe of [child.stdout, child.stderr]) {
+            try { pipe.destroy(); } catch (reason) { failures.push(reason); }
+          }
+          if (failures.length !== 0) throw failures[0];
+        });
+        return cleanup;
+      },
+    });
+    return child;
+  },
+}));
 vi.mock("@bb/config/file-lock", async () => {
   const owner = await vi.importActual<typeof import("@bb/config/internal-managed-root-admission")>("@bb/config/internal-managed-root-admission");
   return {
@@ -33,6 +58,8 @@ class OriginalChild extends EventEmitter {
   delayed = false;
   callbacks: ((error: Error | null) => void)[] = [];
   kill = vi.fn(() => true);
+  stdout = { destroy: vi.fn() };
+  stderr = { destroy: vi.fn() };
   send(message: object, callback: (error: Error | null) => void): boolean {
     this.sent.push(message);
     if (this.delayed) this.callbacks.push(callback);
@@ -47,6 +74,25 @@ describe("managed cohort original-channel control, not native custody", () => {
     native.delayed = false;
     native.wrappers = 0;
     native.resume = undefined;
+  });
+  it("uses captured custody rather than a replaced live kill and retains pipe uncertainty", async () => {
+    const controller = createManagedCohortController(["server"], undefined, {
+      serverEntry: "/fixed/server.js", daemonEntry: "/fixed/daemon.js", logDir: "/fixed/logs", env: {},
+    });
+    const child = new OriginalChild();
+    const originalKill = child.kill;
+    child.stdout.destroy.mockImplementation(() => { throw false; });
+    native.spawn.mockReturnValue(child);
+    await controller.spawnFixedOriginal("server");
+    child.kill = vi.fn(() => { throw new Error("Replaced kill must not run."); });
+    const draining = controller.drain();
+    await vi.waitFor(() => expect(originalKill).toHaveBeenCalledTimes(1));
+    expect(child.kill).not.toHaveBeenCalled();
+    child.emit("close");
+    const result = await draining;
+    expect(result.status).toBe("PINNED");
+    expect(result.failures).toContain(false);
+    expect(child.stderr.destroy).toHaveBeenCalledTimes(1);
   });
   it("retains a throwing kill outcome and still joins original close", async () => {
     native.spawn.mockClear();
