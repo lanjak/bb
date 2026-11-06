@@ -20,7 +20,11 @@ vi.mock("@bb/process-utils", () => state.closedModule("process-utils", { hostToo
 vi.mock("node:fs", () => state.closedModule("fs"));
 vi.mock("node:fs/promises", () => state.closedModule("fs/promises"));
 vi.mock("node:os", () => ({ homedir: () => "/entry-control-home" }));
-vi.mock("../src/logged-process.js", () => ({ spawnLoggedProcess: state.forbidden }));
+vi.mock("../src/logged-process.js", () => ({
+  spawnLoggedProcess: state.forbidden,
+  observeOriginalProcessOutcome: state.forbidden,
+  waitForOriginalLoggedProcess: state.forbidden,
+}));
 vi.mock("@bb/config/file-lock", async () => {
   const owner = await vi.importActual<typeof import("@bb/config/internal-managed-root-admission")>("@bb/config/internal-managed-root-admission");
   return {
