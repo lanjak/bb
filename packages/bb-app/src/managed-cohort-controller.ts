@@ -1,6 +1,6 @@
 import type { ManagedParentToProcessMessage, ManagedProcessRole } from "@bb/config/managed-process-registration";
 import { internal_DO_NOT_USE_beginManagedRootEffect, type ManagedRootEffect } from "@bb/config/file-lock";
-import { spawnLoggedProcess } from "./logged-process.js";
+import { spawnLoggedProcess, type OriginalProcessCustody } from "./logged-process.js";
 
 interface OriginalChild {
   readonly connected: boolean;
@@ -35,6 +35,7 @@ export function createManagedCohortController(
   const spawning = new Set<ManagedProcessRole>();
   const effects = new Set<ManagedRootEffect>();
   const cleanups = new Set<() => Promise<void>>();
+  const originalCustodies = new Set<OriginalProcessCustody>();
   const failures: unknown[] = [];
   const children = new WeakSet<OriginalChild>();
   const originalPredecessor = predecessor !== undefined && controllers.has(predecessor) ? predecessor : undefined;
@@ -96,13 +97,23 @@ export function createManagedCohortController(
           ipc: true,
           logDir: fixedLaunch.logDir,
           logName: role,
+          onOriginal(original) {
+            originalCustodies.add(original);
+            child = original.child;
+            closed = original.closed;
+            original.child.on("error", (reason: unknown) => { failures.push(reason); revoke(); });
+            controller.attachOriginal(role, original.child);
+          },
         });
         const originalChild = child;
-        closed = new Promise<void>((resolve) => {
+        if (closed === undefined) closed = new Promise<void>((resolve) => {
           originalChild.once("close", () => resolve());
         });
         originalChild.on("error", (reason: unknown) => { failures.push(reason); revoke(); });
-        controller.attachOriginal(role, originalChild);
+        if (!children.has(originalChild)) controller.attachOriginal(role, originalChild);
+        for (const original of originalCustodies) {
+          if (original.failures.length !== 0) { revoke(); throw original.failures[0]; }
+        }
         return originalChild;
         });
       } finally {
@@ -155,6 +166,7 @@ export function createManagedCohortController(
         try { await cleanup(); } catch (reason) { failures.push(reason); }
       }));
       const retainedFailures = [...failures];
+      for (const original of originalCustodies) retainedFailures.push(...original.failures);
       for (const original of effects) retainedFailures.push(...original.complete().failures);
       if (originalPredecessor !== undefined) {
         const original = controllers.get(originalPredecessor);

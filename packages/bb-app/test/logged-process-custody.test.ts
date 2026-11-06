@@ -54,6 +54,12 @@ it("preserves undefined spawn primary and original FD close uncertainty without 
   expect(receipt?.primary).toBeUndefined();
   expect(receipt?.original).toBeUndefined();
   expect(receipt?.descriptor).toMatchObject({ fd: 73, attempted: true, closed: false, failures: [closeFailure] });
+  if (receipt === undefined) throw new Error("Missing issuance receipt.");
+  const descriptor = receipt.descriptor;
+  expect(Object.isFrozen(descriptor)).toBe(true);
+  expect(Object.isFrozen(descriptor.failures)).toBe(true);
+  expect(Reflect.set(descriptor, "closed", true)).toBe(false);
+  expect(receipt.descriptor.closed).toBe(false);
   expect(fake.close).toHaveBeenCalledExactlyOnceWith(73);
 });
 
@@ -70,8 +76,26 @@ it("surfaces exact close failure to ordinary caller while retaining the issued o
   expect(receipt?.original?.child).toBe(child);
   expect(receipt?.descriptor.fd).toBe(73);
   expect(fake.close).toHaveBeenCalledTimes(1);
+  const cleanup = receipt?.original?.cleanup();
+  const rejected = expect(cleanup).rejects.toBe(failure);
   child.emit("close");
-  await receipt?.original?.cleanup();
+  await rejected;
+});
+
+it("keeps private event uncertainty after CLOSE despite attempted snapshot mutation", async () => {
+  const child = new OriginalChild();
+  fake.spawn.mockReturnValue(child);
+  const original = getOriginalProcessCustody(spawnLoggedProcess(args));
+  if (original === undefined) throw new Error("Missing original custody.");
+  child.emit("error", false);
+  const snapshot = original.failures;
+  expect(Object.isFrozen(snapshot)).toBe(true);
+  expect(() => Reflect.set(snapshot, "0", undefined)).not.toThrow();
+  expect(original.failures).toEqual([false]);
+  const cleanup = original.cleanup();
+  const rejection = expect(cleanup).rejects.toBe(false);
+  child.emit("close");
+  await rejection;
 });
 
 it("attempts both pipe destructions and rejects with first opaque failure after CLOSE", async () => {

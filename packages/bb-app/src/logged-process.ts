@@ -20,12 +20,17 @@ interface SpawnLoggedProcessArgs {
 }
 
 export class OriginalProcessSpawnFailure extends Error {
+  readonly #descriptorState: { readonly fd: number; readonly attempted: boolean; readonly closed: boolean; readonly failures: readonly unknown[] };
   constructor(
     readonly primary: unknown,
     readonly original: OriginalProcessCustody | undefined,
-    readonly descriptor: { readonly fd: number; readonly attempted: boolean; readonly closed: boolean; readonly failures: readonly unknown[] },
+    descriptorState: { readonly fd: number; readonly attempted: boolean; readonly closed: boolean; readonly failures: readonly unknown[] },
   ) {
     super("Original process issuance remains uncertain.");
+    this.#descriptorState = descriptorState;
+  }
+  get descriptor() {
+    return Object.freeze({ ...this.#descriptorState, failures: Object.freeze([...this.#descriptorState.failures]) });
   }
 }
 
@@ -34,11 +39,16 @@ const uncertainIssuances = new Set<OriginalProcessSpawnFailure>();
 export interface OriginalProcessCustody {
   readonly child: ChildProcess;
   readonly closed: Promise<void>;
-  readonly failures: unknown[];
+  readonly failures: readonly unknown[];
   cleanup(): Promise<void>;
 }
 
 const originals = new WeakMap<ChildProcess, OriginalProcessCustody>();
+const originalFailures = new WeakMap<OriginalProcessCustody, unknown[]>();
+
+function retainFailure(original: OriginalProcessCustody, reason: unknown): void {
+  originalFailures.get(original)?.push(reason);
+}
 
 export function getOriginalProcessCustody(child: ChildProcess): OriginalProcessCustody | undefined {
   return originals.get(child);
@@ -51,7 +61,8 @@ function retainOriginal(child: ChildProcess): OriginalProcessCustody {
   child.on("error", (reason: unknown) => { failures.push(reason); });
   let cleanup: Promise<void> | undefined;
   const original = Object.freeze({
-    child, closed, failures,
+    child, closed,
+    get failures(): readonly unknown[] { return Object.freeze([...failures]); },
     cleanup() {
       if (cleanup !== undefined) return cleanup;
       let resolve: () => void = () => undefined;
@@ -69,11 +80,13 @@ function retainOriginal(child: ChildProcess): OriginalProcessCustody {
           }
         }
         if (failurePresent) throw failure;
+        if (failures.length !== 0) throw failures[0];
       })().then(resolve, reject);
       return cleanup;
     },
   });
   originals.set(child, original);
+  originalFailures.set(original, failures);
   return original;
 }
 
@@ -87,8 +100,8 @@ export function spawnProvisionalBootstrap(
   }));
   try { onOriginal(original); }
   catch (reason) {
-    original.failures.push(reason);
-    void original.cleanup().catch((cleanupReason: unknown) => { original.failures.push(cleanupReason); });
+    retainFailure(original, reason);
+    void original.cleanup().catch((cleanupReason: unknown) => { retainFailure(original, cleanupReason); });
   }
   return original;
 }
@@ -118,18 +131,18 @@ export function spawnLoggedProcess(args: SpawnLoggedProcessArgs): ChildProcess {
   } catch (reason) {
     primaryPresent = true;
     primary = reason;
-    original?.failures.push(reason);
+    if (original !== undefined) retainFailure(original, reason);
   }
   try { descriptor.attempted = true; closeSync(fd); descriptor.closed = true; }
   catch (reason) {
     descriptor.failures.push(reason);
-    if (original !== undefined) original.failures.push(reason);
+    if (original !== undefined) retainFailure(original, reason);
     if (!primaryPresent) { primaryPresent = true; primary = reason; }
   }
   if (primaryPresent) {
     const failure = new OriginalProcessSpawnFailure(primary, original, descriptor);
     uncertainIssuances.add(failure);
-    if (original !== undefined) void original.cleanup().catch((reason: unknown) => { original.failures.push(reason); });
+    if (original !== undefined) void original.cleanup().catch((reason: unknown) => { retainFailure(original, reason); });
     try { args.onIssuanceFailure?.(failure); }
     catch (reason) { descriptor.failures.push(reason); }
     throw primary;
