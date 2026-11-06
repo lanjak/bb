@@ -26,18 +26,19 @@ function sha256Hex(contents: Buffer): string {
   return createHash("sha256").update(contents).digest("hex");
 }
 
-async function readCurrentSha256(filePath: string): Promise<string | null> {
-  const latest = await fs.readFile(filePath).catch(() => null);
+async function readCurrentSha256(filePath: string, effect: ManagedRootEffect): Promise<string | null> {
+  const latest = await effect.runOriginal(() => fs.readFile(filePath).catch(() => null));
   return latest === null ? null : sha256Hex(latest);
 }
 
 async function findLatestConflict(
   args: ReplaceFileArgs,
+  effect: ManagedRootEffect,
 ): Promise<ReplaceFileResult | null> {
   if (args.expectedSha256 === undefined) {
     return null;
   }
-  const latestSha256 = await readCurrentSha256(args.path);
+  const latestSha256 = await readCurrentSha256(args.path, effect);
   return latestSha256 === args.expectedSha256
     ? null
     : { outcome: "conflict", currentSha256: latestSha256 };
@@ -60,12 +61,12 @@ async function publishTemporaryFile(
     if (!(await effect.runOriginal(() => publishFileWithoutReplacing(temporaryPath, args.path)))) {
       return {
         outcome: "conflict",
-        currentSha256: await readCurrentSha256(args.path),
+        currentSha256: await readCurrentSha256(args.path, effect),
       };
     }
     return writtenResult(args.contents);
   }
-  const conflict = await findLatestConflict(args);
+  const conflict = await findLatestConflict(args, effect);
   if (conflict !== null) {
     return conflict;
   }
