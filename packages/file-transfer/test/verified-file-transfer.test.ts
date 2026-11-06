@@ -1,10 +1,25 @@
 import fs, { access, readFile, writeFile } from "node:fs/promises";
+import nodeFs from "node:fs";
 import path from "node:path";
 import { makeTempDir } from "@bb/test-helpers";
 import { describe, expect, it, vi } from "vitest";
 import { copyVerifiedFile } from "../src/index.js";
 
 describe("copyVerifiedFile", () => {
+  it("refuses direct hash reads before stream creation after root enrollment", async () => {
+    vi.resetModules();
+    const admission = await import("@bb/config/file-lock");
+    const transfer = await import("../src/verified-file-transfer.js");
+    const createReadStream = vi.spyOn(nodeFs, "createReadStream").mockImplementation(() => { throw new Error("Unexpected stream creation"); });
+    admission.internal_DO_NOT_USE_enrollManagedRoot({});
+    try {
+      await expect(transfer.hashFile("/foreign/ancestor")).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
+      expect(createReadStream).not.toHaveBeenCalled();
+    } finally {
+      try { createReadStream.mockRestore(); } finally { vi.resetModules(); }
+    }
+  });
+
   it("removes only the original destination when its iterator mutates the caller arguments", async () => {
     const close = vi.fn(async () => {});
     type Handle = Awaited<ReturnType<typeof fs.open>>;

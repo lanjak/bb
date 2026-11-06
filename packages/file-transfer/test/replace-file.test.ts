@@ -10,6 +10,16 @@ function sha256(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+async function withRestoredMocks(body: () => Promise<void>, restores: (() => void)[]): Promise<void> {
+  let failed = false;
+  let reason: unknown;
+  try { await body(); } catch (error) { failed = true; reason = error; }
+  for (const restore of restores) {
+    try { restore(); } catch (error) { if (!failed) { failed = true; reason = error; } }
+  }
+  if (failed) throw reason;
+}
+
 describe("replaceFile", () => {
   it("keeps the original target when the caller mutates its request during stat", async () => {
     const args = { path: "/original/file", contents: Buffer.from("new") };
@@ -19,13 +29,10 @@ describe("replaceFile", () => {
       return new Stats();
     });
     const read = vi.spyOn(fs, "readFile").mockRejectedValue(failure);
-    try {
+    await withRestoredMocks(async () => {
       await expect(replaceFile(args)).rejects.toBe(failure);
       expect(read).toHaveBeenCalledExactlyOnceWith("/original/file");
-    } finally {
-      stat.mockRestore();
-      read.mockRestore();
-    }
+    }, [() => stat.mockRestore(), () => read.mockRestore()]);
   });
 
   it("refuses the next read when enrollment occurs during the original stat", async () => {
@@ -37,14 +44,10 @@ describe("replaceFile", () => {
       return new Stats();
     });
     const read = vi.spyOn(fs, "readFile").mockRejectedValue(new Error("Unexpected read"));
-    try {
+    await withRestoredMocks(async () => {
       await expect(replace({ path: "/original/file", contents: Buffer.from("new") })).rejects.toBeInstanceOf(admission.ManagedRootAdmissionUnavailableError);
       expect(read).not.toHaveBeenCalled();
-    } finally {
-      stat.mockRestore();
-      read.mockRestore();
-      vi.resetModules();
-    }
+    }, [() => stat.mockRestore(), () => read.mockRestore(), () => vi.resetModules()]);
   });
 
   it("does not remove a temporary path when exclusive creation reports EEXIST", async () => {

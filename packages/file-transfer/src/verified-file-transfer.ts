@@ -149,14 +149,33 @@ export async function copyVerifiedFile(args: {
 }
 
 export async function hashFile(filePath: string): Promise<WrittenFile> {
+  const effect = internal_DO_NOT_USE_beginManagedRootEffect("hashFile");
+  let stream: ReturnType<typeof createReadStream> | undefined;
+  const cleanup = effect.reserveOriginalCleanup(async () => { stream?.destroy(); });
+  let failed = false;
+  try {
   const hash = createHash("sha256");
   let sizeBytes = 0;
-  for await (const chunk of createReadStream(filePath)) {
-    const bytes = chunk as Buffer;
+  const originalStream = await effect.runOriginal(async () => createReadStream(filePath));
+  stream = originalStream;
+  const iterator = originalStream[Symbol.asyncIterator]();
+  for (;;) {
+    const next = await effect.runOriginal(() => iterator.next());
+    if (next.done) break;
+    const bytes = next.value as Buffer;
     sizeBytes += bytes.byteLength;
     hash.update(bytes);
   }
   return { sha256: hash.digest("hex"), sizeBytes };
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    try {
+      if (failed) await cleanup().catch(() => undefined);
+      else await cleanup();
+    } finally { effect.complete(); }
+  }
 }
 
 export async function publishFileWithoutReplacing(
