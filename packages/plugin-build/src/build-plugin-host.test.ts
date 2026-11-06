@@ -37,8 +37,8 @@ describe("plugin host build", () => {
     if (selectedHost === undefined) {
       await expect(result).rejects.toThrow("Private host import is not approved");
     } else {
-      const built = await result;
-      expect(await readFile(built.jsPath, "utf8")).toContain("bb-internal:original-managed-root-verifier");
+      await expect(result).rejects.toThrow("Git blob closure are not bound");
+      expect(await readdir(dir)).not.toContain("dist");
     }
   });
 

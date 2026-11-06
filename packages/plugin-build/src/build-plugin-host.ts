@@ -179,11 +179,14 @@ export async function buildPluginHost(
   toolchain: PluginBuildToolchain,
   selectedHost?: "firstparty-roam-managed",
 ): Promise<PluginHostBuildResult> {
+  const selectedHostEntry = selectedHost === "firstparty-roam-managed"
+    ? resolve(rootDir, "managed-host.ts")
+    : null;
+  if (selectedHostEntry !== null) {
+    throw new Error(`Selected managed host entry ${selectedHostEntry} is unavailable: trusted source-owned build invocation, canonical root and Git blob closure are not bound`);
+  }
   const { hostEntry, packageName, pluginVersion } =
     await readPluginHostConfig(rootDir);
-  if (selectedHost !== undefined && packageName !== "bb-plugin-roam") {
-    throw new Error("The selected managed host build requires bb-plugin-roam");
-  }
   const workingDir = await realpath(rootDir);
   const distDir = join(rootDir, "dist");
   await mkdir(distDir, { recursive: true });
@@ -203,7 +206,7 @@ export async function buildPluginHost(
     const bundle = await esbuild.build({
       absWorkingDir: workingDir,
       metafile: true,
-      entryPoints: [hostEntry],
+      entryPoints: [selectedHostEntry ?? hostEntry],
       outfile: stagedJsPath,
       bundle: true,
       format: "esm",
