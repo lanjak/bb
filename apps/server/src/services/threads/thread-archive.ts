@@ -2,6 +2,7 @@ import {
   cancelProviderEnvironmentCreation,
   sweepProviderEnvironment,
 } from "../environments/environment-engine.js";
+import { assertThreadNotMoving } from "./thread-move-fence.js";
 import {
   removeCreatingMachine,
   sweepProviderMachine,
@@ -141,6 +142,7 @@ function archiveThreadTrees(
   ) => ArchiveThreadEnvironment | null,
 ): string[] {
   const threads = listArchiveCandidates(deps.db, roots);
+  for (const thread of threads) assertThreadNotMoving(deps.db, thread.id);
   for (const root of roots) archiveThread(deps.db, deps.hub, root.id);
   const archivedThreadIds: string[] = [];
 

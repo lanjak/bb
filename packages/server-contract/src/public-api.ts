@@ -112,6 +112,8 @@ import {
   type EditMessageRequest,
   type EditMessageResponse,
   type ForkThreadRequest,
+  type MoveThreadRequest,
+  type MoveThreadResponse,
   type RestartTerminalRequest,
   type DeleteThreadSectionRequest,
   type DeleteThreadRequest,
@@ -311,6 +313,7 @@ import {
   updateQueuedMessageRequestSchema,
   createThreadRequestSchema,
   forkThreadRequestSchema,
+  moveThreadRequestSchema,
   updateThreadPluginMetadataRequestSchema,
   pluginThreadMetadataListRequestSchema,
   threadAncestorsListRequestSchema,
@@ -1596,6 +1599,15 @@ export const publicApiRoutes = {
       method: "post",
       request: noRequest<PathId>(),
       response: jsonResponse<{ ok: true }>(),
+    }),
+    move: defineRoute({
+      path: "/threads/:id/move",
+      method: "post",
+      request: jsonRequest<PathId, MoveThreadRequest>(moveThreadRequestSchema),
+      response: [
+        jsonResponse<MoveThreadResponse>(),
+        jsonResponse<ApiError>({ status: 409 }),
+      ],
     }),
     clearContext: defineRoute({
       path: "/threads/:id/context/clear",

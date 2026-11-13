@@ -79,11 +79,7 @@ export class TerminalOutputFlowControl {
   acknowledge(terminalId: string, client: object, nextSeq: number): void {
     const flow = this.flows.get(terminalId);
     const flowClient = flow?.clients.get(client);
-    if (
-      !flow ||
-      !flowClient ||
-      nextSeq <= flowClient.acknowledgedNextSeq
-    ) {
+    if (!flow || !flowClient || nextSeq <= flowClient.acknowledgedNextSeq) {
       return;
     }
     flowClient.acknowledgedNextSeq = nextSeq;
@@ -124,10 +120,7 @@ export class TerminalOutputFlowControl {
         flowClient.lastProgressAt = now;
       }
     }
-    if (
-      flow.enabledDaemonSessionId === null &&
-      hasGoverningClient(flow)
-    ) {
+    if (flow.enabledDaemonSessionId === null && hasGoverningClient(flow)) {
       flow.enabledDaemonSessionId = daemonSessionId;
       flow.sentAckNextSeq = flow.receivedNextSeq;
       this.options.sendDaemonMessage(daemonSessionId, {

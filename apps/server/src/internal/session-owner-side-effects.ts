@@ -23,6 +23,7 @@ import {
   reconcileDaemonReportedThreads,
   resendStopsAwaitingDaemon,
 } from "../services/threads/thread-lifecycle.js";
+import { recoverThreadMoves } from "../services/threads/thread-move.js";
 import { buildThreadStatusChangeMetadataByThreadId } from "../services/threads/thread-runtime-display.js";
 import { settleDanglingBackgroundTasks } from "../services/threads/background-task-reconciliation.js";
 import { reconcileDaemonReportedOpenWork } from "../services/threads/open-work-reconciliation.js";
@@ -179,6 +180,7 @@ export function handleDaemonSocketOpened(
   notifyHostThreadRuntimeStatusChanged(deps, args.hostId);
   deps.pendingInteractions.redeliverAnswersAwaitingDaemon(args.hostId);
   resendStopsAwaitingDaemon(deps, args.hostId);
+  void recoverThreadMoves(deps, { hostId: args.hostId });
 }
 
 export function handleDaemonSessionSilent(

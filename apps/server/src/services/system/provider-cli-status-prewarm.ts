@@ -2,9 +2,9 @@ import type { LoggedWorkSessionDeps } from "../../types.js";
 import { installHostConnectPrewarm } from "../hosts/host-connect-prewarm.js";
 import { getProviderInstallations } from "./provider-installations.js";
 
-export function installProviderCliStatusPrewarm(
-  deps: LoggedWorkSessionDeps,
-): { stop(): void } {
+export function installProviderCliStatusPrewarm(deps: LoggedWorkSessionDeps): {
+  stop(): void;
+} {
   return installHostConnectPrewarm(deps, {
     failureMessage: "Provider CLI status prewarm pass failed",
     async runPass({ hostId, isCurrent }) {

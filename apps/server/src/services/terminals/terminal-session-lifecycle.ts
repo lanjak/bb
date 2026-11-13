@@ -1,4 +1,5 @@
 import { emitPluginTerminalInput } from "../plugins/plugin-thread-events.js";
+import { assertThreadNotMoving } from "../threads/thread-move-fence.js";
 import { resolveHostEnvironment } from "../hosts/host-environment.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -689,6 +690,9 @@ export class TerminalSessionLifecycle {
 
   async createTerminal(args: CreateTerminalArgs): Promise<TerminalSession> {
     const { id, target } = args.payload;
+    if (target.kind === "thread") {
+      assertThreadNotMoving(this.options.db, target.threadId);
+    }
     if (id !== undefined && getTerminalById(this.options.db, id)) {
       throw new ApiError(
         409,

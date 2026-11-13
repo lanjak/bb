@@ -1,4 +1,5 @@
 import { assertEnvironmentPathAvailable } from "../environments/path-admission.js";
+import { isThreadMoveInProgress } from "./thread-move-fence.js";
 import { z } from "zod";
 import {
   getLatestThreadSequence,
@@ -14,6 +15,7 @@ import {
   canonicalizeHostPath,
   isAbsoluteHostPath,
   isHostPathRoot,
+  threadMovingMessage,
   turnScope,
 } from "@bb/domain";
 import type { DynamicTool, Thread, ToolCallResponse } from "@bb/domain";
@@ -170,6 +172,12 @@ function attachReadyEnvironment(
       if (writableFailure) {
         return { kind: "thread_unavailable", message: writableFailure };
       }
+      if (isThreadMoveInProgress(tx, latestThread.id)) {
+        return {
+          kind: "thread_unavailable",
+          message: threadMovingMessage(latestThread.id),
+        };
+      }
 
       if (latestThread.environmentId === args.targetEnvironment.id) {
         return { kind: "attached", changed: false };
@@ -285,6 +293,9 @@ export async function handleUpdateEnvironmentDirectoryToolCall(
   const writableFailure = threadWritableFailure(args.thread);
   if (writableFailure) {
     return toolCallFailure(writableFailure);
+  }
+  if (isThreadMoveInProgress(deps.db, args.thread.id)) {
+    return toolCallFailure(threadMovingMessage(args.thread.id));
   }
 
   try {

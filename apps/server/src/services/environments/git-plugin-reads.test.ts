@@ -23,7 +23,11 @@ describe("readCommitInputs", () => {
   it("asks to turn the Git plugin on only when it is off", async () => {
     await expect(
       readCommitInputs(
-        pluginsWith({ outcome: "not-running", status: "disabled", detail: null }),
+        pluginsWith({
+          outcome: "not-running",
+          status: "disabled",
+          detail: null,
+        }),
         ARGS,
       ),
     ).rejects.toMatchObject({

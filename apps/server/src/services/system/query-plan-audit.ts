@@ -55,7 +55,9 @@ export function createGatedQueryPlanObserver(options: {
             caller: finding.caller,
             detail: finding.detail,
             plan: finding.plan,
-            sql: finding.sql.replace(/\s+/g, " ").slice(0, MAX_LOGGED_SQL_LENGTH),
+            sql: finding.sql
+              .replace(/\s+/g, " ")
+              .slice(0, MAX_LOGGED_SQL_LENGTH),
           },
           "Slow SQLite query plan",
         );

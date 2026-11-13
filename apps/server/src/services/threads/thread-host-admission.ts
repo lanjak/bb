@@ -1,11 +1,13 @@
 import { getEnvironment, getHost, type DbQueryConnection } from "@bb/db";
 import type { Thread } from "@bb/domain";
 import { ApiError } from "../../errors.js";
+import { assertThreadNotMoving } from "./thread-move-fence.js";
 
 export function assertThreadHostAcceptsWork(
   db: DbQueryConnection,
-  thread: Pick<Thread, "environmentId">,
+  thread: Pick<Thread, "environmentId" | "id">,
 ): void {
+  assertThreadNotMoving(db, thread.id);
   if (thread.environmentId === null) return;
   const environment = getEnvironment(db, thread.environmentId);
   if (environment === null) return;

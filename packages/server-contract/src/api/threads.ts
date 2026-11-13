@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { threadMovePhaseSchema } from "@bb/domain";
 import {
   activeThinkingSchema,
   callerExecutionInputSourceSchema,
@@ -277,6 +278,21 @@ export const forkThreadRequestSchema = z
     }
   });
 export type ForkThreadRequest = z.infer<typeof forkThreadRequestSchema>;
+
+export const moveThreadRequestSchema = z
+  .object({ environmentId: z.string().min(1) })
+  .strict();
+export type MoveThreadRequest = z.infer<typeof moveThreadRequestSchema>;
+
+export const moveThreadResponseSchema = z.object({
+  moveId: z.string(),
+  threadId: z.string(),
+  phase: threadMovePhaseSchema,
+  sourceEnvironmentId: z.string(),
+  targetEnvironmentId: z.string(),
+  error: z.string().nullable(),
+});
+export type MoveThreadResponse = z.infer<typeof moveThreadResponseSchema>;
 
 const sendMessageRequestFieldsSchema = z.object({
   input: z.array(promptInputSchema).min(1),

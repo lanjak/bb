@@ -30,7 +30,9 @@ export interface PluginResolvedUpdateVersion {
 }
 
 export type RangeUpgradeBasis =
-  { kind: "catalog"; range: string } | { kind: "release" } | { kind: "none" };
+  | { kind: "catalog"; range: string }
+  | { kind: "release" }
+  | { kind: "none" };
 
 export interface PluginRangeUpgrade {
   range: string;

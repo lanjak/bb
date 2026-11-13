@@ -73,6 +73,7 @@ import {
 } from "./thread-events.js";
 import { requireThreadCommandEnvironment } from "./thread-command-environment.js";
 import { assertThreadHostAcceptsWork } from "./thread-host-admission.js";
+import { assertThreadNotMoving } from "./thread-move-fence.js";
 import {
   requestThreadProvision,
   scheduleThreadProvisioningAdvance,
@@ -758,7 +759,12 @@ async function runDispatchAttempt(
       ...(systemNotice !== null ? { systemNotice } : {}),
       ...(args.retryOf !== undefined ? { retryOf: args.retryOf } : {}),
       beforeAppendInTransaction: ({ tx }) => {
-        if (getThread(tx, thread.id)?.status !== thread.status) {
+        assertThreadNotMoving(tx, thread.id);
+        const latest = getThread(tx, thread.id);
+        if (
+          latest?.status !== thread.status ||
+          latest.environmentId !== thread.environmentId
+        ) {
           throw new DispatchThreadStatusChangedError();
         }
         if (claimed !== null) {
