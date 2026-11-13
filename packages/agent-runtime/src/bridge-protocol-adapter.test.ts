@@ -272,6 +272,32 @@ describe("commands/list", () => {
   });
 });
 
+describe("session transfer", () => {
+  it("is a noop until the handshake declares sessionTransfer and carries the session environment", () => {
+    const adapter = makeAdapter();
+    const command = {
+      type: "session/files" as const,
+      providerThreadId: "s1",
+      cwd: "/workspace",
+      envVars: { CLAUDE_CONFIG_DIR: "/profile" },
+    };
+    expect(adapter.buildCommandPlan(command)).toMatchObject({ kind: "noop" });
+    completeHandshake(adapter, { sessionTransfer: true });
+    expect(adapter.buildCommandPlan(command)).toMatchObject({
+      kind: "request",
+      method: "session/files",
+      params: {
+        providerThreadId: "s1",
+        cwd: "/workspace",
+        options: { envVars: { CLAUDE_CONFIG_DIR: "/profile" } },
+      },
+    });
+    expect(
+      adapter.buildCommandPlan({ ...command, type: "session/destination" }),
+    ).toMatchObject({ kind: "request", method: "session/destination" });
+  });
+});
+
 describe("skills/configure", () => {
   it("is a noop until the handshake declares skills.configure", () => {
     const adapter = makeAdapter();

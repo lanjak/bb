@@ -310,6 +310,7 @@ export interface SessionTransferArgs {
   bridgeLaunch: AgentRuntimeBridgeLaunch;
   providerThreadId: string;
   cwd: string;
+  envVars: Record<string, string>;
 }
 
 interface ProviderMaintenanceArgs {
