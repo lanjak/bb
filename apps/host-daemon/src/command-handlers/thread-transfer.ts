@@ -20,6 +20,15 @@ import {
   type CommandOf,
 } from "../command-dispatch-support.js";
 import { isFsErrorWithCode } from "../fs-errors.js";
+import {
+  applyWorkspaceChanges,
+  hasWorkspaceJournal,
+  isWorkspaceFile,
+  prepareWorkspaceExport,
+  undoWorkspaceJournal,
+} from "./thread-transfer-workspace.js";
+
+export { inspectThreadTransferWorkspace } from "./thread-transfer-workspace.js";
 
 const TRANSFER_DIRECTORY_NAME = "thread-transfer";
 const SET_ASIDE_DIRECTORY_NAME = "set-aside";
@@ -37,12 +46,13 @@ type TransferOptions = Pick<
   | "resolveSessionDestination"
 >;
 
-interface TransferPaths {
+export interface TransferPaths {
   root: string;
   out: string;
   in: string;
   backup: string;
   journal: string;
+  workspaceJournal: string;
   setAsideJournal: string;
   sealed: string;
   setAside: string;
@@ -55,7 +65,7 @@ interface SessionRef {
   cwd: string;
 }
 
-interface ProviderFile {
+export interface ProviderFile {
   relativePath: string;
   absolutePath: string;
 }
@@ -116,7 +126,7 @@ async function withTransferLock<T>(
   }
 }
 
-function invalid(message: string): CommandDispatchError {
+export function invalid(message: string): CommandDispatchError {
   return new CommandDispatchError("thread_transfer_invalid", message);
 }
 
@@ -132,6 +142,7 @@ function transferPaths(dataDir: string, transferId: string): TransferPaths {
     in: path.join(root, "in"),
     backup: path.join(root, "backup"),
     journal: path.join(root, "commit-journal.jsonl"),
+    workspaceJournal: path.join(root, "workspace-journal.jsonl"),
     setAsideJournal: path.join(root, "set-aside-journal.jsonl"),
     sealed: path.join(root, "sealed"),
     setAside: path.join(base, SET_ASIDE_DIRECTORY_NAME, transferId),
@@ -172,7 +183,7 @@ function resolveWithin(base: string, parts: readonly string[]): string {
   return resolved;
 }
 
-async function assertNoSymlinkBelow(
+export async function assertNoSymlinkBelow(
   base: string,
   target: string,
 ): Promise<void> {
@@ -193,7 +204,7 @@ async function assertNoSymlinkBelow(
   }
 }
 
-async function resolveRegularFile(
+export async function resolveRegularFile(
   base: string,
   relativePath: string,
 ): Promise<string> {
@@ -206,7 +217,7 @@ async function resolveRegularFile(
   return target;
 }
 
-async function fsyncPath(target: string): Promise<void> {
+export async function fsyncPath(target: string): Promise<void> {
   const handle = await fs.open(target, "r");
   try {
     await handle.sync();
@@ -215,7 +226,9 @@ async function fsyncPath(target: string): Promise<void> {
   }
 }
 
-async function pathKind(target: string): Promise<"missing" | "file" | "other"> {
+export async function pathKind(
+  target: string,
+): Promise<"missing" | "file" | "other"> {
   try {
     return (await fs.lstat(target)).isFile() ? "file" : "other";
   } catch (error) {
@@ -226,7 +239,10 @@ async function pathKind(target: string): Promise<"missing" | "file" | "other"> {
   }
 }
 
-async function appendJsonLine(file: string, value: unknown): Promise<void> {
+export async function appendJsonLine(
+  file: string,
+  value: unknown,
+): Promise<void> {
   const handle = await fs.open(file, "a", PRIVATE_FILE_MODE);
   try {
     await handle.writeFile(`${JSON.stringify(value)}\n`);
@@ -236,7 +252,7 @@ async function appendJsonLine(file: string, value: unknown): Promise<void> {
   }
 }
 
-async function readJsonLines(file: string): Promise<unknown[] | null> {
+export async function readJsonLines(file: string): Promise<unknown[] | null> {
   let text: string;
   try {
     text = await fs.readFile(file, "utf8");
@@ -303,7 +319,7 @@ async function copyExclusive(
   await fsyncPath(destination);
 }
 
-async function placeNoReplace(
+export async function placeNoReplace(
   source: string,
   destination: string,
 ): Promise<void> {
@@ -462,41 +478,63 @@ export function exportThreadTransfer(
       "storage/",
       true,
     );
-    const all = [...sessionFiles, ...storageFiles];
-    if (all.length > THREAD_TRANSFER_MAX_FILES) {
-      throw invalid(`Too many files to move: ${all.length}`);
-    }
-    if (new Set(all.map((file) => file.relativePath)).size !== all.length) {
-      throw invalid("Duplicate transfer paths");
-    }
     await ensureTransferRoot(options.dataDir, paths);
-    await fs.rm(paths.out, { recursive: true, force: true });
-    await ensurePrivateDirectory(paths.out);
-    const files: ThreadTransferFile[] = [];
-    let totalBytes = 0;
-    for (const file of all) {
-      const destination = resolveWithin(
-        paths.out,
-        relativeParts(file.relativePath),
-      );
-      const mode = await snapshotFile(file.absolutePath, destination);
-      const hashed = await hashFile(destination);
-      totalBytes += hashed.sizeBytes;
-      if (totalBytes > THREAD_TRANSFER_MAX_TOTAL_BYTES) {
-        await fs.rm(paths.out, { recursive: true, force: true });
-        throw invalid(
-          `Files to move exceed ${THREAD_TRANSFER_MAX_TOTAL_BYTES} bytes`,
-        );
-      }
-      files.push({
-        relativePath: file.relativePath,
-        sizeBytes: hashed.sizeBytes,
-        sha256: hashed.sha256,
-        mode,
-      });
+    const workspace =
+      command.workspace === undefined
+        ? null
+        : await prepareWorkspaceExport(
+            command.cwd,
+            command.workspace.targetHead,
+            paths,
+          );
+    try {
+      return await snapshotTransfer(paths, [
+        ...sessionFiles,
+        ...storageFiles,
+        ...(workspace?.files ?? []),
+      ]);
+    } finally {
+      await workspace?.cleanup();
     }
-    return { files };
   });
+}
+
+async function snapshotTransfer(
+  paths: TransferPaths,
+  all: ProviderFile[],
+): Promise<HostDaemonOnlineRpcResult<"thread.transfer.export">> {
+  if (all.length > THREAD_TRANSFER_MAX_FILES) {
+    throw invalid(`Too many files to move: ${all.length}`);
+  }
+  if (new Set(all.map((file) => file.relativePath)).size !== all.length) {
+    throw invalid("Duplicate transfer paths");
+  }
+  await fs.rm(paths.out, { recursive: true, force: true });
+  await ensurePrivateDirectory(paths.out);
+  const files: ThreadTransferFile[] = [];
+  let totalBytes = 0;
+  for (const file of all) {
+    const destination = resolveWithin(
+      paths.out,
+      relativeParts(file.relativePath),
+    );
+    const mode = await snapshotFile(file.absolutePath, destination);
+    const hashed = await hashFile(destination);
+    totalBytes += hashed.sizeBytes;
+    if (totalBytes > THREAD_TRANSFER_MAX_TOTAL_BYTES) {
+      await fs.rm(paths.out, { recursive: true, force: true });
+      throw invalid(
+        `Files to move exceed ${THREAD_TRANSFER_MAX_TOTAL_BYTES} bytes`,
+      );
+    }
+    files.push({
+      relativePath: file.relativePath,
+      sizeBytes: hashed.sizeBytes,
+      sha256: hashed.sha256,
+      mode,
+    });
+  }
+  return { files };
 }
 
 export function readThreadTransferChunk(
@@ -607,7 +645,7 @@ export function writeThreadTransferChunk(
   });
 }
 
-async function verifyStagedFile(
+export async function verifyStagedFile(
   paths: TransferPaths,
   file: ThreadTransferFile,
 ): Promise<void> {
@@ -747,6 +785,7 @@ export function commitThreadTransfer(
     if (existing !== null) {
       await undoJournal(paths, existing);
     }
+    await undoWorkspaceJournal(paths);
     if (command.files.length > THREAD_TRANSFER_MAX_FILES) {
       throw invalid(`Too many files to move: ${command.files.length}`);
     }
@@ -770,20 +809,27 @@ export function commitThreadTransfer(
     await fsyncPath(paths.root);
     stagingStats.delete(command.transferId);
     try {
+      await applyWorkspaceChanges(command, paths);
       return await placeStagedFiles(command, options, paths);
     } catch (error) {
       const state = await readJournal(paths).catch(() => null);
+      const warnOnFailure = (undoError: unknown) => {
+        options.logger.warn(
+          `thread transfer undo failed: ${undoError instanceof Error ? undoError.message : String(undoError)}`,
+        );
+        return false;
+      };
       let undone = state === null;
       if (state !== null) {
         undone = await undoJournal(paths, state).then(
           () => true,
-          (undoError: unknown) => {
-            options.logger.warn(
-              `thread transfer undo failed: ${undoError instanceof Error ? undoError.message : String(undoError)}`,
-            );
-            return false;
-          },
+          warnOnFailure,
         );
+      }
+      if (await hasWorkspaceJournal(paths)) {
+        undone =
+          (await undoWorkspaceJournal(paths).then(() => true, warnOnFailure)) &&
+          undone;
       }
       if (undone) {
         await fs.rm(paths.sealed, { force: true });
@@ -798,7 +844,8 @@ async function placeStagedFiles(
   options: TransferOptions,
   paths: TransferPaths,
 ): Promise<HostDaemonOnlineRpcResult<"thread.transfer.commit">> {
-  for (const file of command.files) {
+  const placedFiles = command.files.filter((file) => !isWorkspaceFile(file));
+  for (const file of placedFiles) {
     await verifyStagedFile(paths, file);
   }
   const destination = await options.resolveSessionDestination(
@@ -828,7 +875,7 @@ async function placeStagedFiles(
     stagedPath: string;
     backupPath: string | null;
   }> = [];
-  for (const [index, file] of command.files.entries()) {
+  for (const [index, file] of placedFiles.entries()) {
     const [area, ...rest] = relativeParts(file.relativePath);
     const isSession = area === "session";
     const root = isSession ? sessionRoot : storageRoot;
@@ -914,6 +961,7 @@ export function rollbackThreadTransfer(
     if (state !== null) {
       await undoJournal(paths, state);
     }
+    await undoWorkspaceJournal(paths);
     await removeRoot(paths);
     return { ok: true };
   });

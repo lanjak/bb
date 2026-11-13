@@ -246,6 +246,7 @@ export function registerThreadActionRoutes(
     const thread = requirePublicThread(deps.db, context.req.param("id"));
     return context.json(
       await moveThread(deps, {
+        carryChanges: payload.carryChanges ?? false,
         environmentId: payload.environmentId,
         threadId: thread.id,
       }),

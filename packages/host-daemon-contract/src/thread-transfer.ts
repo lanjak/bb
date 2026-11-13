@@ -14,13 +14,15 @@ export const threadTransferRelativePathSchema = z
   .max(1024)
   .refine(
     (value) =>
-      (value.startsWith("session/") || value.startsWith("storage/")) &&
+      (value.startsWith("session/") ||
+        value.startsWith("storage/") ||
+        value.startsWith("workspace/")) &&
       !value.includes("\\") &&
       !value.includes("\0") &&
       value
         .split("/")
         .every((part) => part.length > 0 && part !== "." && part !== ".."),
-    "Transfer paths start with session/ or storage/ and stay inside them",
+    "Transfer paths start with session/, storage/ or workspace/ and stay inside them",
   );
 
 export const threadTransferFileSchema = z
@@ -46,10 +48,33 @@ const threadTransferSessionSchema = z
   })
   .strict();
 
+const gitCommitIdSchema = z.string().regex(/^[a-f0-9]{40,64}$/u);
+
+export const threadTransferWorkspaceSchema = z
+  .object({ targetHead: gitCommitIdSchema })
+  .strict();
+
+export const threadTransferInspectWorkspaceCommandSchema = z
+  .object({
+    type: z.literal("thread.transfer.inspect_workspace"),
+    cwd: z.string().min(1),
+    ancestorCommit: gitCommitIdSchema.nullable(),
+  })
+  .strict();
+
+export const threadTransferInspectWorkspaceResultSchema = z
+  .object({
+    head: gitCommitIdSchema.nullable(),
+    clean: z.boolean(),
+    containsAncestorCommit: z.boolean(),
+  })
+  .strict();
+
 export const threadTransferExportCommandSchema = threadTransferSessionSchema
   .extend({
     type: z.literal("thread.transfer.export"),
     transferId: transferIdSchema,
+    workspace: threadTransferWorkspaceSchema.optional(),
   })
   .strict();
 
@@ -99,6 +124,7 @@ export const threadTransferCommitCommandSchema = threadTransferSessionSchema
     type: z.literal("thread.transfer.commit"),
     transferId: transferIdSchema,
     files: threadTransferManifestSchema,
+    workspace: threadTransferWorkspaceSchema.optional(),
   })
   .strict();
 

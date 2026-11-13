@@ -187,10 +187,7 @@ describe("discoverRepos", () => {
     const WALK_BUDGET_MS = 1_000;
     const PROMPT_ANSWER_MS = 1_500;
 
-    const scan = (
-      platform: NodeJS.Platform,
-      delays: Record<string, number>,
-    ) =>
+    const scan = (platform: NodeJS.Platform, delays: Record<string, number>) =>
       discoverRepos({
         maxDepth: 5,
         sinceDays: 3650,

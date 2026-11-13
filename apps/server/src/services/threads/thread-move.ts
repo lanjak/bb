@@ -158,6 +158,37 @@ function planThreadMove(
   };
 }
 
+async function preflightCarryChanges(
+  deps: MoveDeps,
+  plan: MovePlan,
+): Promise<{ targetHead: string }> {
+  const target = await rpc(deps, plan.targetHostId, {
+    type: "thread.transfer.inspect_workspace",
+    cwd: plan.targetCwd,
+    ancestorCommit: null,
+  });
+  if (target.head === null) {
+    refuse("Target workspace is not a git checkout.");
+  }
+  if (!target.clean) {
+    refuse(
+      "Target workspace has uncommitted changes; commit, stash or discard them first.",
+    );
+  }
+  const source = await rpc(deps, plan.sourceHostId, {
+    type: "thread.transfer.inspect_workspace",
+    cwd: plan.sourceCwd,
+    ancestorCommit: target.head,
+  });
+  if (source.head === null) {
+    refuse("Source workspace is not a git checkout.");
+  }
+  if (!source.containsAncestorCommit) {
+    refuse("Target branch is not behind the source; push or pull first.");
+  }
+  return { targetHead: target.head };
+}
+
 function requireBridgeLaunch(deps: MoveDeps, providerId: string) {
   const bridgeLaunch = resolveBridgeLaunchForProviderId(deps, providerId);
   if (bridgeLaunch === null) {
@@ -342,7 +373,11 @@ async function finishBothSides(
   });
 }
 
-function switchThreadEnvironment(deps: MoveDeps, move: ThreadMoveRow): void {
+function switchThreadEnvironment(
+  deps: MoveDeps,
+  move: ThreadMoveRow,
+  carriedChanges: boolean,
+): void {
   deps.db.transaction(
     (tx) => {
       const current = getThreadMove(tx, move.id);
@@ -383,13 +418,14 @@ function switchThreadEnvironment(deps: MoveDeps, move: ThreadMoveRow): void {
           operation: THREAD_MOVE_OPERATION,
           operationId: createEventId(),
           status: "completed",
-          message: `Moved from ${sourceHost?.name ?? move.sourceHostId} (${move.sourceCwd}) to ${targetHost?.name ?? move.targetHostId} (${move.targetCwd})`,
+          message: `Moved from ${sourceHost?.name ?? move.sourceHostId} (${move.sourceCwd}) to ${targetHost?.name ?? move.targetHostId} (${move.targetCwd})${carriedChanges ? ", carrying the workspace changes" : ""}`,
           metadata: {
             moveId: move.id,
             sourceEnvironmentId: move.sourceEnvironmentId,
             targetEnvironmentId: move.targetEnvironmentId,
             sourceHostId: move.sourceHostId,
             targetHostId: move.targetHostId,
+            carriedChanges,
           },
         },
       });
@@ -431,7 +467,7 @@ async function finishAfterSwitch(
 
 export async function moveThread(
   deps: MoveDeps,
-  args: { environmentId: string; threadId: string },
+  args: { carryChanges: boolean; environmentId: string; threadId: string },
 ): Promise<MoveThreadResponse> {
   const thread = getThread(deps.db, args.threadId);
   if (thread === null || thread.deletedAt !== null) {
@@ -451,6 +487,9 @@ export async function moveThread(
   requireConnectedHostSession(deps, preflight.sourceHostId);
   requireConnectedHostSession(deps, preflight.targetHostId);
   await settleEarlierCleanups(deps, args.threadId);
+  const workspace = args.carryChanges
+    ? await preflightCarryChanges(deps, preflight)
+    : undefined;
 
   let move = deps.db.transaction(
     (tx) => {
@@ -483,6 +522,7 @@ export async function moveThread(
         type: "thread.transfer.export",
         transferId: move.id,
         ...sessionArgs(move, move.sourceCwd),
+        ...(workspace === undefined ? {} : { workspace }),
         bridgeLaunch,
         sessionEnvironment: await sessionEnvironment(deps, move, "source"),
       });
@@ -496,10 +536,11 @@ export async function moveThread(
         transferId: move.id,
         ...sessionArgs(move, move.targetCwd),
         files: exported.files,
+        ...(workspace === undefined ? {} : { workspace }),
         bridgeLaunch,
         sessionEnvironment: await sessionEnvironment(deps, move, "target"),
       });
-      switchThreadEnvironment(deps, move);
+      switchThreadEnvironment(deps, move, workspace !== undefined);
     } catch (error) {
       const latest = getThreadMove(deps.db, move.id) ?? move;
       if (isThreadMovePreSwitch(latest.phase)) {

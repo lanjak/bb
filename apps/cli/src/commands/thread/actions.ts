@@ -299,16 +299,24 @@ export function registerActionsCommands(
       "--environment <env-id>",
       "Target environment id (same project, different machine)",
     )
+    .option(
+      "--carry-changes",
+      "Also carry the source workspace's commits, uncommitted changes and untracked files to a clean target checkout",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
       action(
-        async (id: string, opts: { environment: string; json?: boolean }) => {
+        async (
+          id: string,
+          opts: { carryChanges?: boolean; environment: string; json?: boolean },
+        ) => {
           const sdk = createCliBbSdk(getUrl());
           let result: Awaited<ReturnType<typeof sdk.threads.experimental_move>>;
           try {
             result = await sdk.threads.experimental_move({
               threadId: id,
               environmentId: opts.environment,
+              carryChanges: opts.carryChanges === true,
             });
           } catch (err: unknown) {
             throw prependErrorContext(`Failed to move thread ${id}`, err);

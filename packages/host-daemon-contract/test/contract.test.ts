@@ -343,6 +343,11 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       },
     ],
   },
+  "thread.transfer.inspect_workspace": {
+    head: "a".repeat(40),
+    clean: true,
+    containsAncestorCommit: true,
+  },
   "thread.transfer.read_chunk": { offset: 0, contentBase64: "AAEC" },
   "thread.transfer.write_chunk": { sizeBytes: 3 },
   "thread.transfer.commit": { placedFiles: 1, backedUpFiles: 0 },

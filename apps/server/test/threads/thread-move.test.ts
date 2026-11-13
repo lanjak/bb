@@ -244,6 +244,7 @@ describe("thread move", () => {
     await withTestHarness(async (harness) => {
       const fx = setup(harness);
       const result = await moveThread(harness.deps, {
+        carryChanges: false,
         threadId: fx.threadId,
         environmentId: fx.targetEnvironmentId,
       });
@@ -312,6 +313,7 @@ describe("thread move", () => {
 
       await expect(
         moveThread(harness.deps, {
+          carryChanges: false,
           threadId: fx.threadId,
           environmentId: fx.targetEnvironmentId,
         }),
@@ -446,6 +448,7 @@ describe("thread move", () => {
 
           await expect(
             moveThread(harness.deps, {
+              carryChanges: false,
               threadId: fx.threadId,
               environmentId: fx.targetEnvironmentId,
             }),
@@ -467,6 +470,7 @@ describe("thread move", () => {
         insertMove(harness, fx);
         await expect(
           moveThread(harness.deps, {
+            carryChanges: false,
             threadId: fx.threadId,
             environmentId: fx.targetEnvironmentId,
           }),
@@ -598,6 +602,7 @@ describe("thread move", () => {
 
           await expect(
             moveThread(harness.deps, {
+              carryChanges: false,
               threadId: fx.threadId,
               environmentId: fx.targetEnvironmentId,
             }),
@@ -712,6 +717,7 @@ describe("thread move", () => {
         });
         await expect(
           moveThread(harness.deps, {
+            carryChanges: false,
             threadId: fx.threadId,
             environmentId: fx.targetEnvironmentId,
           }),
@@ -722,6 +728,7 @@ describe("thread move", () => {
 
         await expect(
           moveThread(harness.deps, {
+            carryChanges: false,
             threadId: fx.threadId,
             environmentId: fx.targetEnvironmentId,
           }),

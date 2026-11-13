@@ -280,7 +280,10 @@ export const forkThreadRequestSchema = z
 export type ForkThreadRequest = z.infer<typeof forkThreadRequestSchema>;
 
 export const moveThreadRequestSchema = z
-  .object({ environmentId: z.string().min(1) })
+  .object({
+    environmentId: z.string().min(1),
+    carryChanges: z.boolean().optional(),
+  })
   .strict();
 export type MoveThreadRequest = z.infer<typeof moveThreadRequestSchema>;
 
