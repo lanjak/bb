@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Options,
@@ -88,6 +91,100 @@ describe("SdkSession", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe("settings model env under host-managed provider routing", () => {
+    let root: string;
+    let cwd: string;
+    let configDir: string;
+
+    beforeEach(async () => {
+      root = await mkdtemp(join(tmpdir(), "bb-claude-settings-model-env-"));
+      cwd = join(root, "project");
+      configDir = join(root, "config");
+      await mkdir(join(cwd, ".claude"), { recursive: true });
+      await mkdir(configDir, { recursive: true });
+      await writeFile(
+        join(configDir, "settings.json"),
+        JSON.stringify({
+          env: {
+            CLAUDE_CODE_SUBAGENT_MODEL: "user-subagent",
+            CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: "user-workflow",
+            ANTHROPIC_DEFAULT_OPUS_MODEL: "user-opus",
+            ANTHROPIC_BASE_URL: "https://user.example",
+          },
+        }),
+      );
+      await writeFile(
+        join(cwd, ".claude", "settings.json"),
+        JSON.stringify({
+          env: {
+            CLAUDE_CODE_SUBAGENT_MODEL: "project-subagent",
+            ANTHROPIC_SMALL_FAST_MODEL: "project-small",
+          },
+        }),
+      );
+      await writeFile(
+        join(cwd, ".claude", "settings.local.json"),
+        JSON.stringify({
+          env: {
+            CLAUDE_CODE_SUBAGENT_MODEL: "local-subagent",
+            CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: "local-workflow",
+            ANTHROPIC_AUTH_TOKEN: "local-token",
+          },
+        }),
+      );
+    });
+
+    afterEach(async () => {
+      await rm(root, { recursive: true, force: true });
+    });
+
+    function startWithEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+      const session = new SdkSession(
+        { ...defaultOptions, cwd, env },
+        vi.fn(),
+        vi.fn(),
+      );
+      session.start();
+      const sessionEnv = getLatestQueryCall().options.env;
+      session.stop();
+      if (sessionEnv === undefined) {
+        throw new Error("Expected Claude SDK query env");
+      }
+      return sessionEnv;
+    }
+
+    it("passes settings model selections as process env with Claude Code precedence", () => {
+      const env = startWithEnv({
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST: "1",
+        ANTHROPIC_BASE_URL: "https://pool.example",
+        ANTHROPIC_AUTH_TOKEN: "pool-token",
+        CLAUDE_CODE_SUBAGENT_MODEL: "machine-subagent",
+      });
+
+      expect(env).toMatchObject({
+        CLAUDE_CODE_SUBAGENT_MODEL: "local-subagent",
+        CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL: "user-workflow",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "user-opus",
+        ANTHROPIC_SMALL_FAST_MODEL: "project-small",
+        ANTHROPIC_BASE_URL: "https://pool.example",
+        ANTHROPIC_AUTH_TOKEN: "pool-token",
+      });
+    });
+
+    it("leaves settings to Claude Code when the host does not manage provider routing", () => {
+      const env = startWithEnv({
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_CODE_SUBAGENT_MODEL: "machine-subagent",
+      });
+
+      expect(env).toEqual({
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_CODE_SUBAGENT_MODEL: "machine-subagent",
+      });
+    });
   });
 
   it("rejects queued input when the SDK input stream closes before consumption", async () => {

@@ -65,6 +65,11 @@ Routed Claude Code also receives `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST=1`, so it
 neither reads nor refreshes this machine's Claude login. Features that need
 that login (Claude in Chrome, claude.ai connectors, Remote Control) stay off in
 routed threads; use `bb pool bypass <thread-id>` for a thread that needs them.
+In this mode Claude Code ignores model variables in the `env` of its settings
+files, so bb copies `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_*_MODEL`,
+`ANTHROPIC_SMALL_FAST_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL` and
+`CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL` from those files into the process
+environment. Provider and credential variables in settings files stay ignored.
 Claude Code removes `ANTHROPIC_AUTH_TOKEN` from tool subprocesses in this mode,
 so route a nested `claude` explicitly with
 `ANTHROPIC_AUTH_TOKEN="$BB_ACCOUNT_POOL_PARENT_TOKEN" claude ...`.

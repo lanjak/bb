@@ -22,6 +22,7 @@ import {
   missingClaudeCliGuidance,
   translateMissingClaudeCliError,
 } from "./missing-cli-error.js";
+import { withSettingsModelEnv } from "./settings-model-env.js";
 
 export interface SdkSessionOptions {
   cwd: string;
@@ -264,7 +265,10 @@ export class SdkSession {
       includePartialMessages: true,
       settingSources: ["user", "project", "local"],
       persistSession: true,
-      env: this.options.env ?? process.env,
+      env: withSettingsModelEnv(
+        this.options.env ?? process.env,
+        this.options.cwd,
+      ),
       stderr: onStderr,
       ...(this.options.mcpServers
         ? { mcpServers: this.options.mcpServers }
