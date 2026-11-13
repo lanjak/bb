@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const THREAD_TRANSFER_CHUNK_MAX_BYTES = 1024 * 1024;
 export const THREAD_TRANSFER_MAX_FILES = 10_000;
+export const THREAD_TRANSFER_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 
 const transferIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/u);
 

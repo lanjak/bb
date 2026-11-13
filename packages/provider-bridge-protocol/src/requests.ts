@@ -84,7 +84,7 @@ export const sessionDestinationParamsSchema = z
   .passthrough();
 
 export const sessionDestinationResultSchema = z
-  .object({ directory: z.string().min(1) })
+  .object({ directory: z.string().min(1), root: z.string().min(1) })
   .passthrough();
 export type SessionDestinationResult = z.infer<
   typeof sessionDestinationResultSchema

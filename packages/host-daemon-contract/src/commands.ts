@@ -201,14 +201,17 @@ export type HostDaemonBridgeLaunch = z.infer<
 const threadTransferExportWithLaunchSchema =
   threadTransferExportCommandSchema.extend({
     bridgeLaunch: hostDaemonBridgeLaunchSchema,
+    envVars: z.record(z.string(), z.string()),
   });
 const threadTransferCommitWithLaunchSchema =
   threadTransferCommitCommandSchema.extend({
     bridgeLaunch: hostDaemonBridgeLaunchSchema,
+    envVars: z.record(z.string(), z.string()),
   });
 const threadTransferFinishWithLaunchSchema =
   threadTransferFinishCommandSchema.extend({
     bridgeLaunch: hostDaemonBridgeLaunchSchema.nullable(),
+    envVars: z.record(z.string(), z.string()),
   });
 
 export const hostDaemonContributedEnvEntrySchema = z
