@@ -204,6 +204,7 @@ function createFakeRuntime() {
     listSessionFiles: vi.fn(async () => ({ files: [] })),
     resolveSessionDestination: vi.fn(async () => ({
       directory: "/tmp/session-destination",
+      root: "/tmp",
     })),
     providerHealth: vi.fn(async () => ({ supported: false as const })),
     providerUsage: vi.fn(async () => ({ supported: false as const })),

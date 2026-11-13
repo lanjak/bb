@@ -1238,6 +1238,7 @@ describe("bridge", () => {
       const destination = await bridge.waitForResponse(3);
       expect(destination.result).toEqual({
         directory: join(configDir, "projects", "-tmp-new-checkout"),
+        root: configDir,
       });
 
       bridge.sendRequest(4, "session/files", {

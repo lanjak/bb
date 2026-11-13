@@ -78,12 +78,14 @@ export interface CommandDispatchOptions {
     bridgeLaunch: AgentRuntimeBridgeLaunch;
     providerThreadId: string;
     cwd: string;
+    envVars: Record<string, string>;
   }) => Promise<SessionFilesResult>;
   resolveSessionDestination: (args: {
     providerId: string;
     bridgeLaunch: AgentRuntimeBridgeLaunch;
     providerThreadId: string;
     cwd: string;
+    envVars: Record<string, string>;
   }) => Promise<SessionDestinationResult>;
   providerHealth: (args: {
     providerId: string;
