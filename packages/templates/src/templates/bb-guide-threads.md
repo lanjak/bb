@@ -179,7 +179,7 @@ Moving a thread to another machine:
   different machine. The thread keeps its id, history, provider session and
   thread storage; only its environment changes, and a "Moved from ... to ..."
   entry is added to the timeline. Code is not moved: the target environment
-  must already hold the workspace. SDK: threads.move({ threadId,
+  must already hold the workspace. SDK: threads.experimental_move({ threadId,
   environmentId }); HTTP: POST /threads/:id/move.
 
   Only claude-code threads can move. The thread must be idle with no queued

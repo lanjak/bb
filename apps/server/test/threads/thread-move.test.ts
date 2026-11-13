@@ -293,6 +293,39 @@ describe("thread move", () => {
     });
   });
 
+  it("never rolls back the target once the environment has switched", async () => {
+    await withTestHarness(async (harness) => {
+      const fx = setup(harness);
+      const notifyThread = harness.deps.hub.notifyThread.bind(harness.deps.hub);
+      harness.deps.hub.notifyThread = (threadId, changes, metadata) => {
+        if (
+          changes.includes("events-appended") &&
+          getThread(harness.db, threadId)?.environmentId ===
+            fx.targetEnvironmentId
+        ) {
+          throw new Error("notify failed after the switch");
+        }
+        return notifyThread(threadId, changes, metadata);
+      };
+
+      await expect(
+        moveThread(harness.deps, {
+          threadId: fx.threadId,
+          environmentId: fx.targetEnvironmentId,
+        }),
+      ).rejects.toThrow("notify failed after the switch");
+
+      expect(getThread(harness.db, fx.threadId)?.environmentId).toBe(
+        fx.targetEnvironmentId,
+      );
+      expect(fx.target.types()).not.toContain("thread.transfer.rollback");
+      expect(fx.source.types()).not.toContain("thread.transfer.rollback");
+      expect(getUnfinishedThreadMove(harness.db, fx.threadId)?.phase).toBe(
+        "switched",
+      );
+    });
+  });
+
   describe("preflight", () => {
     const refusals: Array<{
       name: string;

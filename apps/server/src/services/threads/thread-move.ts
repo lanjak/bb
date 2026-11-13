@@ -37,6 +37,7 @@ import { requireConnectedHostSession } from "../lib/entity-lookup.js";
 import { resolveReuseThreadRequestEnvironment } from "./thread-request-eligibility.js";
 import { stopThreadForCurrentState } from "./thread-lifecycle.js";
 import { appendThreadEventInTransaction } from "./thread-events.js";
+import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 
 type MoveDeps = LoggedPendingInteractionWorkSessionDeps;
 
@@ -461,10 +462,10 @@ export async function moveThread(
       });
       switchThreadEnvironment(deps, move);
     } catch (error) {
-      const rollbackFailures = await rollbackBothSides(deps, move);
-      const message = [errorMessage(error), ...rollbackFailures].join("; ");
       const latest = getThreadMove(deps.db, move.id) ?? move;
       if (isThreadMovePreSwitch(latest.phase)) {
+        const rollbackFailures = await rollbackBothSides(deps, move);
+        const message = [errorMessage(error), ...rollbackFailures].join("; ");
         updateThreadMovePhase(deps.db, {
           id: move.id,
           expectedPhase: latest.phase,
@@ -484,6 +485,10 @@ export async function moveThread(
     return toResponse(await finishAfterSwitch(deps, move));
   } finally {
     activeMoveIds.delete(move.id);
+    requestQueuedMessageDispatch(deps, {
+      kind: "thread-ready",
+      threadId: args.threadId,
+    });
   }
 }
 
@@ -504,9 +509,13 @@ async function recoverMove(deps: MoveDeps, move: ThreadMoveRow): Promise<void> {
       now: Date.now(),
       error: "Rolled back after a server restart",
     });
-    return;
+  } else {
+    await finishAfterSwitch(deps, move);
   }
-  await finishAfterSwitch(deps, move);
+  requestQueuedMessageDispatch(deps, {
+    kind: "thread-ready",
+    threadId: move.threadId,
+  });
 }
 
 export async function recoverThreadMoves(

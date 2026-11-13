@@ -1167,6 +1167,33 @@ Docs: `backend-sdk.md`.
    becoming visible, so a caller that skips hidden threads cannot refresh
    one when it appears; decide whether visibility changes need an event.
 
+## `bb.sdk.threads.experimental_move`
+
+`POST /threads/:id/move` with `{ environmentId }` moves an idle claude-code
+thread to a ready environment of the same project on another machine. The
+thread keeps its id, timeline, provider session and thread storage; the
+workspace code does not move. The server fences the thread, stops its
+provider runtime, copies the session and thread storage between the two host
+daemons with the `thread.transfer.*` commands, commits them on the target and
+switches `environmentId` in one transaction. A failure before the switch
+rolls both hosts back and leaves the thread where it was. Returns
+`{ moveId, phase, error, threadId, sourceEnvironmentId, targetEnvironmentId }`;
+refusals are 409 `thread_move_refused`, failures 409 `thread_move_failed`.
+First caller: `bb thread move <id> --environment <env-id>`.
+
+Docs: `bb-guide-threads.md`.
+
+**Audit before stabilizing.**
+
+1. **Providers.** Only claude-code supports session transfer. Decide how other
+   providers opt in and whether the route should list supported providers.
+2. **Target selection.** The caller must name an environment. Decide whether
+   to accept a machine and choose or create the environment.
+3. **Stuck moves.** A move interrupted before the switch keeps the thread
+   fenced until both daemons reconnect. Decide whether an owner can abandon it.
+4. **Events.** No plugin event announces a move. Decide whether a
+   `thread.moved` event is needed.
+
 ## `bb.sdk.threads.experimental_listCascade`
 
 `POST /threads/cascade` with `{ threadIds, action }` (1–200 ids, `action`

@@ -304,9 +304,9 @@ export function registerActionsCommands(
       action(
         async (id: string, opts: { environment: string; json?: boolean }) => {
           const sdk = createCliBbSdk(getUrl());
-          let result: Awaited<ReturnType<typeof sdk.threads.move>>;
+          let result: Awaited<ReturnType<typeof sdk.threads.experimental_move>>;
           try {
-            result = await sdk.threads.move({
+            result = await sdk.threads.experimental_move({
               threadId: id,
               environmentId: opts.environment,
             });

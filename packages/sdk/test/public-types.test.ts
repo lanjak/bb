@@ -395,6 +395,7 @@ type ExpectedThreadSectionsKey = "create" | "delete" | "list" | "update";
 type ExpectedThreadsKey =
   | "experimental_listAncestors"
   | "experimental_listDescendants"
+  | "experimental_move"
   | "experimental_listCascade"
   | "experimental_listPluginMetadata"
   | "experimental_headState"
@@ -416,7 +417,6 @@ type ExpectedThreadsKey =
   | "editMessage"
   | "events"
   | "fork"
-  | "move"
   | "get"
   | "interactions"
   | "list"
