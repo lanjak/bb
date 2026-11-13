@@ -32,6 +32,7 @@ import type { MoveThreadResponse } from "@bb/server-contract";
 import { ApiError } from "../../errors.js";
 import type { LoggedPendingInteractionWorkSessionDeps } from "../../types.js";
 import { callHostRetryableOnlineRpc } from "../hosts/online-rpc.js";
+import { resolveBridgeLaunchForProviderId } from "../system/provider-bridge-launch.js";
 import { requireConnectedHostSession } from "../lib/entity-lookup.js";
 import { resolveReuseThreadRequestEnvironment } from "./thread-request-eligibility.js";
 import { stopThreadForCurrentState } from "./thread-lifecycle.js";
@@ -147,6 +148,14 @@ function planThreadMove(
     targetEnvironmentId: target.id,
     targetHostId: target.hostId,
   };
+}
+
+function requireBridgeLaunch(deps: MoveDeps, providerId: string) {
+  const bridgeLaunch = resolveBridgeLaunchForProviderId(deps, providerId);
+  if (bridgeLaunch === null) {
+    refuse(`Provider bridge is unavailable for ${providerId}.`);
+  }
+  return bridgeLaunch;
 }
 
 function rpc<TCommand extends HostDaemonRetryableOnlineRpcCommand>(
@@ -286,11 +295,13 @@ async function finishBothSides(
     type: "thread.transfer.finish",
     transferId: move.id,
     setAsideSession: sessionArgs(move, move.sourceCwd),
+    bridgeLaunch: requireBridgeLaunch(deps, move.providerId),
   });
   await rpc(deps, move.targetHostId, {
     type: "thread.transfer.finish",
     transferId: move.id,
     setAsideSession: null,
+    bridgeLaunch: null,
   });
 }
 
@@ -399,6 +410,7 @@ export async function moveThread(
     { type: "reuse", environmentId: args.environmentId },
     thread.projectId,
   );
+  const bridgeLaunch = requireBridgeLaunch(deps, MOVABLE_PROVIDER_ID);
   requireConnectedHostSession(deps, preflight.sourceHostId);
   requireConnectedHostSession(deps, preflight.targetHostId);
 
@@ -433,6 +445,7 @@ export async function moveThread(
         type: "thread.transfer.export",
         transferId: move.id,
         ...sessionArgs(move, move.sourceCwd),
+        bridgeLaunch,
       });
       move = advance(deps, move, "exporting", "copying");
       for (const file of exported.files) {
@@ -444,6 +457,7 @@ export async function moveThread(
         transferId: move.id,
         ...sessionArgs(move, move.targetCwd),
         files: exported.files,
+        bridgeLaunch,
       });
       switchThreadEnvironment(deps, move);
     } catch (error) {
