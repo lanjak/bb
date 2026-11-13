@@ -173,14 +173,29 @@ Forking:
 
 Moving a thread to another machine:
 
-  bb thread move <id> --environment <env-id> [--json]
+  bb thread move <id> --environment <env-id> [--carry-changes] [--json]
 
   Moves an idle thread to an existing ready environment of the same project on a
   different machine. The thread keeps its id, history, provider session and
   thread storage; only its environment changes, and a "Moved from ... to ..."
-  entry is added to the timeline. Code is not moved: the target environment
-  must already hold the workspace. SDK: threads.experimental_move({ threadId,
-  environmentId }); HTTP: POST /threads/:id/move.
+  entry is added to the timeline. By default code is not moved: the target
+  environment must already hold the workspace. SDK:
+  threads.experimental_move({ threadId, environmentId, carryChanges? });
+  HTTP: POST /threads/:id/move.
+
+  --carry-changes (carryChanges) also carries the source workspace to the
+  target workspace: commits the target lacks, staged and unstaged changes to
+  tracked files, and untracked files. It is checked before the thread is
+  fenced and refused unless both workspaces are git checkouts, the target has
+  no uncommitted or untracked files, and the target HEAD is the source HEAD or
+  an ancestor of it (otherwise: "Target workspace has uncommitted changes" or
+  "Target branch is not behind the source; push or pull first"). The target's
+  checked-out branch is fast-forwarded to the source HEAD, then the changes are
+  applied. Staged changes arrive unstaged. Ignored files, .env files, anything
+  under .git, nested repositories and submodule changes are never carried. If
+  applying fails, the target is reset to its old HEAD and the files the apply
+  created are removed, and the move fails without switching. The source
+  workspace is left untouched, so the changes exist on both machines afterward.
 
   Only claude-code threads can move. The thread must be idle with no queued
   messages, pending interactions, running child threads or open terminals, and

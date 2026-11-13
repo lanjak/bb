@@ -1169,10 +1169,17 @@ Docs: `backend-sdk.md`.
 
 ## `bb.sdk.threads.experimental_move`
 
-`POST /threads/:id/move` with `{ environmentId }` moves an idle claude-code
-thread to a ready environment of the same project on another machine. The
-thread keeps its id, timeline, provider session and thread storage; the
-workspace code does not move. The server fences the thread, stops its
+`POST /threads/:id/move` with `{ environmentId, carryChanges? }` moves an idle
+claude-code thread to a ready environment of the same project on another
+machine. The thread keeps its id, timeline, provider session and thread
+storage; the workspace code does not move unless `carryChanges` is true. With
+`carryChanges`, the server first checks both workspaces with
+`thread.transfer.inspect_workspace` (git checkouts, clean target, target HEAD an
+ancestor of the source HEAD), then the transfer also carries a git bundle of the
+missing commits, a binary patch of tracked changes and the untracked files under
+`workspace/`. The target fast-forwards, applies the patch and writes the files
+in the commit step, and a rollback restores its old HEAD. The source workspace
+is not changed. The server fences the thread, stops its
 provider runtime, copies the session and thread storage between the two host
 daemons with the `thread.transfer.*` commands, commits them on the target and
 switches `environmentId` in one transaction. A failure before the switch
@@ -1196,6 +1203,10 @@ Docs: `bb-guide-threads.md`.
    the daemon should also expire old transfer folders on its own.
 4. **Events.** No plugin event announces a move. Decide whether a
    `thread.moved` event is needed.
+5. **Carried changes.** Staged changes arrive unstaged, submodule changes and
+   nested repositories are skipped, and `.env` files are never carried. Decide
+   whether to carry stashes, the index or a non-fast-forward branch, and
+   whether the source should be cleaned after a successful move.
 
 ## `bb.sdk.threads.experimental_listCascade`
 
