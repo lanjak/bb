@@ -5338,6 +5338,96 @@ describe("acp bridge: work the agent starts on its own", () => {
     );
   });
 
+  it("auto-allows a permission request the agent raises with no prompt in flight in full mode", async () => {
+    const { providerThreadId } = await startThread({ permissionMode: "full" });
+    await runPromptedTurn(providerThreadId, "then-unprompted-permission");
+
+    expect(
+      await waitFor(
+        () =>
+          agentMessageTexts().find((text) => text.startsWith("permission:")),
+        "agent's reaction to the full-access decision",
+      ),
+    ).toBe("permission:allow");
+    expect(
+      output.messages.filter(
+        (message) => message.method === "interaction/request",
+      ),
+    ).toHaveLength(0);
+  });
+
+  function loggedPermissionOutcome(): string | undefined {
+    const log = join(workspaceDir, "permission.log");
+    return existsSync(log) ? readFileSync(log, "utf8").trim() : undefined;
+  }
+
+  it("auto-allows a permission request raised during session/load in full mode", async () => {
+    const first = await startThread({
+      envVars: { FAKE_ACP_LOAD_SESSION: "1" },
+    });
+    await stopThread(first.providerThreadId);
+
+    const resumeId = sendRequest("thread/resume", {
+      threadId: first.bbThreadId,
+      cwd: workspaceDir,
+      instructionMode: "append",
+      options: executionOptions({
+        providerOptions: {
+          acpLaunchSpec: acpLaunchSpec({
+            envVars: {
+              FAKE_ACP_LOAD_SESSION: "1",
+              FAKE_ACP_PERMISSION_ON: "load",
+              FAKE_ACP_PERMISSION_LOG: join(workspaceDir, "permission.log"),
+            },
+          }),
+        },
+      }),
+      providerThreadId: first.providerThreadId,
+    });
+
+    expect((await waitForResponse(resumeId)).result).toEqual({
+      providerThreadId: first.providerThreadId,
+      sessionRestorable: true,
+    });
+    expect(loggedPermissionOutcome()).toBe("yes");
+    expect(
+      output.messages.filter(
+        (message) => message.method === "interaction/request",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it.each(["thread/stop", "turn/steer"] as const)(
+    "cancels a full-mode permission request the agent raises after %s",
+    async (method) => {
+      const { providerThreadId } = await startThread({
+        permissionMode: "full",
+        envVars: {
+          FAKE_ACP_PERMISSION_ON: "cancel",
+          FAKE_ACP_PERMISSION_LOG: join(workspaceDir, "permission.log"),
+        },
+      });
+      const turnId = sendTurnRequest("turn/start", providerThreadId, {
+        input: [{ type: "text", text: "hang", mentions: [] }],
+      });
+      await waitForResponse(turnId);
+
+      if (method === "thread/stop") {
+        await stopThread(providerThreadId);
+      } else {
+        const steerId = sendTurnRequest("turn/steer", providerThreadId, {
+          expectedTurnId: "turn-1",
+          input: [{ type: "text", text: "steered", mentions: [] }],
+        });
+        expect((await waitForResponse(steerId)).error).toBeUndefined();
+      }
+
+      expect(
+        await waitFor(loggedPermissionOutcome, "logged permission outcome"),
+      ).toBe("cancelled");
+    },
+  );
+
   it("fails the agent's own turn when the agent exits during it", async () => {
     const readyFile = join(workspaceDir, "agent-ready");
     const { providerThreadId } = await startThread({

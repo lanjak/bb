@@ -515,6 +515,26 @@ function requestClient(method, params) {
   });
 }
 
+async function requestLoggedPermission(sessionId) {
+  const result = await requestClient("session/request_permission", {
+    sessionId,
+    toolCall: {
+      toolCallId: "logged-permission-tool",
+      title: "Read status",
+      kind: "read",
+    },
+    options: [
+      { optionId: "yes", name: "Allow", kind: "allow_once" },
+      { optionId: "no", name: "Deny", kind: "reject_once" },
+    ],
+  });
+  const outcome = result?.outcome;
+  appendFileSync(
+    process.env.FAKE_ACP_PERMISSION_LOG,
+    `${outcome?.outcome === "selected" ? outcome.optionId : (outcome?.outcome ?? "none")}\n`,
+  );
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1042,6 +1062,9 @@ async function handleMessage(message) {
             usageSessionId ?? message.params?.sessionId,
           );
         }
+        if (process.env.FAKE_ACP_PERMISSION_ON === "load") {
+          await requestLoggedPermission(message.params?.sessionId);
+        }
         if (failLoad) {
           send({
             jsonrpc: "2.0",
@@ -1288,6 +1311,9 @@ async function handleMessage(message) {
       if (activePromptId !== null) {
         const id = activePromptId;
         activePromptId = null;
+        if (process.env.FAKE_ACP_PERMISSION_ON === "cancel") {
+          await requestLoggedPermission(activeSessionId);
+        }
         if (process.env.FAKE_ACP_CANCEL_ERROR === "1") {
           stuckAfterCancel = true;
           send({
