@@ -618,6 +618,7 @@ export function createPluginApi(options: {
     "experimental_thread.events": [],
     "experimental_thread.parentChanged": [],
     "experimental_thread.read": [],
+    "experimental_thread.moved": [],
     "experimental_terminal.input": [],
     "experimental_host.deleted": [],
     "experimental_environment.removed": [],

@@ -25,6 +25,10 @@ import type {
   RetiredBundledPlugin,
 } from "./builtin-registry.js";
 import type { PluginManifest } from "./manifest.js";
+import type { PluginThreadEventPayloads } from "@get-bb/plugin-sdk";
+
+export type PluginThreadMovedPayload =
+  PluginThreadEventPayloads["experimental_thread.moved"];
 import type {
   PluginApiHandle,
   PluginBackgroundServiceRecord,
@@ -248,6 +252,7 @@ export interface PluginThreadEventEmitter {
   ): void;
   emitThreadDeleted(thread: Thread): void;
   emitThreadRead(threadId: string): void;
+  emitThreadMoved(payload: PluginThreadMovedPayload): void;
   emitInteractionPending(thread: Thread, interaction: PendingInteraction): void;
   /**
    * Queue lifecycle. The row is already in its new state when these fire; the

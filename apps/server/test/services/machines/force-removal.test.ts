@@ -57,6 +57,7 @@ function captureEnvironmentRemovals(): string[] {
     emitThreadParentChanged: ignore,
     emitThreadDeleted: ignore,
     emitThreadRead: ignore,
+    emitThreadMoved: ignore,
     emitMessageQueued: ignore,
     emitMessageDispatched: ignore,
     emitMessageCancelled: ignore,

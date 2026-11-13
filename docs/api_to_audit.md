@@ -1169,9 +1169,15 @@ Docs: `backend-sdk.md`.
 
 ## `bb.sdk.threads.experimental_move`
 
-`POST /threads/:id/move` with `{ environmentId, carryChanges? }` moves an idle
+`POST /threads/:id/move` with exactly one of `{ environmentId }` or
+`{ hostId }`, and optional `withChildren` and `carryChanges`, moves an idle
 thread of a provider that supports session transfer to a ready environment of
-the same project on another machine. The thread keeps its id, timeline,
+the same project on another machine. `hostId` picks the environment: the one
+reusable ready environment on that machine, preferring one whose path equals
+the source path, refusing none or several. `withChildren` moves the thread and
+its non-archived descendants on the same environment as one group: one
+`thread_moves` row each sharing a `group_id`, rolled back together before the
+switch and switched in one transaction. The thread keeps its id, timeline,
 provider session and thread storage; the workspace code does not move unless
 `carryChanges` is true. With `carryChanges`, the server first checks both
 workspaces with `thread.transfer.inspect_workspace` (git checkouts, clean
@@ -1183,10 +1189,12 @@ old HEAD. The source workspace is not changed. The server fences the thread, sto
 provider runtime, copies the session and thread storage between the two host
 daemons with the `thread.transfer.*` commands, commits them on the target and
 switches `environmentId` in one transaction. A failure before the switch
-rolls both hosts back and leaves the thread where it was. Returns
-`{ moveId, phase, error, threadId, sourceEnvironmentId, targetEnvironmentId }`;
+rolls both hosts back and leaves the thread where it was. After the switch the
+source daemon sets the old session files and the thread storage folder aside.
+Returns `{ moveId, groupId, phase, error, threadId, threadIds,
+sourceEnvironmentId, targetEnvironmentId }` for the requested thread;
 refusals are 409 `thread_move_refused`, failures 409 `thread_move_failed`.
-First caller: `bb thread move <id> --environment <env-id>`.
+First caller: `bb thread move <id> --environment <env-id> | --machine <id>`.
 
 Docs: `bb-guide-threads.md`.
 
@@ -1196,15 +1204,16 @@ Docs: `bb-guide-threads.md`.
    `capabilities.experimental_supportsSessionTransfer` and a bridge that
    advertises `sessionTransfer`. Decide whether the route should list the
    providers that support it.
-2. **Target selection.** The caller must name an environment. Decide whether
-   to accept a machine and choose or create the environment.
+2. **Target selection.** A machine picks an existing environment but never
+   creates one. Decide whether the move should create the environment from a
+   project source.
 3. **Leftover files.** A move that fails or is interrupted before the switch
    releases the thread at once and is kept as `cleanup_pending` until both
    daemons confirm the rollback. A later move of the thread first finishes
    that cleanup, or is refused while a machine is offline. Decide whether
    the daemon should also expire old transfer folders on its own.
-4. **Events.** No plugin event announces a move. Decide whether a
-   `thread.moved` event is needed.
+4. **Events.** `experimental_thread.moved` announces each switched thread; see
+   its own entry below.
 5. **Carried changes.** Staged changes arrive unstaged, submodule changes and
    nested repositories are skipped, and `.env` files are never carried. Decide
    whether to carry stashes, the index or a non-fast-forward branch, and
@@ -4072,6 +4081,20 @@ Docs: `backend-sdk.md`.
 
 Stabilization requires deciding whether a general `thread.updated` event
 should replace it, and a second consumer.
+
+## Thread move notifications
+
+`experimental_thread.moved` delivers `{ threadId, moveId, sourceEnvironmentId,
+targetEnvironmentId, sourceHostId, targetHostId }` once per thread after
+`threads.experimental_move` switched it to the target environment, including
+each child moved with `withChildren`. It fires from the same server path that
+appends the "Moved from ... to ..." timeline entry, after the switch commits and
+before the source copy is set aside. No first-party plugin consumes it yet.
+
+Docs: `backend-sdk.md`, `backend-events.md`.
+
+Stabilization requires a consumer, and deciding whether the payload should carry
+the thread DTO like the other thread events.
 
 ## Thread read notifications
 

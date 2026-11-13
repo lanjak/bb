@@ -9,10 +9,13 @@ import {
   getThreadMove,
   getUnfinishedThreadMove,
   listCleanupPendingThreadMoves,
+  threadMoves,
   updateThreadMovePhase,
 } from "@bb/db";
 import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
 import { describe, expect, it } from "vitest";
+import { setPluginThreadEventEmitter } from "../../src/services/plugins/plugin-thread-events.js";
+import type { PluginThreadEventEmitter } from "../../src/services/plugins/plugin-service.js";
 import { ApiError } from "../../src/errors.js";
 import {
   moveThread,
@@ -55,13 +58,16 @@ interface FakeWorkspace {
 }
 
 interface FakeDaemonOptions {
+  failAfter?: number;
   failOn?: Command["type"];
   workspace?: FakeWorkspace;
+  onCommit?: (command: Command) => void;
   shortWrite?: boolean;
 }
 
 class FakeDaemon {
   readonly commands: Command[] = [];
+  private failOnSeen = 0;
   readonly staged = new Map<string, Buffer>();
   readonly source = new Map<string, Buffer>([
     ["session/abc.jsonl", BIG_FILE],
@@ -76,7 +82,10 @@ class FakeDaemon {
   ): HostRpcHandlerResult => {
     const command = request.command;
     this.commands.push(command);
-    if (command.type === this.options.failOn) {
+    if (
+      command.type === this.options.failOn &&
+      this.failOnSeen++ >= (this.options.failAfter ?? 0)
+    ) {
       return {
         ok: false,
         errorCode: "test_failure",
@@ -136,6 +145,7 @@ class FakeDaemon {
         };
       }
       case "thread.transfer.commit":
+        this.options.onCommit?.(command);
         return { ok: true, result: { placedFiles: 3, backedUpFiles: 0 } };
       case "host.read_workspace_agent_context":
         return { ok: true, result: EMPTY_WORKSPACE_AGENT_CONTEXT };
@@ -245,6 +255,7 @@ function operationMessages(harness: TestAppHarness, threadId: string) {
 function insertMove(harness: TestAppHarness, fx: Fixture) {
   return createThreadMove(harness.db, {
     id: "mv_test",
+    groupId: "mvg_test",
     now: Date.now(),
     providerId: "claude-code",
     providerThreadId: PROVIDER_THREAD_ID,
@@ -265,7 +276,8 @@ describe("thread move", () => {
       const result = await moveThread(harness.deps, {
         carryChanges: false,
         threadId: fx.threadId,
-        environmentId: fx.targetEnvironmentId,
+        target: { environmentId: fx.targetEnvironmentId },
+        withChildren: false,
       });
 
       expect(result).toMatchObject({
@@ -334,7 +346,8 @@ describe("thread move", () => {
         moveThread(harness.deps, {
           carryChanges: false,
           threadId: fx.threadId,
-          environmentId: fx.targetEnvironmentId,
+          target: { environmentId: fx.targetEnvironmentId },
+          withChildren: false,
         }),
       ).rejects.toThrow("notify failed after the switch");
 
@@ -346,6 +359,463 @@ describe("thread move", () => {
       expect(getUnfinishedThreadMove(harness.db, fx.threadId)?.phase).toBe(
         "switched",
       );
+    });
+  });
+
+  describe("machine target", () => {
+    function seedExtraEnvironment(
+      harness: TestAppHarness,
+      fx: Fixture,
+      hostId: string,
+      path: string,
+    ) {
+      return seedEnvironment(harness.deps, {
+        hostId,
+        projectId: fx.projectId,
+        path,
+      });
+    }
+
+    it("moves to the only reusable environment on the machine", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        const result = await moveThread(harness.deps, {
+          carryChanges: false,
+          threadId: fx.threadId,
+          target: { hostId: fx.targetHostId },
+          withChildren: false,
+        });
+        expect(result.targetEnvironmentId).toBe(fx.targetEnvironmentId);
+        expect(getThread(harness.db, fx.threadId)?.environmentId).toBe(
+          fx.targetEnvironmentId,
+        );
+      });
+    });
+
+    it("prefers the environment whose path equals the source path", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        const samePath = seedExtraEnvironment(
+          harness,
+          fx,
+          fx.targetHostId,
+          "/work/a",
+        );
+        seedExtraEnvironment(harness, fx, fx.targetHostId, "/work/c");
+        const result = await moveThread(harness.deps, {
+          carryChanges: false,
+          threadId: fx.threadId,
+          target: { hostId: fx.targetHostId },
+          withChildren: false,
+        });
+        expect(result.targetEnvironmentId).toBe(samePath.id);
+      });
+    });
+
+    it("refuses several environments without a path match and lists them", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        const other = seedExtraEnvironment(
+          harness,
+          fx,
+          fx.targetHostId,
+          "/work/c",
+        );
+        await expect(
+          moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { hostId: fx.targetHostId },
+            withChildren: false,
+          }),
+        ).rejects.toMatchObject({
+          status: 409,
+          body: {
+            code: "thread_move_refused",
+            message: expect.stringContaining(
+              `${fx.targetEnvironmentId}, ${other.id}`,
+            ),
+          },
+        });
+        expect(getUnfinishedThreadMove(harness.db, fx.threadId)).toBeNull();
+        expect(fx.source.commands).toEqual([]);
+      });
+    });
+
+    it("refuses a machine without a reusable environment and says how to add one", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        const empty = seedHostSession(harness.deps, {
+          id: "host-c",
+          name: "Gamma",
+        });
+        await expect(
+          moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { hostId: empty.host.id },
+            withChildren: false,
+          }),
+        ).rejects.toMatchObject({
+          status: 409,
+          body: {
+            code: "thread_move_refused",
+            message: expect.stringContaining("bb project source add"),
+          },
+        });
+      });
+    });
+
+    it("refuses an unknown machine and the machine the thread is on", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        await expect(
+          moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { hostId: "host-missing" },
+            withChildren: false,
+          }),
+        ).rejects.toMatchObject({ status: 404 });
+        await expect(
+          moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { hostId: fx.sourceHostId },
+            withChildren: false,
+          }),
+        ).rejects.toMatchObject({
+          status: 409,
+          body: { code: "thread_move_refused" },
+        });
+      });
+    });
+  });
+
+  describe("with children", () => {
+    function seedChild(
+      harness: TestAppHarness,
+      fx: Fixture,
+      args: {
+        environmentId?: string;
+        parentThreadId?: string;
+        status?: "active" | "idle";
+      } = {},
+    ) {
+      const child = seedThread(harness.deps, {
+        projectId: fx.projectId,
+        environmentId: args.environmentId ?? fx.sourceEnvironmentId,
+        parentThreadId: args.parentThreadId ?? fx.threadId,
+        providerId: "claude-code",
+        status: args.status ?? "idle",
+      });
+      seedThreadIdentity(harness.deps, {
+        threadId: child.id,
+        environmentId: child.environmentId ?? fx.sourceEnvironmentId,
+        providerThreadId: `claude-session-${child.id}`,
+      });
+      return child;
+    }
+
+    function allMoves(harness: TestAppHarness) {
+      return harness.db.select().from(threadMoves).all();
+    }
+
+    it("moves the thread and its descendants together in one group", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        const child = seedChild(harness, fx);
+        const grandchild = seedChild(harness, fx, {
+          parentThreadId: child.id,
+        });
+        const archived = seedChild(harness, fx);
+        archiveThread(harness.db, harness.deps.hub, archived.id);
+
+        const result = await moveThread(harness.deps, {
+          carryChanges: false,
+          threadId: fx.threadId,
+          target: { environmentId: fx.targetEnvironmentId },
+          withChildren: true,
+        });
+
+        expect(result.phase).toBe("done");
+        expect([...result.threadIds].sort()).toEqual(
+          [fx.threadId, child.id, grandchild.id].sort(),
+        );
+        for (const id of result.threadIds) {
+          expect(getThread(harness.db, id)?.environmentId).toBe(
+            fx.targetEnvironmentId,
+          );
+          expect(operationMessages(harness, id)).toHaveLength(1);
+        }
+        expect(getThread(harness.db, archived.id)?.environmentId).toBe(
+          fx.sourceEnvironmentId,
+        );
+        const moves = allMoves(harness);
+        expect(moves).toHaveLength(3);
+        expect(new Set(moves.map((move) => move.groupId))).toEqual(
+          new Set([result.groupId]),
+        );
+        expect(moves.every((move) => move.phase === "done")).toBe(true);
+        expect(
+          fx.source.types().filter((type) => type === "thread.transfer.finish"),
+        ).toHaveLength(3);
+      });
+    });
+
+    it("leaves children behind without the flag", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        const child = seedChild(harness, fx);
+        const result = await moveThread(harness.deps, {
+          carryChanges: false,
+          threadId: fx.threadId,
+          target: { environmentId: fx.targetEnvironmentId },
+          withChildren: false,
+        });
+        expect(result.threadIds).toEqual([fx.threadId]);
+        expect(getThread(harness.db, child.id)?.environmentId).toBe(
+          fx.sourceEnvironmentId,
+        );
+      });
+    });
+
+    it("refuses children on another environment and lists their ids", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        const elsewhere = seedEnvironment(harness.deps, {
+          hostId: fx.targetHostId,
+          projectId: fx.projectId,
+          path: "/work/elsewhere",
+        });
+        const same = seedChild(harness, fx);
+        const foreign = seedChild(harness, fx, {
+          environmentId: elsewhere.id,
+        });
+        await expect(
+          moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { environmentId: fx.targetEnvironmentId },
+            withChildren: true,
+          }),
+        ).rejects.toMatchObject({
+          status: 409,
+          body: {
+            code: "thread_move_refused",
+            message: expect.stringContaining(foreign.id),
+          },
+        });
+        expect(allMoves(harness)).toEqual([]);
+        expect(getThread(harness.db, same.id)?.environmentId).toBe(
+          fx.sourceEnvironmentId,
+        );
+        expect(fx.source.commands).toEqual([]);
+      });
+    });
+
+    it("refuses a running child with or without the flag and moves nothing", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        const running = seedChild(harness, fx, { status: "active" });
+        for (const withChildren of [true, false]) {
+          await expect(
+            moveThread(harness.deps, {
+              carryChanges: false,
+              threadId: fx.threadId,
+              target: { environmentId: fx.targetEnvironmentId },
+              withChildren,
+            }),
+          ).rejects.toMatchObject({
+            status: 409,
+            body: { code: "thread_move_refused" },
+          });
+        }
+        expect(allMoves(harness)).toEqual([]);
+        expect(getThread(harness.db, running.id)?.environmentId).toBe(
+          fx.sourceEnvironmentId,
+        );
+      });
+    });
+
+    it("rolls every thread back when a later thread fails before the switch", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness, {
+          source: { failOn: "thread.transfer.export", failAfter: 1 },
+        });
+        const child = seedChild(harness, fx);
+
+        await expect(
+          moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { environmentId: fx.targetEnvironmentId },
+            withChildren: true,
+          }),
+        ).rejects.toMatchObject({ body: { code: "thread_move_failed" } });
+
+        for (const id of [fx.threadId, child.id]) {
+          expect(getThread(harness.db, id)?.environmentId).toBe(
+            fx.sourceEnvironmentId,
+          );
+          expect(getUnfinishedThreadMove(harness.db, id)).toBeNull();
+          expect(operationMessages(harness, id)).toEqual([]);
+        }
+        const moves = allMoves(harness);
+        expect(moves).toHaveLength(2);
+        expect(moves.every((move) => move.phase === "failed")).toBe(true);
+        expect(
+          fx.target
+            .types()
+            .filter((type) => type === "thread.transfer.rollback"),
+        ).toHaveLength(2);
+        expect(
+          fx.source
+            .types()
+            .filter((type) => type === "thread.transfer.rollback"),
+        ).toHaveLength(2);
+        expect(fx.target.types()).not.toContain("thread.transfer.finish");
+      });
+    });
+
+    it("rolls every thread back when the target commit of a later thread fails", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness, {
+          target: { failOn: "thread.transfer.commit", failAfter: 1 },
+        });
+        const child = seedChild(harness, fx);
+
+        await expect(
+          moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { environmentId: fx.targetEnvironmentId },
+            withChildren: true,
+          }),
+        ).rejects.toMatchObject({ body: { code: "thread_move_failed" } });
+
+        for (const id of [fx.threadId, child.id]) {
+          expect(getThread(harness.db, id)?.environmentId).toBe(
+            fx.sourceEnvironmentId,
+          );
+        }
+        expect(allMoves(harness).map((move) => move.phase)).toEqual([
+          "failed",
+          "failed",
+        ]);
+      });
+    });
+
+    it("switches no thread when the final transaction rejects one", async () => {
+      await withTestHarness(async (harness) => {
+        let childId = "";
+        const fx = setup(harness, {
+          target: {
+            onCommit: (command) => {
+              if (
+                command.type === "thread.transfer.commit" &&
+                command.threadId === childId
+              ) {
+                harness.db
+                  .update(threadMoves)
+                  .set({ phase: "failed" })
+                  .where(eq(threadMoves.threadId, fx.threadId))
+                  .run();
+              }
+            },
+          },
+        });
+        childId = seedChild(harness, fx).id;
+        await expect(
+          moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { environmentId: fx.targetEnvironmentId },
+            withChildren: true,
+          }),
+        ).rejects.toBeInstanceOf(ApiError);
+        for (const id of [fx.threadId, childId]) {
+          expect(getThread(harness.db, id)?.environmentId).toBe(
+            fx.sourceEnvironmentId,
+          );
+          expect(operationMessages(harness, id)).toEqual([]);
+        }
+      });
+    });
+  });
+
+  describe("plugin event", () => {
+    function recordMoved() {
+      const moved: unknown[] = [];
+      const emitter: PluginThreadEventEmitter = {
+        emitThreadEvents: () => {},
+        emitTerminalInput: () => {},
+        emitHostDeleted: () => {},
+        emitEnvironmentRemoved: () => {},
+        emitThreadCreated: () => {},
+        emitThreadActive: () => {},
+        emitThreadIdle: () => {},
+        emitThreadFailed: () => {},
+        emitThreadArchived: () => {},
+        emitThreadDeleted: () => {},
+        emitThreadRead: () => {},
+        emitThreadMoved: (payload) => moved.push(payload),
+        emitInteractionPending: () => {},
+        emitMessageQueued: () => {},
+        emitMessageDispatched: () => {},
+        emitMessageCancelled: () => {},
+        emitThreadUnarchived: () => {},
+        emitThreadParentChanged: () => {},
+        emitTurnFailed: () => {},
+      };
+      setPluginThreadEventEmitter(emitter);
+      return moved;
+    }
+
+    it("announces each switched thread once and nothing for a failed move", async () => {
+      await withTestHarness(async (harness) => {
+        const moved = recordMoved();
+        try {
+          const failing = setup(harness, {
+            source: { failOn: "thread.transfer.export" },
+          });
+          await expect(
+            moveThread(harness.deps, {
+              carryChanges: false,
+              threadId: failing.threadId,
+              target: { environmentId: failing.targetEnvironmentId },
+              withChildren: false,
+            }),
+          ).rejects.toBeInstanceOf(ApiError);
+          expect(moved).toEqual([]);
+        } finally {
+          setPluginThreadEventEmitter(undefined);
+        }
+      });
+      await withTestHarness(async (harness) => {
+        const moved = recordMoved();
+        try {
+          const fx = setup(harness);
+          const result = await moveThread(harness.deps, {
+            carryChanges: false,
+            threadId: fx.threadId,
+            target: { environmentId: fx.targetEnvironmentId },
+            withChildren: false,
+          });
+          expect(moved).toEqual([
+            {
+              threadId: fx.threadId,
+              moveId: result.moveId,
+              sourceEnvironmentId: fx.sourceEnvironmentId,
+              targetEnvironmentId: fx.targetEnvironmentId,
+              sourceHostId: fx.sourceHostId,
+              targetHostId: fx.targetHostId,
+            },
+          ]);
+        } finally {
+          setPluginThreadEventEmitter(undefined);
+        }
+      });
     });
   });
 
@@ -469,7 +939,8 @@ describe("thread move", () => {
             moveThread(harness.deps, {
               carryChanges: false,
               threadId: fx.threadId,
-              environmentId: fx.targetEnvironmentId,
+              target: { environmentId: fx.targetEnvironmentId },
+              withChildren: false,
             }),
           ).rejects.toBeInstanceOf(ApiError);
 
@@ -491,7 +962,8 @@ describe("thread move", () => {
           moveThread(harness.deps, {
             carryChanges: false,
             threadId: fx.threadId,
-            environmentId: fx.targetEnvironmentId,
+            target: { environmentId: fx.targetEnvironmentId },
+            withChildren: false,
           }),
         ).rejects.toMatchObject({ status: 409 });
       });
@@ -623,7 +1095,8 @@ describe("thread move", () => {
             moveThread(harness.deps, {
               carryChanges: false,
               threadId: fx.threadId,
-              environmentId: fx.targetEnvironmentId,
+              target: { environmentId: fx.targetEnvironmentId },
+              withChildren: false,
             }),
           ).rejects.toMatchObject({
             status: 409,
@@ -738,7 +1211,8 @@ describe("thread move", () => {
           moveThread(harness.deps, {
             carryChanges: false,
             threadId: fx.threadId,
-            environmentId: fx.targetEnvironmentId,
+            target: { environmentId: fx.targetEnvironmentId },
+            withChildren: false,
           }),
         ).rejects.toMatchObject({ body: { code: "thread_move_failed" } });
         const [first] = listCleanupPendingThreadMoves(harness.db, fx.threadId);
@@ -749,7 +1223,8 @@ describe("thread move", () => {
           moveThread(harness.deps, {
             carryChanges: false,
             threadId: fx.threadId,
-            environmentId: fx.targetEnvironmentId,
+            target: { environmentId: fx.targetEnvironmentId },
+            withChildren: false,
           }),
         ).rejects.toMatchObject({ body: { code: "thread_move_refused" } });
 
@@ -767,8 +1242,9 @@ describe("thread move", () => {
     const carry = (harness: TestAppHarness, fx: Fixture) =>
       moveThread(harness.deps, {
         carryChanges: true,
-        environmentId: fx.targetEnvironmentId,
+        target: { environmentId: fx.targetEnvironmentId },
         threadId: fx.threadId,
+        withChildren: false,
       });
 
     it("inspects both workspaces before the fence and sends the target head with export and commit", async () => {
@@ -823,8 +1299,9 @@ describe("thread move", () => {
         const fx = setup(harness);
         await moveThread(harness.deps, {
           carryChanges: false,
-          environmentId: fx.targetEnvironmentId,
+          target: { environmentId: fx.targetEnvironmentId },
           threadId: fx.threadId,
+          withChildren: false,
         });
         expect(fx.target.types()).not.toContain(
           "thread.transfer.inspect_workspace",

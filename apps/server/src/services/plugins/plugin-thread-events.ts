@@ -3,6 +3,7 @@ import type { ApplyThreadLifecycleEventOutcome, HostRow } from "@bb/db";
 import type { PendingInteraction, Thread } from "@bb/domain";
 import type { ThreadQueuedMessage } from "@bb/domain";
 import type { PluginThreadEventEmitter } from "./plugin-service.js";
+import type { PluginThreadMovedPayload } from "./plugin-service-internal.js";
 
 const pendingThreadEvents = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -45,6 +46,10 @@ export function emitPluginThreadParentChanged(
 
 export function emitPluginThreadDeleted(thread: Thread): void {
   emitter?.emitThreadDeleted(thread);
+}
+
+export function emitPluginThreadMoved(payload: PluginThreadMovedPayload): void {
+  emitter?.emitThreadMoved(payload);
 }
 
 export function emitPluginThreadRead(threadId: string): void {

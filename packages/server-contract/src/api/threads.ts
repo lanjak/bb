@@ -281,15 +281,24 @@ export type ForkThreadRequest = z.infer<typeof forkThreadRequestSchema>;
 
 export const moveThreadRequestSchema = z
   .object({
-    environmentId: z.string().min(1),
+    environmentId: z.string().min(1).optional(),
+    hostId: z.string().min(1).optional(),
+    withChildren: z.boolean().optional(),
     carryChanges: z.boolean().optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      (value.environmentId === undefined) !== (value.hostId === undefined),
+    { message: "Provide exactly one of environmentId or hostId" },
+  );
 export type MoveThreadRequest = z.infer<typeof moveThreadRequestSchema>;
 
 export const moveThreadResponseSchema = z.object({
   moveId: z.string(),
+  groupId: z.string(),
   threadId: z.string(),
+  threadIds: z.array(z.string()),
   phase: threadMovePhaseSchema,
   sourceEnvironmentId: z.string(),
   targetEnvironmentId: z.string(),

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "65cf676f-4c68-4e64-afc9-9a815994af9a",
+  "id": "f72af6fd-24c1-463c-81bf-1f80c5f36de4",
   "prevId": "5dbdf9dc-b8ed-4174-8b53-552ff92f814d",
   "tables": {
     "app_settings": {
@@ -4383,6 +4383,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "group_id": {
+          "name": "group_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "thread_id": {
           "name": "thread_id",
           "type": "text",
@@ -4488,6 +4495,13 @@
           "name": "thread_moves_thread_idx",
           "columns": [
             "thread_id"
+          ],
+          "isUnique": false
+        },
+        "thread_moves_group_idx": {
+          "name": "thread_moves_group_idx",
+          "columns": [
+            "group_id"
           ],
           "isUnique": false
         }

@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS `thread_moves` (
 	`id` text PRIMARY KEY NOT NULL,
+	`group_id` text NOT NULL,
 	`thread_id` text NOT NULL,
 	`source_environment_id` text NOT NULL,
 	`target_environment_id` text NOT NULL,
@@ -17,4 +18,5 @@ CREATE TABLE IF NOT EXISTS `thread_moves` (
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX IF NOT EXISTS `thread_moves_unfinished_thread_idx` ON `thread_moves` (`thread_id`) WHERE "thread_moves"."phase" NOT IN ('done', 'failed', 'cleanup_pending', 'rolled_back');--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS `thread_moves_thread_idx` ON `thread_moves` (`thread_id`);
+CREATE INDEX IF NOT EXISTS `thread_moves_thread_idx` ON `thread_moves` (`thread_id`);--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS `thread_moves_group_idx` ON `thread_moves` (`group_id`);

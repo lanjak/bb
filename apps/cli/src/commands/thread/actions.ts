@@ -42,6 +42,16 @@ import {
   uploadClientAttachmentInputs,
 } from "./helpers.js";
 import { SEND_AT_HELP, parseSendAt } from "./send-time.js";
+import { resolveMachineEnvironmentRouting } from "../machine.js";
+
+interface ThreadMoveCommandOptions {
+  carryChanges?: boolean;
+  environment?: string;
+  host?: string;
+  json?: boolean;
+  machine?: string;
+  withChildren?: boolean;
+}
 
 interface ThreadUpdateCommandOptions {
   self?: boolean;
@@ -293,11 +303,20 @@ export function registerActionsCommands(
   parent
     .command("move <id>")
     .description(
-      "Move an idle claude-code thread to a ready environment on another machine, keeping its history and provider session",
+      "Move an idle thread to a ready environment on another machine, keeping its history and provider session",
     )
-    .requiredOption(
+    .option(
       "--environment <env-id>",
       "Target environment id (same project, different machine)",
+    )
+    .option(
+      "--machine <id-or-name>",
+      "Target machine; picks a ready environment of the thread's project there",
+    )
+    .option("--host <id-or-name>", "Alias for --machine")
+    .option(
+      "--with-children",
+      "Also move the thread's non-archived child threads on the same environment",
     )
     .option(
       "--carry-changes",
@@ -305,29 +324,36 @@ export function registerActionsCommands(
     )
     .option("--json", "Print machine-readable JSON output")
     .action(
-      action(
-        async (
-          id: string,
-          opts: { carryChanges?: boolean; environment: string; json?: boolean },
-        ) => {
-          const sdk = createCliBbSdk(getUrl());
-          let result: Awaited<ReturnType<typeof sdk.threads.experimental_move>>;
-          try {
-            result = await sdk.threads.experimental_move({
-              threadId: id,
-              environmentId: opts.environment,
-              carryChanges: opts.carryChanges === true,
-            });
-          } catch (err: unknown) {
-            throw prependErrorContext(`Failed to move thread ${id}`, err);
-          }
-          if (outputJson(opts, { ok: true, ...result })) return;
-          console.log(
-            `Thread ${id} moved to environment ${result.targetEnvironmentId} (${result.phase})`,
-          );
-          if (result.error !== null) console.log(result.error);
-        },
-      ),
+      action(async (id: string, opts: ThreadMoveCommandOptions) => {
+        const serverUrl = getUrl();
+        const routing = await resolveMachineEnvironmentRouting(opts, serverUrl);
+        if (
+          routing.environmentId === undefined &&
+          routing.hostId === undefined
+        ) {
+          throw new Error("Provide --environment <env-id> or --machine <id>.");
+        }
+        const sdk = createCliBbSdk(serverUrl);
+        let result: Awaited<ReturnType<typeof sdk.threads.experimental_move>>;
+        try {
+          result = await sdk.threads.experimental_move({
+            threadId: id,
+            ...routing,
+            ...(opts.withChildren ? { withChildren: true } : {}),
+            ...(opts.carryChanges ? { carryChanges: true } : {}),
+          });
+        } catch (err: unknown) {
+          throw prependErrorContext(`Failed to move thread ${id}`, err);
+        }
+        if (outputJson(opts, { ok: true, ...result })) return;
+        const moved = result.threadIds.length;
+        console.log(
+          moved > 1
+            ? `Thread ${id} and ${moved - 1} child thread${moved === 2 ? "" : "s"} moved to environment ${result.targetEnvironmentId} (${result.phase})`
+            : `Thread ${id} moved to environment ${result.targetEnvironmentId} (${result.phase})`,
+        );
+        if (result.error !== null) console.log(result.error);
+      }),
     );
 
   parent

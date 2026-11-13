@@ -2951,6 +2951,7 @@ describe("a provider-produced environment over its life", () => {
         emitThreadParentChanged: () => {},
         emitThreadDeleted: () => {},
         emitThreadRead: () => {},
+        emitThreadMoved: () => {},
         emitMessageQueued: () => {},
         emitMessageDispatched: () => {},
         emitMessageCancelled: () => {},

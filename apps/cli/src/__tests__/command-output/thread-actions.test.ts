@@ -529,4 +529,102 @@ describe("bb thread action command output", () => {
       "retry of turn creq_3333333333 (attempt 3) queued",
     );
   });
+
+  describe("bb thread move", () => {
+    const moveResponse = {
+      moveId: "mv_1",
+      groupId: "mvg_1",
+      threadId: "thread-1",
+      threadIds: ["thread-1", "thread-2"],
+      phase: "done",
+      sourceEnvironmentId: "env-a",
+      targetEnvironmentId: "env-b",
+      error: null,
+    };
+
+    it("sends the environment and the with-children flag", async () => {
+      const movePost = vi.fn(async () => moveResponse);
+      stubServerApi({ "v1.threads.:id.move.$post": movePost });
+
+      await runCommand(
+        [
+          "thread",
+          "move",
+          "thread-1",
+          "--environment",
+          "env-b",
+          "--with-children",
+        ],
+        register,
+      );
+
+      expect(movePost).toHaveBeenCalledWith({
+        param: { id: "thread-1" },
+        json: { environmentId: "env-b", withChildren: true },
+      });
+      expect(collectLogLines(vi.mocked(console.log)).join("\n")).toContain(
+        "Thread thread-1 and 1 child thread moved to environment env-b (done)",
+      );
+    });
+
+    it("resolves a machine name to a host id", async () => {
+      const movePost = vi.fn(async () => ({
+        ...moveResponse,
+        threadIds: ["thread-1"],
+      }));
+      stubServerApi({
+        "v1.hosts.$get": vi.fn(async () => [
+          {
+            id: "host-remote",
+            name: "builder",
+            status: "connected",
+            lastSeenAt: 1,
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ]),
+        "v1.threads.:id.move.$post": movePost,
+      });
+
+      await runCommand(
+        ["thread", "move", "thread-1", "--machine", "builder"],
+        register,
+      );
+
+      expect(movePost).toHaveBeenCalledWith({
+        param: { id: "thread-1" },
+        json: { hostId: "host-remote" },
+      });
+    });
+
+    it("rejects a missing target and both targets", async () => {
+      const movePost = vi.fn(async () => moveResponse);
+      stubServerApi({ "v1.threads.:id.move.$post": movePost });
+
+      await expect(
+        runCommand(["thread", "move", "thread-1"], register),
+      ).rejects.toThrow("process.exit:1");
+      expect(console.error).toHaveBeenCalledWith(
+        "Error: Provide --environment <env-id> or --machine <id>.",
+      );
+      await expect(
+        runCommand(
+          [
+            "thread",
+            "move",
+            "thread-1",
+            "--environment",
+            "env-b",
+            "--machine",
+            "builder",
+          ],
+          register,
+        ),
+      ).rejects.toThrow("process.exit:1");
+      expect(console.error).toHaveBeenCalledWith(
+        "Error: Cannot combine --machine or --host with --environment; the environment already selects its machine.",
+      );
+      expect(movePost).not.toHaveBeenCalled();
+    });
+  });
 });

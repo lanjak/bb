@@ -967,6 +967,33 @@ export function rollbackThreadTransfer(
   });
 }
 
+async function removeEmptyDirectories(directory: string): Promise<boolean> {
+  let entries;
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (isFsErrorWithCode(error, "ENOENT")) {
+      return true;
+    }
+    throw error;
+  }
+  let empty = true;
+  for (const entry of entries) {
+    if (
+      entry.isDirectory() &&
+      (await removeEmptyDirectories(path.join(directory, entry.name)))
+    ) {
+      continue;
+    }
+    empty = false;
+  }
+  if (empty) {
+    await fs.rmdir(directory);
+    await fsyncPath(path.dirname(directory));
+  }
+  return empty;
+}
+
 interface SetAsideMove {
   from: string;
   to: string;
@@ -1045,6 +1072,18 @@ export function finishThreadTransfer(
           });
         }
       }
+      if (command.setAsideSession !== null) {
+        for (const file of await listRegularFiles(
+          threadStorageDirectory(options, command.setAsideSession.threadId),
+          "storage/",
+          true,
+        )) {
+          moves.push({
+            from: file.absolutePath,
+            to: resolveWithin(paths.setAside, relativeParts(file.relativePath)),
+          });
+        }
+      }
       for (const backup of await listRegularFiles(
         paths.backup,
         "backup/",
@@ -1068,6 +1107,11 @@ export function finishThreadTransfer(
       }
       await runSetAsideMove(move);
       await appendJsonLine(paths.setAsideJournal, { t: "done", i: index });
+    }
+    if (command.setAsideSession !== null) {
+      await removeEmptyDirectories(
+        threadStorageDirectory(options, command.setAsideSession.threadId),
+      );
     }
     await removeRoot(paths);
     return { ok: true };

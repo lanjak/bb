@@ -173,15 +173,33 @@ Forking:
 
 Moving a thread to another machine:
 
-  bb thread move <id> --environment <env-id> [--carry-changes] [--json]
+  bb thread move <id> --environment <env-id> [--with-children] [--carry-changes] [--json]
+  bb thread move <id> --machine <id-or-name> [--with-children] [--carry-changes] [--json]
 
   Moves an idle thread to an existing ready environment of the same project on a
   different machine. The thread keeps its id, history, provider session and
   thread storage; only its environment changes, and a "Moved from ... to ..."
   entry is added to the timeline. By default code is not moved: the target
-  environment must already hold the workspace. SDK:
-  threads.experimental_move({ threadId, environmentId, carryChanges? });
-  HTTP: POST /threads/:id/move.
+  environment must already hold the workspace (see --carry-changes). SDK:
+  threads.experimental_move({ threadId, environmentId | hostId, withChildren?,
+  carryChanges? }); HTTP: POST /threads/:id/move with exactly one of
+  environmentId or hostId.
+
+  --machine picks the environment for you: a ready environment of the thread's
+  project on that machine that a thread can reuse, preferring one whose path
+  equals the thread's current path. With none, the move is refused and names
+  `bb project source add <project> --path <path> --machine <id>` to create one.
+  With several and no path match, it is refused and lists their ids; pick one
+  with --environment.
+
+  --with-children also moves the thread's non-archived child threads, at any
+  depth, that use the same environment. All or none move: every thread is
+  checked first, a failure before the switch rolls all of them back, and the
+  environments of all of them switch in one transaction. It is refused when a
+  child uses another environment or machine (the ids are listed) or is not
+  idle. Without the flag, a thread with running child threads is refused and
+  idle children stay where they are. The response lists every moved thread in
+  threadIds and shares one groupId.
 
   --carry-changes (carryChanges) also carries the source workspace to the
   target workspace: commits the target lacks, staged and unstaged changes to
@@ -203,10 +221,12 @@ Moving a thread to another machine:
   sends, queueing, forks, edits, clear, archive, delete, new terminals and
   environment directory updates with "Thread <id> is moving to another
   machine." A failed move leaves the thread unchanged on its original
-  machine. The old session files are set aside under the source machine's
-  data directory, never deleted. If the server restarts mid-move, an
+  machine. The old session files and the old thread storage folder are set
+  aside under the source machine's data directory, never deleted, so no stale
+  copy stays in place. If the server restarts mid-move, an
   unfinished move is rolled back, or finished if the switch already happened,
-  when the machines reconnect.
+  when the machines reconnect. Plugins can listen for the
+  experimental_thread.moved event, sent once per moved thread after the switch.
 
 Editing a sent message:
 

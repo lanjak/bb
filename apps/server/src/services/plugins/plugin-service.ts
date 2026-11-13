@@ -1503,6 +1503,9 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           thread: buildThreadDto(thread),
         }));
       },
+      emitThreadMoved(payload) {
+        emitThreadEvent("experimental_thread.moved", () => payload);
+      },
       emitThreadRead(threadId) {
         emitThreadEvent("experimental_thread.read", () => {
           const thread = getThread(deps.db, threadId);

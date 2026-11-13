@@ -199,6 +199,12 @@ thread becomes read: a client opened it or marked it read, or the user sent it
 a turn. Marking a thread unread does not fire it, and a thread that was already
 read can fire it again when a client re-marks it, so keep the handler cheap.
 
+`bb.events.on("experimental_thread.moved", handler)` fires after `bb thread move`
+switched a thread to an environment on another machine, with `threadId`,
+`moveId`, `sourceEnvironmentId`, `targetEnvironmentId`, `sourceHostId` and
+`targetHostId`. It fires once per moved thread, after the switch commits and
+before the old copy is cleaned up.
+
 Every `bb.agents.configure` callback receives its plugin's current namespace as
 a deep-frozen snapshot at top-level `context.pluginMetadata`, or `{}` when it
 is absent. The snapshot is typed deep-readonly (`ReadonlyJsonValue` values),
