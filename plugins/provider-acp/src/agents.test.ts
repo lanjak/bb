@@ -31,6 +31,7 @@ describe("parseCustomAcpAgents", () => {
         args: [],
         env: {},
         supportsManualCompaction: false,
+        sessionTransfer: false,
       },
     ]);
   });
@@ -245,6 +246,28 @@ describe("custom agents that report usage", () => {
     ).toBe(true);
   });
 
+  it("declares session transfer only when the agent opts in", () => {
+    const optedIn = parse({
+      id: "mover",
+      displayName: "Mover",
+      command: "mover",
+      sessionTransfer: true,
+    });
+    const plain = parse({
+      id: "plain",
+      displayName: "Plain",
+      command: "plain",
+    });
+    expect(
+      acpProviderDeclaration(customAcpAgentDefinition(optedIn)).capabilities
+        .experimental_supportsSessionTransfer,
+    ).toBe(true);
+    expect(
+      acpProviderDeclaration(customAcpAgentDefinition(plain)).capabilities
+        .experimental_supportsSessionTransfer,
+    ).toBeUndefined();
+  });
+
   it("stays out of the usage surface by default", () => {
     const agent = parse({
       id: "amp-plain",
@@ -404,6 +427,7 @@ describe("acpProviderDeclaration", () => {
         args: [],
         env: {},
         supportsManualCompaction: false,
+        sessionTransfer: false,
       }),
     );
 

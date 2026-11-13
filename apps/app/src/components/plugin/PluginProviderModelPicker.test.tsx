@@ -67,6 +67,7 @@ function provider(
       supportsNativeUserQuestion: true,
       supportsFork: true,
       supportsSessionRewind: true,
+      supportsSessionTransfer: false,
       permissionModes: ["auto"],
       modelCatalogScope: "host",
     },

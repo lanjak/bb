@@ -118,6 +118,7 @@ describe("useSystemProviderInfo", () => {
         supportsNativeUserQuestion: false,
         supportsFork: true,
         supportsSessionRewind: true,
+        supportsSessionTransfer: false,
         modelCatalogScope: "workspace",
         permissionModes: ["accept-edits", "auto", "full"],
       },
@@ -161,6 +162,7 @@ describe("useSystemProviderInfo", () => {
         capabilities: {
           supportsServiceTier: true,
           supportsSessionRewind: true,
+          supportsSessionTransfer: false,
         },
       }),
     ];
@@ -262,6 +264,7 @@ describe("useSystemExecutionOptions", () => {
         capabilities: {
           supportsServiceTier: true,
           supportsSessionRewind: true,
+          supportsSessionTransfer: false,
         },
       }),
       makeProviderInfo({
@@ -380,6 +383,7 @@ describe("useSystemExecutionOptions", () => {
         supportsNativeUserQuestion: false,
         supportsFork: true,
         supportsSessionRewind: true,
+        supportsSessionTransfer: false,
         modelCatalogScope: "workspace",
         permissionModes: ["accept-edits", "auto", "full"],
       },

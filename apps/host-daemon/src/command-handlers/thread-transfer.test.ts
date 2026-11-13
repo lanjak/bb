@@ -247,6 +247,23 @@ describe("thread transfer", () => {
     await expect(exportFrom(source)).rejects.toThrow(/no files to move/);
   });
 
+  it("refuses a provider file outside the provider's session root", async () => {
+    const source = await makeSide("source");
+    await seedSource(source);
+    const outside = path.join(path.dirname(source.dataDir), "secret.txt");
+    await fs.writeFile(outside, "secret\n");
+    const list = source.options.listSessionFiles;
+    source.options.listSessionFiles = async (args) => {
+      const listed = await list(args);
+      return {
+        files: [...listed.files, { path: outside, relativePath: "s1/x.txt" }],
+      };
+    };
+    await expect(exportFrom(source)).rejects.toThrow(
+      "Provider listed a file outside its session root",
+    );
+  });
+
   it("round-trips chunks and places verified files on the target", async () => {
     const { files } = await exportFrom(source);
     await copyAll(source, target, files);

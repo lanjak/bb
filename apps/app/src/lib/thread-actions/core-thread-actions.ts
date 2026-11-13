@@ -12,6 +12,7 @@ import {
 import { threadParentNotificationsSchema } from "@bb/domain";
 import { useIsCompactViewport } from "@bb/shared-ui/hooks/use-compact-viewport";
 import { useThreadActions } from "@/components/thread/ThreadActionsProvider";
+import { findCachedProviderInfo } from "@/hooks/queries/system-queries";
 import { useRouteState } from "@/hooks/useRouteState";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { appToast } from "@/components/ui/app-toast";
@@ -224,11 +225,6 @@ interface MoveData {
   queryClient: QueryClient;
   requestMove: LifecycleHandlers["requestMove"];
 }
-
-const MOVABLE_PROVIDER_IDS: ReadonlySet<string> = new Set([
-  "claude-code",
-  "codex",
-]);
 
 function useMoveData(): MoveData {
   const { requestMove } = useLifecycleHandlers();
@@ -524,7 +520,10 @@ export const CORE_THREAD_ACTIONS: readonly PluginThreadActionRegistration<unknow
         const cached = lookupCachedThread(data.queryClient, thread.id);
         if (
           cached === null ||
-          !MOVABLE_PROVIDER_IDS.has(cached.providerId) ||
+          !(
+            findCachedProviderInfo(data.queryClient, cached.providerId)
+              ?.capabilities.supportsSessionTransfer ?? false
+          ) ||
           thread.archivedAt !== null
         ) {
           return null;

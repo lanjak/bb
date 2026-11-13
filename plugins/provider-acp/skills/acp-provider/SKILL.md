@@ -163,3 +163,7 @@ restart is needed.
   workspace, each a relative path without dot segments.
 - `supportsManualCompaction` (default `false`) shows `/compact` only for agents
   that accept an explicit compaction request.
+- `sessionTransfer` (default `false`) lets `bb thread move` move the agent's
+  threads to another machine. Turn it on only for agents that support
+  `session/load` and declare `bb.dev/sessionTransfer` (see
+  docs/provider-plugin-api.md); bb refuses the move otherwise.

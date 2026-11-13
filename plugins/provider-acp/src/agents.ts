@@ -29,6 +29,7 @@ export interface AcpAgentDefinition {
   iconTint?: { light: string; dark: string };
   supportsManualCompaction?: boolean;
   fork?: "none" | "tip";
+  sessionTransfer?: boolean;
   reasoningLevels?: readonly PluginProviderReasoningLevel[];
   providerUsage?: boolean;
   providerInstallation?: boolean;
@@ -56,6 +57,7 @@ export const customAcpAgentSchema = z
     nativeSkillRoots: launchSpecFields.nativeSkillRoots,
     permissionCli: launchSpecFields.permissionCli,
     supportsManualCompaction: z.boolean().default(false),
+    sessionTransfer: z.boolean().default(false),
     providerUsage: z.boolean().optional(),
   })
   .strict();
@@ -102,6 +104,7 @@ export function customAcpAgentDefinition(
       : {}),
     visibility: "always",
     fork: "none",
+    sessionTransfer: agent.sessionTransfer,
     supportsManualCompaction: agent.supportsManualCompaction,
   };
 }

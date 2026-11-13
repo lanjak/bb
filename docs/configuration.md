@@ -714,7 +714,9 @@ selection), `reasoningCli` (launch-time reasoning flags), `nativeReasoning`
 (`{"user": [...], "project": [...]}` relative paths; an entry is a path or
 `{"path": ..., "recursive": true, "ancestors": true}`), `permissionCli`
 (permission-mode launch flags), `supportsManualCompaction` (bb hides
-`/compact` otherwise), `providerUsage`, and `dialect` (`cursor`, `opencode`,
+`/compact` otherwise), `sessionTransfer` (lets `bb thread move` move the
+agent's threads; the agent must declare `bb.dev/sessionTransfer`),
+`providerUsage`, and `dialect` (`cursor`, `opencode`,
 `omp`, or `grok`).
 
 Changes apply immediately, with no restart. A custom agent's command is local

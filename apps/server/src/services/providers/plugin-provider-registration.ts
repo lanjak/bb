@@ -186,6 +186,8 @@ export function buildPluginProviderRegistration(args: {
       permissionModes: [...permissionModes],
       supportsFork: capabilities.fork !== "none",
       supportsSessionRewind: capabilities.fork === "checkpoint",
+      supportsSessionTransfer:
+        capabilities.experimental_supportsSessionTransfer ?? false,
       modelCatalogScope: declaration.models.scope,
     },
     composerActions,

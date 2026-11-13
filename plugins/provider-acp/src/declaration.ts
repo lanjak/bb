@@ -92,6 +92,9 @@ export function acpProviderDeclaration(
     capabilities: {
       ...ACP_BASE_CAPABILITIES,
       fork: agent.fork ?? DEFAULT_FORK,
+      ...(agent.sessionTransfer === true
+        ? { experimental_supportsSessionTransfer: true }
+        : {}),
       permissionModes: [...ACP_BASE_CAPABILITIES.permissionModes],
       ...(agent.supportsManualCompaction === true
         ? { supportsManualCompaction: true }

@@ -21,7 +21,7 @@ import {
   verifyStagedFile,
   type ProviderFile,
   type TransferPaths,
-} from "./thread-transfer.js";
+} from "./thread-transfer-fs.js";
 
 export const WORKSPACE_PREFIX = "workspace/";
 const BUNDLE_PATH = "workspace/commits.bundle";
