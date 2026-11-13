@@ -17,10 +17,7 @@ import {
   useProjectEnvironments,
 } from "@/hooks/queries/environment-queries";
 import { useHosts } from "@/hooks/queries/host-queries";
-import {
-  sidebarNavigationQueryKey,
-  threadQueryKey,
-} from "@/hooks/queries/query-keys";
+import { invalidateThreadMetadataBatch } from "@/hooks/cache-owners/thread-state-cache-owner";
 import { getMutationErrorMessage } from "@/lib/mutation-errors";
 import { sdk } from "@/lib/sdk";
 
@@ -192,11 +189,9 @@ function ThreadMoveDialogBody({
         }),
       ),
     onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: threadQueryKey(thread.id),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: sidebarNavigationQueryKey(),
+      invalidateThreadMetadataBatch({
+        queryClient,
+        threadIds: [thread.id],
       });
       onOpenChange(false);
     },
