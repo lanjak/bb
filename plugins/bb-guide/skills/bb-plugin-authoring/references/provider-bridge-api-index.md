@@ -173,6 +173,10 @@ Read the installed declarations for exact current signatures.
 - `runtimePermissionScopeValues`
 - `sanitizeInheritedChildProcessEnv`
 - `sdkMessageEnvelopeSchema`
+- `sessionDestinationParamsSchema`
+- `sessionDestinationResultSchema`
+- `sessionFilesParamsSchema`
+- `sessionFilesResultSchema`
 - `shouldAutoDenyInteractiveRequest`
 - `skillsConfigureParamsSchema`
 - `textBlockSchema`

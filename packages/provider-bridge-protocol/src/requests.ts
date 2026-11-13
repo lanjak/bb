@@ -12,6 +12,8 @@ export const BRIDGE_REQUEST_METHODS = {
   initialize: "initialize",
   modelList: "model/list",
   commandList: "commands/list",
+  sessionFiles: "session/files",
+  sessionDestination: "session/destination",
   providerHealth: "provider/health",
   providerUsage: "provider/usage",
   providerInstallationStatus: "provider/installation/status",
@@ -50,6 +52,43 @@ export const modelListParamsSchema = z
 export const commandListParamsSchema = z
   .object({ cwd: z.string().min(1) })
   .passthrough();
+
+const sessionTransferParamsFields = {
+  providerThreadId: z.string().min(1),
+  cwd: z.string().min(1),
+  options: z
+    .object({ envVars: z.record(z.string(), z.string()).optional() })
+    .passthrough(),
+};
+
+export const sessionFilesParamsSchema = z
+  .object(sessionTransferParamsFields)
+  .passthrough();
+
+export const sessionFilesResultSchema = z
+  .object({
+    files: z.array(
+      z
+        .object({
+          path: z.string().min(1),
+          relativePath: z.string().min(1),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
+export type SessionFilesResult = z.infer<typeof sessionFilesResultSchema>;
+
+export const sessionDestinationParamsSchema = z
+  .object(sessionTransferParamsFields)
+  .passthrough();
+
+export const sessionDestinationResultSchema = z
+  .object({ directory: z.string().min(1) })
+  .passthrough();
+export type SessionDestinationResult = z.infer<
+  typeof sessionDestinationResultSchema
+>;
 
 export const commandListResultSchema = threadProviderCommandsStateSchema;
 export type CommandListResult = z.infer<typeof commandListResultSchema>;

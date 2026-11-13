@@ -433,6 +433,28 @@ export async function runHandshakeScenario(
         capability: "commands.list",
         declared: parsed.data.capabilities.commands.list,
       })),
+      ...(await runDeclaredRequestScenario(client, {
+        id: "session/files-declared",
+        method: BRIDGE_REQUEST_METHODS.sessionFiles,
+        params: {
+          providerThreadId: "bb-conformance-session",
+          cwd: fixture.cwd,
+          options: {},
+        },
+        capability: "sessionTransfer",
+        declared: parsed.data.capabilities.sessionTransfer,
+      })),
+      ...(await runDeclaredRequestScenario(client, {
+        id: "session/destination-declared",
+        method: BRIDGE_REQUEST_METHODS.sessionDestination,
+        params: {
+          providerThreadId: "bb-conformance-session",
+          cwd: fixture.cwd,
+          options: {},
+        },
+        capability: "sessionTransfer",
+        declared: parsed.data.capabilities.sessionTransfer,
+      })),
     ],
     capabilities: parsed.data.capabilities,
   };
