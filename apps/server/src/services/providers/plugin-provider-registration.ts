@@ -217,6 +217,8 @@ export function buildPluginProviderRegistration(args: {
     reasoningLevels: [...capabilities.reasoningLevels],
     fork: capabilities.fork,
     supportsManualCompaction: capabilities.supportsManualCompaction,
+    supportsSessionTransfer:
+      capabilities.experimental_supportsSessionTransfer ?? false,
   };
 
   return {

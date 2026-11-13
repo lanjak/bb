@@ -24,6 +24,7 @@ export interface ProviderServerCapabilities {
   reasoningLevels: readonly ReasoningLevel[];
   fork: ProviderFork;
   supportsManualCompaction: boolean;
+  supportsSessionTransfer: boolean;
 }
 
 export interface ProviderInstallRank {
@@ -71,6 +72,7 @@ export interface ProviderRegistryService {
   ): Promise<void>;
   forgetInstalledKey(key: ProviderHealthCacheKey): void;
   forgetAllInstalled(): void;
+  supportsSessionTransfer(providerId: string): boolean;
   getServerCapabilities(providerId: string): ProviderServerCapabilities | null;
   getSupportedPermissionModes(
     providerId: string,
@@ -318,6 +320,13 @@ export function createProviderRegistryService(
       return (
         getRegistration(providerId)?.serverCapabilities
           .supportsManualCompaction ?? false
+      );
+    },
+
+    supportsSessionTransfer(providerId) {
+      return (
+        getRegistration(providerId)?.serverCapabilities
+          .supportsSessionTransfer ?? false
       );
     },
 

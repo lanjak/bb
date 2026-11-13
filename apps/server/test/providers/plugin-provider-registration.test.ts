@@ -90,6 +90,7 @@ describe("buildPluginProviderRegistration", () => {
       fork: "checkpoint",
       supportsManualCompaction:
         normalized.capabilities.supportsManualCompaction,
+      supportsSessionTransfer: false,
     });
     expect(registration.bridgeOptions).toStrictEqual({
       launch: { command: "my-agent" },

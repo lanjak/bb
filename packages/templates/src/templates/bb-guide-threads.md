@@ -182,7 +182,7 @@ Moving a thread to another machine:
   must already hold the workspace. SDK: threads.experimental_move({ threadId,
   environmentId }); HTTP: POST /threads/:id/move.
 
-  Only claude-code threads can move. The thread must be idle with no queued
+  Only threads of providers that support session transfer (claude-code and codex) can move. The thread must be idle with no queued
   messages, pending interactions, running child threads or open terminals, and
   both machines must be connected. While a move runs, the thread refuses
   sends, queueing, forks, edits, clear, archive, delete, new terminals and

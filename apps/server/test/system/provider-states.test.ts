@@ -309,6 +309,7 @@ describe("getProviderStates", () => {
             completedTurnDisplay: "collapse",
           },
           serverCapabilities: {
+            supportsSessionTransfer: false,
             reasoningLevels: ["medium"],
             fork: "none",
             supportsManualCompaction: false,

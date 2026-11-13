@@ -335,9 +335,9 @@ describe("thread move", () => {
       options?: { providerId?: string };
     }> = [
       {
-        name: "a provider other than claude-code",
+        name: "a provider that does not support session transfer",
         prepare: () => undefined,
-        options: { providerId: "codex" },
+        options: { providerId: "fake" },
       },
       {
         name: "a thread that is not idle",

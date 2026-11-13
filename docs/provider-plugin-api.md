@@ -66,6 +66,7 @@ bb.providers.register({
     fork: "checkpoint", // "none" | "tip" | "checkpoint"
     supportsNativeUserQuestion: true,
     supportsManualCompaction: true,
+    experimental_supportsSessionTransfer: false, // optional; true when the bridge serves session/files and session/destination
     supportsThreadArchive: true,
     supportsThreadRename: true,
     supportsServiceTier: false,

@@ -1169,8 +1169,8 @@ Docs: `backend-sdk.md`.
 
 ## `bb.sdk.threads.experimental_move`
 
-`POST /threads/:id/move` with `{ environmentId }` moves an idle claude-code
-thread to a ready environment of the same project on another machine. The
+`POST /threads/:id/move` with `{ environmentId }` moves an idle thread of a
+provider that supports session transfer to a ready environment of the same project on another machine. The
 thread keeps its id, timeline, provider session and thread storage; the
 workspace code does not move. The server fences the thread, stops its
 provider runtime, copies the session and thread storage between the two host
@@ -1185,8 +1185,10 @@ Docs: `bb-guide-threads.md`.
 
 **Audit before stabilizing.**
 
-1. **Providers.** Only claude-code supports session transfer. Decide how other
-   providers opt in and whether the route should list supported providers.
+1. **Providers.** A provider opts in with
+   `capabilities.experimental_supportsSessionTransfer` and a bridge that
+   advertises `sessionTransfer`. Decide whether the route should list the
+   providers that support it.
 2. **Target selection.** The caller must name an environment. Decide whether
    to accept a machine and choose or create the environment.
 3. **Leftover files.** A move that fails or is interrupted before the switch
@@ -1196,6 +1198,21 @@ Docs: `bb-guide-threads.md`.
    the daemon should also expire old transfer folders on its own.
 4. **Events.** No plugin event announces a move. Decide whether a
    `thread.moved` event is needed.
+
+## `capabilities.experimental_supportsSessionTransfer` (provider declaration)
+
+Optional boolean, default `false`. It declares that the provider's bridge
+serves `session/files` and `session/destination` and advertises
+`sessionTransfer` at `initialize`, so `threads.experimental_move` accepts its
+threads. The server preflight reads it through
+`ProviderRegistryService.supportsSessionTransfer`; the move orchestration is
+the only core caller. First callers: the claude-code and codex plugins.
+
+Docs: [provider-plugin-api.md](provider-plugin-api.md).
+
+**Audit before stabilizing.** Decide whether the bridge handshake should
+narrow it at run time, as `fork` does, and whether the declaration field is
+needed at all once the server can read the handshake.
 
 ## `bb.sdk.threads.experimental_listCascade`
 

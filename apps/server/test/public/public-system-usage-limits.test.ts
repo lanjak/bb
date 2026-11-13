@@ -176,6 +176,7 @@ describe("GET /api/v1/system/usage-limits", () => {
             completedTurnDisplay: "collapse",
           },
           serverCapabilities: {
+            supportsSessionTransfer: false,
             reasoningLevels: ["medium"],
             fork: "none",
             supportsManualCompaction: false,

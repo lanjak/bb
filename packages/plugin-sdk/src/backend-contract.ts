@@ -1341,6 +1341,10 @@ export interface PluginProviderCapabilities {
   /** The provider accepts an explicit context-compaction request — gates the
    * compact affordance. */
   supportsManualCompaction: boolean;
+  /** The bridge implements `session/files` and `session/destination`, so an
+   * idle thread can move to another machine with its provider session.
+   * Defaults to `false`; the bridge must also advertise `sessionTransfer`. */
+  experimental_supportsSessionTransfer?: boolean;
   /** The provider keeps its own thread archive, so BB mirrors archive and
    * unarchive onto it instead of tracking the state only in bb's own rows. */
   supportsThreadArchive: boolean;

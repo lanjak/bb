@@ -49,7 +49,6 @@ import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 type MoveDeps = LoggedPendingInteractionWorkSessionDeps;
 
 const THREAD_MOVE_RPC_TIMEOUT_MS = 5 * 60_000;
-const MOVABLE_PROVIDER_ID = "claude-code";
 export const THREAD_MOVE_OPERATION = "thread_move";
 
 const activeMoveIds = new Set<string>();
@@ -81,11 +80,6 @@ function planThreadMove(
     throw new ApiError(404, "thread_not_found", "Thread not found");
   }
   if (thread.archivedAt !== null) refuse("Archived threads cannot be moved.");
-  if (thread.providerId !== MOVABLE_PROVIDER_ID) {
-    refuse(
-      `Only ${MOVABLE_PROVIDER_ID} threads can be moved; this thread uses ${thread.providerId}.`,
-    );
-  }
   if (thread.status !== "idle") {
     refuse(`Only idle threads can be moved; this thread is ${thread.status}.`);
   }
@@ -437,6 +431,11 @@ export async function moveThread(
   if (thread === null || thread.deletedAt !== null) {
     throw new ApiError(404, "thread_not_found", "Thread not found");
   }
+  if (!deps.providerRegistry.supportsSessionTransfer(thread.providerId)) {
+    refuse(
+      `Provider ${thread.providerId} does not support moving threads between machines.`,
+    );
+  }
   const preflight = planThreadMove(deps.db, {
     ownMoveId: null,
     targetEnvironmentId: args.environmentId,
@@ -447,7 +446,7 @@ export async function moveThread(
     { type: "reuse", environmentId: args.environmentId },
     thread.projectId,
   );
-  const bridgeLaunch = requireBridgeLaunch(deps, MOVABLE_PROVIDER_ID);
+  const bridgeLaunch = requireBridgeLaunch(deps, thread.providerId);
   requireConnectedHostSession(deps, preflight.sourceHostId);
   requireConnectedHostSession(deps, preflight.targetHostId);
   await settleEarlierCleanups(deps, args.threadId);
@@ -463,7 +462,7 @@ export async function moveThread(
         ...plan,
         id: `mv_${randomUUID()}`,
         now: Date.now(),
-        providerId: MOVABLE_PROVIDER_ID,
+        providerId: thread.providerId,
         threadId: args.threadId,
       });
     },

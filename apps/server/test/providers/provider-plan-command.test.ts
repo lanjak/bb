@@ -48,6 +48,7 @@ function registryWith(): ReturnType<typeof createProviderRegistryService> {
           composerActions: [...composerActions],
         },
         serverCapabilities: {
+          supportsSessionTransfer: false,
           supportsManualCompaction: false,
           reasoningLevels: ["medium"],
           fork: "none",

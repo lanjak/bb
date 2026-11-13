@@ -56,6 +56,8 @@ const REGISTRATION_FIELDS = {
   fork: "capabilities.fork",
   supportsNativeUserQuestion: "capabilities.supportsNativeUserQuestion",
   supportsManualCompaction: "capabilities.supportsManualCompaction",
+  experimental_supportsSessionTransfer:
+    "capabilities.experimental_supportsSessionTransfer",
   supportsThreadArchive: "capabilities.supportsThreadArchive",
   supportsThreadRename: "capabilities.supportsThreadRename",
   supportsServiceTier: "capabilities.supportsServiceTier",

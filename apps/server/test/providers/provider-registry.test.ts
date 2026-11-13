@@ -26,6 +26,7 @@ const CURSOR_LIKE_INFO = {
 
 const MINIMAL_SERVER_CAPABILITIES = {
   supportsManualCompaction: false,
+  supportsSessionTransfer: false,
   reasoningLevels: ["medium" as const],
   fork: "none" as const,
 };
