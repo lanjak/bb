@@ -2,6 +2,7 @@
 
 import { experimental_selectedSkillMentions as selectedSkillMentions } from "@get-bb/plugin-sdk/provider-bridge";
 import { createHash } from "node:crypto";
+import { homedir } from "node:os";
 import { isDeepStrictEqual } from "node:util";
 import {
   isStandaloneBuiltinCompactCommand,
@@ -18,6 +19,8 @@ import {
   THREAD_DELTA_NOTIFICATION_METHOD,
   initializeParamsSchema,
   modelListParamsSchema,
+  sessionDestinationParamsSchema,
+  sessionFilesParamsSchema,
   providerInstallationRunParamsSchema,
   providerInstallationStatusParamsSchema,
   providerMaintenanceParamsSchema,
@@ -71,6 +74,11 @@ import {
   type CodexCyberProgram,
   type CodexModelCatalog,
 } from "../models.js";
+import { resolveCodexHome } from "../codex-home.js";
+import {
+  codexSessionsDirectory,
+  listCodexSessionFiles,
+} from "./session-transfer.js";
 import { resolveCodexMcpElicitationAppIcon } from "../mcp-elicitation-host.js";
 import { macOsPermissionPresentation } from "../presentation.js";
 import {
@@ -116,6 +124,14 @@ const codexBridgeCommandSchema = z.discriminatedUnion("method", [
     params: initializeParamsSchema,
   }),
   z.object({ method: z.literal("model/list"), params: modelListParamsSchema }),
+  z.object({
+    method: z.literal("session/files"),
+    params: sessionFilesParamsSchema,
+  }),
+  z.object({
+    method: z.literal("session/destination"),
+    params: sessionDestinationParamsSchema,
+  }),
   z.object({
     method: z.literal("provider/health"),
     params: providerMaintenanceParamsSchema,
@@ -406,6 +422,12 @@ function appServerLaunchEnv(
     if (value !== undefined) env[name] = value;
   }
   return env;
+}
+
+function codexHomeForEnvVars(
+  envVars: Readonly<Record<string, string>> | undefined,
+): string {
+  return resolveCodexHome(homedir(), appServerLaunchEnv(envVars));
 }
 
 function buildAppServerEnv(
@@ -1603,7 +1625,7 @@ function handleInitialize(id: string | number): void {
       steerMode: "inject",
       skills: { configure: true },
       commands: { list: false },
-      sessionTransfer: false,
+      sessionTransfer: true,
     },
   };
   sendResult(id, result);
@@ -2635,6 +2657,30 @@ async function handleRequest(
     case "model/list":
       await handleModelList(request.id, request.params);
       break;
+    case "session/files":
+      try {
+        sendResult(request.id, {
+          files: await listCodexSessionFiles({
+            codexHome: codexHomeForEnvVars(request.params.options.envVars),
+            sessionId: request.params.providerThreadId,
+          }),
+        });
+      } catch (error) {
+        sendError(
+          request.id,
+          BRIDGE_JSON_RPC_ERRORS.BRIDGE_ERROR,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      break;
+    case "session/destination": {
+      const codexHome = codexHomeForEnvVars(request.params.options.envVars);
+      sendResult(request.id, {
+        directory: codexSessionsDirectory(codexHome),
+        root: codexHome,
+      });
+      break;
+    }
     case "provider/health":
       sendResult(request.id, await getCodexProviderHealth());
       break;

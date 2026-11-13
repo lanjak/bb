@@ -45,6 +45,7 @@ export default function plugin(bb: BbPluginApi) {
       supportsNativeUserQuestion: false,
       fork: "checkpoint",
       supportsManualCompaction: true,
+      experimental_supportsSessionTransfer: true,
       supportsThreadArchive: true,
       supportsThreadRename: true,
       permissionModes: ["accept-edits", "auto", "full"],
