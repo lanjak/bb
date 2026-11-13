@@ -416,6 +416,7 @@ type ExpectedThreadsKey =
   | "editMessage"
   | "events"
   | "fork"
+  | "move"
   | "get"
   | "interactions"
   | "list"

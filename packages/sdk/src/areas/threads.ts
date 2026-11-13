@@ -22,6 +22,8 @@ import type {
   QueuedMessageListQuery,
   EditMessageRequest,
   EditMessageResponse,
+  MoveThreadRequest,
+  MoveThreadResponse,
   ForkThreadRequest,
   DeleteThreadRequest,
   PromptHistoryResponse,
@@ -208,6 +210,7 @@ export type ThreadDeleteResult = { ok: true };
 export type ThreadSendResult = SendMessageResponse;
 export type ThreadRetryResult = RetryTurnResponse;
 export type ThreadEditMessageResult = EditMessageResponse;
+export type ThreadMoveResult = MoveThreadResponse;
 export type ThreadStopResult = { ok: true };
 export type ThreadCompactResult = { ok: true };
 export type ThreadBannerActionResult = { ok: true };
@@ -314,6 +317,10 @@ export interface ThreadSendArgs extends SendMessageRequest {
 }
 
 export interface ThreadEditMessageArgs extends EditMessageRequest {
+  threadId: string;
+}
+
+export interface ThreadMoveArgs extends MoveThreadRequest {
   threadId: string;
 }
 
@@ -632,6 +639,7 @@ export interface ThreadsArea {
   editMessage(args: ThreadEditMessageArgs): Promise<ThreadEditMessageResult>;
   events: ThreadEventsArea;
   fork(args: ThreadForkArgs): Promise<ThreadForkResult>;
+  move(args: ThreadMoveArgs): Promise<ThreadMoveResult>;
   get(args: ThreadGetArgs): Promise<ThreadGetResult>;
   getPluginMetadata(
     args: ThreadPluginMetadataArgs,
@@ -1355,6 +1363,15 @@ export function createThreadsArea(args: CreateSdkAreaArgs): ThreadsArea {
         }),
       );
       return { ok: true };
+    },
+    async move(input) {
+      const { threadId, ...json } = input;
+      return transport.readJson(
+        transport.api.v1.threads[":id"].move.$post({
+          param: { id: threadId },
+          json,
+        }),
+      );
     },
     async editMessage(input) {
       const { threadId, ...json } = input;

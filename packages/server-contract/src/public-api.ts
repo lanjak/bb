@@ -1604,10 +1604,7 @@ export const publicApiRoutes = {
       path: "/threads/:id/move",
       method: "post",
       request: jsonRequest<PathId, MoveThreadRequest>(moveThreadRequestSchema),
-      response: [
-        jsonResponse<MoveThreadResponse>(),
-        jsonResponse<ApiError>({ status: 409 }),
-      ],
+      response: jsonResponse<MoveThreadResponse>(),
     }),
     clearContext: defineRoute({
       path: "/threads/:id/context/clear",
