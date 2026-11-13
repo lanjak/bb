@@ -333,6 +333,21 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
     mimeType: "video/mp4",
     revision: "a".repeat(64),
   },
+  "thread.transfer.export": {
+    files: [
+      {
+        relativePath: "session/abc.jsonl",
+        sizeBytes: 3,
+        sha256: "a".repeat(64),
+        mode: 0o600,
+      },
+    ],
+  },
+  "thread.transfer.read_chunk": { offset: 0, contentBase64: "AAEC" },
+  "thread.transfer.write_chunk": { sizeBytes: 3 },
+  "thread.transfer.commit": { placedFiles: 1, backedUpFiles: 0 },
+  "thread.transfer.rollback": { ok: true },
+  "thread.transfer.finish": { ok: true },
   "host.write_file": {
     outcome: "written",
     sha256: "c".repeat(64),
@@ -1068,7 +1083,7 @@ describe("host-daemon command schemas", () => {
   });
 
   it("uses the current host-daemon protocol version", () => {
-    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(265);
+    expect(HOST_DAEMON_PROTOCOL_VERSION).toBe(266);
     expect(HOST_ARTIFACT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 
@@ -1093,7 +1108,8 @@ describe("host-daemon command schemas", () => {
     expect(contract.isCompatibleHostDaemonProtocolVersion(262)).toBe(false);
     expect(contract.isCompatibleHostDaemonProtocolVersion(263)).toBe(false);
     expect(contract.isCompatibleHostDaemonProtocolVersion(264)).toBe(false);
-    expect(contract.isCompatibleHostDaemonProtocolVersion(265)).toBe(true);
+    expect(contract.isCompatibleHostDaemonProtocolVersion(265)).toBe(false);
+    expect(contract.isCompatibleHostDaemonProtocolVersion(266)).toBe(true);
     expect(contract.hostDaemonSupportsConnectNext(246)).toBe(false);
     expect(contract.hostDaemonSupportsConnectNext(247)).toBe(true);
     expect(contract.hostDaemonSupportsDesktopBrokerProof(247)).toBe(false);
@@ -3710,6 +3726,55 @@ describe("bounded file read contract", () => {
     expect(
       hostDaemonOnlineRpcCommandSchema.safeParse({ ...command, ...override })
         .success,
+    ).toBe(false);
+  });
+});
+
+describe("thread transfer commands", () => {
+  const base = {
+    type: "thread.transfer.read_chunk",
+    transferId: "move_1",
+    offset: 0,
+    length: 1024,
+  } as const;
+
+  it("accepts paths inside session/ and storage/", () => {
+    for (const relativePath of [
+      "session/abc.jsonl",
+      "session/abc/subagents/a.jsonl",
+      "storage/notes/x.md",
+    ]) {
+      expect(
+        hostDaemonOnlineRpcCommandSchema.safeParse({ ...base, relativePath })
+          .success,
+      ).toBe(true);
+    }
+  });
+
+  it("rejects paths that leave the transfer folders", () => {
+    for (const relativePath of [
+      "/etc/passwd",
+      "session/../../x",
+      "storage/./x",
+      "other/x",
+      "session/",
+      "session//x",
+      "session\\x",
+    ]) {
+      expect(
+        hostDaemonOnlineRpcCommandSchema.safeParse({ ...base, relativePath })
+          .success,
+      ).toBe(false);
+    }
+  });
+
+  it("rejects transfer ids that are not path-safe", () => {
+    expect(
+      hostDaemonOnlineRpcCommandSchema.safeParse({
+        ...base,
+        transferId: "../x",
+        relativePath: "session/a",
+      }).success,
     ).toBe(false);
   });
 });

@@ -52,6 +52,19 @@ import {
   providerUsageSchema,
   providerUsageWindowSchema,
 } from "@bb/provider-bridge-protocol";
+import {
+  threadTransferCommitCommandSchema,
+  threadTransferCommitResultSchema,
+  threadTransferDoneResultSchema,
+  threadTransferExportCommandSchema,
+  threadTransferExportResultSchema,
+  threadTransferFinishCommandSchema,
+  threadTransferReadChunkCommandSchema,
+  threadTransferReadChunkResultSchema,
+  threadTransferRollbackCommandSchema,
+  threadTransferWriteChunkCommandSchema,
+  threadTransferWriteChunkResultSchema,
+} from "./thread-transfer.js";
 
 export {
   HOST_ARTIFACT_MAX_BYTES,
@@ -1830,6 +1843,60 @@ export const hostDaemonCommandRegistry = {
     flushEventsBeforeResult: false,
     envLane: null,
   }),
+  "thread.transfer.export": defineHostDaemonCommandDescriptor({
+    type: "thread.transfer.export",
+    schema: threadTransferExportCommandSchema,
+    resultSchema: threadTransferExportResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "thread.transfer.read_chunk": defineHostDaemonCommandDescriptor({
+    type: "thread.transfer.read_chunk",
+    schema: threadTransferReadChunkCommandSchema,
+    resultSchema: threadTransferReadChunkResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "thread.transfer.write_chunk": defineHostDaemonCommandDescriptor({
+    type: "thread.transfer.write_chunk",
+    schema: threadTransferWriteChunkCommandSchema,
+    resultSchema: threadTransferWriteChunkResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "thread.transfer.commit": defineHostDaemonCommandDescriptor({
+    type: "thread.transfer.commit",
+    schema: threadTransferCommitCommandSchema,
+    resultSchema: threadTransferCommitResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "thread.transfer.rollback": defineHostDaemonCommandDescriptor({
+    type: "thread.transfer.rollback",
+    schema: threadTransferRollbackCommandSchema,
+    resultSchema: threadTransferDoneResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
+  "thread.transfer.finish": defineHostDaemonCommandDescriptor({
+    type: "thread.transfer.finish",
+    schema: threadTransferFinishCommandSchema,
+    resultSchema: threadTransferDoneResultSchema,
+    transport: "onlineRpc",
+    retryable: true,
+    flushEventsBeforeResult: false,
+    envLane: null,
+  }),
   "host.write_file": defineHostDaemonCommandDescriptor({
     type: "host.write_file",
     schema: hostWriteFileCommandSchema,
@@ -1980,7 +2047,9 @@ type HostDaemonRetryableOnlineRpcCommandSchema =
 type HostDaemonResultSchemaMapForTransport<
   Transport extends HostDaemonCommandTransport,
 > = {
-  [Descriptor in HostDaemonCommandDescriptorForTransport<Transport> as Descriptor["type"]]: Descriptor["resultSchema"];
+  [
+    Descriptor in HostDaemonCommandDescriptorForTransport<Transport> as Descriptor["type"]
+  ]: Descriptor["resultSchema"];
 };
 
 type HostDaemonCommandResultSchemaMap =
