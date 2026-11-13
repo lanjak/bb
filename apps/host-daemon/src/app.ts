@@ -860,6 +860,14 @@ export async function createHostDaemonApp(
       withMaintenanceRuntime({ allowStale: true }, (runtime) =>
         runtime.listCommands(args),
       ),
+    listSessionFiles: (args) =>
+      withMaintenanceRuntime({ allowStale: true }, (runtime) =>
+        runtime.listSessionFiles(args),
+      ),
+    resolveSessionDestination: (args) =>
+      withMaintenanceRuntime({ allowStale: true }, (runtime) =>
+        runtime.resolveSessionDestination(args),
+      ),
     providerHealth: (args) =>
       withMaintenanceRuntime({ allowStale: false }, (runtime) =>
         runtime.providerHealth(args),

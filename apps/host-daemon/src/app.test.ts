@@ -298,6 +298,12 @@ function createFakeRuntime(): AgentRuntime {
     async listCommands() {
       return { commands: [] };
     },
+    async listSessionFiles() {
+      return { files: [] };
+    },
+    async resolveSessionDestination() {
+      return { directory: "/tmp/session-destination" };
+    },
     async providerHealth() {
       return { supported: false as const };
     },

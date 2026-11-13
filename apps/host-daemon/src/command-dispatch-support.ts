@@ -21,6 +21,8 @@ import {
 import { BRIDGE_JSON_RPC_ERRORS } from "@bb/provider-bridge-protocol";
 import type {
   CommandListResult,
+  SessionDestinationResult,
+  SessionFilesResult,
   ProviderInstallationCommand,
   ProviderInstallationRunResult,
   ProviderInstallationStatus,
@@ -71,6 +73,18 @@ export interface CommandDispatchOptions {
     bridgeLaunch: AgentRuntimeBridgeLaunch;
     cwd: string;
   }) => Promise<CommandListResult>;
+  listSessionFiles: (args: {
+    providerId: string;
+    bridgeLaunch: AgentRuntimeBridgeLaunch;
+    providerThreadId: string;
+    cwd: string;
+  }) => Promise<SessionFilesResult>;
+  resolveSessionDestination: (args: {
+    providerId: string;
+    bridgeLaunch: AgentRuntimeBridgeLaunch;
+    providerThreadId: string;
+    cwd: string;
+  }) => Promise<SessionDestinationResult>;
   providerHealth: (args: {
     providerId: string;
     bridgeLaunch: AgentRuntimeBridgeLaunch;

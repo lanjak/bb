@@ -72,6 +72,8 @@ export interface CommandRouterOptions {
   eventSink: CommandDispatchOptions["eventSink"];
   listModels: CommandDispatchOptions["listModels"];
   listCommands: CommandDispatchOptions["listCommands"];
+  listSessionFiles: CommandDispatchOptions["listSessionFiles"];
+  resolveSessionDestination: CommandDispatchOptions["resolveSessionDestination"];
   providerHealth: CommandDispatchOptions["providerHealth"];
   providerUsage: CommandDispatchOptions["providerUsage"];
   providerInstallationStatus: CommandDispatchOptions["providerInstallationStatus"];
@@ -311,6 +313,8 @@ export class CommandRouter {
       eventSink: this.options.eventSink,
       listModels: this.options.listModels,
       listCommands: this.options.listCommands,
+      listSessionFiles: this.options.listSessionFiles,
+      resolveSessionDestination: this.options.resolveSessionDestination,
       providerHealth: this.options.providerHealth,
       providerUsage: this.options.providerUsage,
       providerInstallationStatus: this.options.providerInstallationStatus,

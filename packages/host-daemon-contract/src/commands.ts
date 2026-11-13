@@ -198,6 +198,19 @@ export type HostDaemonBridgeLaunch = z.infer<
   typeof hostDaemonBridgeLaunchSchema
 >;
 
+const threadTransferExportWithLaunchSchema =
+  threadTransferExportCommandSchema.extend({
+    bridgeLaunch: hostDaemonBridgeLaunchSchema,
+  });
+const threadTransferCommitWithLaunchSchema =
+  threadTransferCommitCommandSchema.extend({
+    bridgeLaunch: hostDaemonBridgeLaunchSchema,
+  });
+const threadTransferFinishWithLaunchSchema =
+  threadTransferFinishCommandSchema.extend({
+    bridgeLaunch: hostDaemonBridgeLaunchSchema.nullable(),
+  });
+
 export const hostDaemonContributedEnvEntrySchema = z
   .object({
     name: z.string().regex(/^[A-Z_][A-Z0-9_]*$/u),
@@ -1845,7 +1858,7 @@ export const hostDaemonCommandRegistry = {
   }),
   "thread.transfer.export": defineHostDaemonCommandDescriptor({
     type: "thread.transfer.export",
-    schema: threadTransferExportCommandSchema,
+    schema: threadTransferExportWithLaunchSchema,
     resultSchema: threadTransferExportResultSchema,
     transport: "onlineRpc",
     retryable: true,
@@ -1872,7 +1885,7 @@ export const hostDaemonCommandRegistry = {
   }),
   "thread.transfer.commit": defineHostDaemonCommandDescriptor({
     type: "thread.transfer.commit",
-    schema: threadTransferCommitCommandSchema,
+    schema: threadTransferCommitWithLaunchSchema,
     resultSchema: threadTransferCommitResultSchema,
     transport: "onlineRpc",
     retryable: true,
@@ -1890,7 +1903,7 @@ export const hostDaemonCommandRegistry = {
   }),
   "thread.transfer.finish": defineHostDaemonCommandDescriptor({
     type: "thread.transfer.finish",
-    schema: threadTransferFinishCommandSchema,
+    schema: threadTransferFinishWithLaunchSchema,
     resultSchema: threadTransferDoneResultSchema,
     transport: "onlineRpc",
     retryable: true,

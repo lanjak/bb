@@ -39,6 +39,8 @@ export const unexpectedProviderMaintenance: Pick<
   CommandDispatchOptions,
   | "listModels"
   | "listCommands"
+  | "listSessionFiles"
+  | "resolveSessionDestination"
   | "providerHealth"
   | "providerUsage"
   | "providerInstallationStatus"
@@ -50,6 +52,12 @@ export const unexpectedProviderMaintenance: Pick<
   },
   listCommands: async () => {
     throw new Error("Unexpected provider.list_commands call");
+  },
+  listSessionFiles: async () => {
+    throw new Error("Unexpected thread.transfer session files call");
+  },
+  resolveSessionDestination: async () => {
+    throw new Error("Unexpected thread.transfer session destination call");
   },
   providerHealth: async () => {
     throw new Error("Unexpected provider.health call");
@@ -336,6 +344,12 @@ export function createFakeRuntime() {
     },
     async listCommands() {
       return { commands: [] };
+    },
+    async listSessionFiles() {
+      return { files: [] };
+    },
+    async resolveSessionDestination() {
+      return { directory: "/tmp/unexpected-session-destination" };
     },
     async providerHealth() {
       return { supported: false as const };

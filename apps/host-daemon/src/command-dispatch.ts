@@ -55,6 +55,14 @@ import {
   readHostFileChunk,
 } from "./command-handlers/host-files.js";
 import { writeHostFile } from "./command-handlers/file-write.js";
+import {
+  commitThreadTransfer,
+  exportThreadTransfer,
+  finishThreadTransfer,
+  readThreadTransferChunk,
+  rollbackThreadTransfer,
+  writeThreadTransferChunk,
+} from "./command-handlers/thread-transfer.js";
 import { discoverRepos } from "./command-handlers/discover-repos.js";
 import {
   mkdirHostPath,
@@ -614,6 +622,12 @@ const onlineRpcHandlers: OnlineRpcHandlerMap = {
   "host.read_file": readHostFile,
   "host.read_file_chunk": readHostFileChunk,
   "host.write_file": writeHostFile,
+  "thread.transfer.export": exportThreadTransfer,
+  "thread.transfer.read_chunk": readThreadTransferChunk,
+  "thread.transfer.write_chunk": writeThreadTransferChunk,
+  "thread.transfer.commit": commitThreadTransfer,
+  "thread.transfer.rollback": rollbackThreadTransfer,
+  "thread.transfer.finish": finishThreadTransfer,
   "provider.list_models": (command, options) =>
     withResolvedBridgeLaunch(command, options, (args) =>
       options.listModels({

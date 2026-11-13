@@ -201,6 +201,10 @@ function createFakeRuntime() {
       selectedOnlyModels: [],
     })),
     listCommands: vi.fn(async () => ({ commands: [] })),
+    listSessionFiles: vi.fn(async () => ({ files: [] })),
+    resolveSessionDestination: vi.fn(async () => ({
+      directory: "/tmp/session-destination",
+    })),
     providerHealth: vi.fn(async () => ({ supported: false as const })),
     providerUsage: vi.fn(async () => ({ supported: false as const })),
     providerInstallationStatus: vi.fn(async () => {
