@@ -63,6 +63,7 @@ import {
 } from "../../services/threads/thread-send.js";
 import { acceptThreadSendRequest } from "../../services/threads/thread-send-request.js";
 import { editThreadMessage } from "../../services/threads/thread-edit-message.js";
+import { moveThread } from "../../services/threads/thread-move.js";
 import { clearThreadContext } from "../../services/threads/thread-context-clear.js";
 import {
   buildExecutionOptions,
@@ -239,6 +240,16 @@ export function registerThreadActionRoutes(
       thread,
     });
     return context.json(result);
+  });
+
+  post(routes.move, async (context, payload) => {
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
+    return context.json(
+      await moveThread(deps, {
+        environmentId: payload.environmentId,
+        threadId: thread.id,
+      }),
+    );
   });
 
   post(routes.retry, async (context, payload) => {

@@ -1,4 +1,5 @@
 import { countUnarchivedThreadDescendants } from "../../services/threads/thread-archive.js";
+import { assertThreadNotMoving } from "../../services/threads/thread-move-fence.js";
 import { listThreadCascades } from "../../services/threads/thread-cascade.js";
 import { cancelAbandonedProviderCreations } from "../../services/threads/thread-environment-providers.js";
 import {
@@ -524,6 +525,10 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
       thread,
     });
     const dependents = listThreadDeletionTree(deps.db, thread.id);
+    assertThreadNotMoving(deps.db, thread.id);
+    for (const dependent of dependents) {
+      assertThreadNotMoving(deps.db, dependent.id);
+    }
     markThreadDeleted(deps.db, deps.hub, { threadId: thread.id });
     for (const dependent of dependents) {
       const deleted = getThread(deps.db, dependent.id);

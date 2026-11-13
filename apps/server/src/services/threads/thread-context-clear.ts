@@ -1,4 +1,5 @@
 import { createEventId, getThread, type DbTransaction } from "@bb/db";
+import { assertThreadNotMoving } from "./thread-move-fence.js";
 import {
   THREAD_CONTEXT_CLEAR_OPERATION,
   THREAD_CONTEXT_CLEARED_DETAIL,
@@ -30,6 +31,7 @@ export async function clearThreadContext(
     if (thread.archivedAt !== null || thread.deletedAt !== null) {
       throw new ApiError(409, "invalid_request", "Thread is not writable");
     }
+    assertThreadNotMoving(deps.db, thread.id);
     if (thread.status !== "idle" && thread.status !== "error") {
       throw new ApiError(
         409,

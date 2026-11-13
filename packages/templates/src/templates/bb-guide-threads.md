@@ -171,6 +171,28 @@ Forking:
   a numbered prefix: "foo" becomes "(1) foo" and "(1) foo" becomes "(2) foo".
   Forks created with a first prompt get a title from that prompt.
 
+Moving a thread to another machine:
+
+  bb thread move <id> --environment <env-id> [--json]
+
+  Moves an idle thread to an existing ready environment of the same project on a
+  different machine. The thread keeps its id, history, provider session and
+  thread storage; only its environment changes, and a "Moved from ... to ..."
+  entry is added to the timeline. Code is not moved: the target environment
+  must already hold the workspace. SDK: threads.move({ threadId,
+  environmentId }); HTTP: POST /threads/:id/move.
+
+  Only claude-code threads can move. The thread must be idle with no queued
+  messages, pending interactions, running child threads or open terminals, and
+  both machines must be connected. While a move runs, the thread refuses
+  sends, queueing, forks, edits, clear, archive, delete, new terminals and
+  environment directory updates with "Thread <id> is moving to another
+  machine." A failed move leaves the thread unchanged on its original
+  machine. The old session files are set aside under the source machine's
+  data directory, never deleted. If the server restarts mid-move, an
+  unfinished move is rolled back, or finished if the switch already happened,
+  when the machines reconnect.
+
 Editing a sent message:
 
   bb thread edit-message <id> --message "Replacement text"

@@ -3,6 +3,7 @@ import {
   THREAD_PRUNING_SWEEP_LIMITS,
   type ThreadPruningSweepLimits,
 } from "./thread-pruning-sweep.js";
+import { recoverThreadMoves } from "../threads/thread-move.js";
 import { discardInterruptedForkHistoryCopies } from "../threads/thread-create.js";
 import {
   PROJECT_ATTACHMENT_BACKFILL_LIMITS,
@@ -924,6 +925,9 @@ export async function runStartupRecoverySweep(
       );
     }
   });
+  await runStartupRecoveryStep(deps, "thread-moves", () =>
+    recoverThreadMoves(deps),
+  );
   await runStartupRecoveryStep(deps, "legacy-deferred-messages", () =>
     deliverLegacyDeferredThreadMessages(deps),
   );

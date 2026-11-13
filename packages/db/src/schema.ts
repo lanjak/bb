@@ -21,6 +21,7 @@ import { threadOriginKindValues } from "@bb/domain/thread-origin-kind";
 import { threadParentNotificationsValues } from "@bb/domain/thread-parent-notifications";
 import { threadVisibilityValues } from "@bb/domain/thread-visibility";
 import type {
+  ThreadMovePhase,
   EnvironmentProviderSelection,
   JsonValue,
   EnvironmentStatus,
@@ -724,6 +725,34 @@ export const threadPurges = sqliteTable(
     requestedAt: integer("requested_at").notNull(),
   },
   (table) => [index("thread_purges_requested_idx").on(table.requestedAt)],
+);
+
+export const threadMoves = sqliteTable(
+  "thread_moves",
+  {
+    id: text("id").primaryKey(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    sourceEnvironmentId: text("source_environment_id").notNull(),
+    targetEnvironmentId: text("target_environment_id").notNull(),
+    sourceHostId: text("source_host_id").notNull(),
+    targetHostId: text("target_host_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    providerThreadId: text("provider_thread_id").notNull(),
+    sourceCwd: text("source_cwd").notNull(),
+    targetCwd: text("target_cwd").notNull(),
+    phase: text("phase").$type<ThreadMovePhase>().notNull(),
+    error: text("error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("thread_moves_unfinished_thread_idx")
+      .on(table.threadId)
+      .where(sql`${table.phase} NOT IN ('done', 'failed', 'rolled_back')`),
+    index("thread_moves_thread_idx").on(table.threadId),
+  ],
 );
 
 export const threadTabs = sqliteTable("thread_tabs", {

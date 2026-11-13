@@ -151,6 +151,18 @@ export {
 } from "./app-settings.js";
 export { getStoredThreadTabs, replaceStoredThreadTabs } from "./thread-tabs.js";
 export {
+  createThreadMove,
+  getThreadMove,
+  getUnfinishedThreadMove,
+  listUnfinishedThreadMoves,
+  updateThreadMovePhase,
+} from "./thread-moves.js";
+export type {
+  CreateThreadMoveArgs,
+  ThreadMoveRow,
+  UpdateThreadMovePhaseArgs,
+} from "./thread-moves.js";
+export {
   deleteThreadPurgeBatch,
   nextThreadPurge,
   requestThreadPurge,

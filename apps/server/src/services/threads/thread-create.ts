@@ -1,4 +1,5 @@
 import { requestThreadStorageDeletion } from "./thread-lifecycle.js";
+import { assertThreadNotMoving } from "./thread-move-fence.js";
 import { seedThreadSessionOptionSelections } from "./thread-session-options.js";
 import {
   admitAfterPathClaimsSettle,
@@ -642,6 +643,7 @@ export async function createThreadFromRequest(
         parentThreadId: hierarchyParentThreadId,
       })
     : null;
+  if (parentThread !== null) assertThreadNotMoving(deps.db, parentThread.id);
   if (originKind === null && sourceThreadId !== undefined) {
     throw new ApiError(
       400,
@@ -662,6 +664,7 @@ export async function createThreadFromRequest(
         sourceThreadId,
       })
     : null;
+  if (sourceThread !== null) assertThreadNotMoving(deps.db, sourceThread.id);
   if (originKind !== null && sourceThread !== null) {
     assertValidParentThread(deps, {
       parentThreadId: sourceThread.id,

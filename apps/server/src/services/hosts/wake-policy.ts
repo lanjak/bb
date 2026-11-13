@@ -71,6 +71,12 @@ const hostCommandWakePolicy = {
   "provider.installation.status": "work",
   "provider.installation.run": "work",
   "provider.usage": "work",
+  "thread.transfer.export": "never",
+  "thread.transfer.read_chunk": "never",
+  "thread.transfer.write_chunk": "never",
+  "thread.transfer.commit": "never",
+  "thread.transfer.rollback": "never",
+  "thread.transfer.finish": "never",
   "host.discover_repos": "work",
 } satisfies Record<HostDaemonRpcCommand["type"], "never" | "work">;
 

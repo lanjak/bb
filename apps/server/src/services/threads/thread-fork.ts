@@ -1,4 +1,5 @@
 import { getEnvironment, getThread } from "@bb/db";
+import { assertThreadNotMoving } from "./thread-move-fence.js";
 import type { EnvironmentRow } from "@bb/db";
 import type { PromptInput, Thread } from "@bb/domain";
 import type { ForkThreadRequest } from "@bb/server-contract";
@@ -64,6 +65,7 @@ export async function createThreadForkFromRequest(
   request: ForkThreadRequest,
 ) {
   const sourceThread = requireForkSourceThread(deps, request.sourceThreadId);
+  assertThreadNotMoving(deps.db, sourceThread.id);
   requireForkCapableProvider(deps, sourceThread);
   const sourceEnvironment = requireSourceEnvironment(deps, sourceThread);
   const sourceExecution = getLastExecutionOptions(deps, sourceThread.id);

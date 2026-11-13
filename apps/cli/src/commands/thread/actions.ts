@@ -291,6 +291,38 @@ export function registerActionsCommands(
     );
 
   parent
+    .command("move <id>")
+    .description(
+      "Move an idle claude-code thread to a ready environment on another machine, keeping its history and provider session",
+    )
+    .requiredOption(
+      "--environment <env-id>",
+      "Target environment id (same project, different machine)",
+    )
+    .option("--json", "Print machine-readable JSON output")
+    .action(
+      action(
+        async (id: string, opts: { environment: string; json?: boolean }) => {
+          const sdk = createCliBbSdk(getUrl());
+          let result: Awaited<ReturnType<typeof sdk.threads.move>>;
+          try {
+            result = await sdk.threads.move({
+              threadId: id,
+              environmentId: opts.environment,
+            });
+          } catch (err: unknown) {
+            throw prependErrorContext(`Failed to move thread ${id}`, err);
+          }
+          if (outputJson(opts, { ok: true, ...result })) return;
+          console.log(
+            `Thread ${id} moved to environment ${result.targetEnvironmentId} (${result.phase})`,
+          );
+          if (result.error !== null) console.log(result.error);
+        },
+      ),
+    );
+
+  parent
     .command("archive [id]")
     .description("Archive a thread")
     .option("--self", "Target the current thread (from BB_THREAD_ID)")
