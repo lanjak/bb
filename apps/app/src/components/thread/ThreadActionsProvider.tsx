@@ -43,6 +43,7 @@ import {
   ThreadArchiveDialog,
   type ThreadArchiveDialogTarget,
 } from "@/components/dialogs/ThreadArchiveDialog";
+import { ThreadMoveDialog } from "@/components/dialogs/ThreadMoveDialog";
 import { ArchivedThreadToastDescription } from "@/components/thread/ArchivedThreadToastDescription";
 import { destroyPersistedBrowserViewsForThread } from "@/components/secondary-panel/browserViewVisibilityCoordinator";
 import { getThreadReadToggleAction } from "@bb/client-core";
@@ -62,6 +63,7 @@ export interface ThreadActionsContextValue {
   renameThreadAsync: (threadId: string, title: string) => Promise<void>;
   requestDelete: (thread: Thread) => void;
   requestDeleteThreads: (threads: readonly Thread[]) => void;
+  requestMove: (thread: Thread) => void;
   unarchiveThread: (thread: Thread) => void;
   togglePin: (thread: Thread) => void;
   toggleRead: (thread: Thread) => void;
@@ -150,6 +152,8 @@ export function ThreadActionsProvider({
   const renameController = useRenameController();
   const deleteDialog = useDialogState<DeleteDialogRequest>();
   const archiveDialog = useDialogState<ArchiveDialogRequest>();
+  const moveDialog = useDialogState<Thread>();
+  const { onOpen: requestMove } = moveDialog;
 
   const { onClose: closeDeleteDialog, onOpen: openDeleteDialog } = deleteDialog;
   const { onClose: closeArchiveDialog, onOpen: openArchiveDialog } =
@@ -552,6 +556,7 @@ export function ThreadActionsProvider({
       requestArchiveThreads,
       requestDelete,
       requestDeleteThreads,
+      requestMove,
       unarchiveThread: unarchiveThreadAction,
       togglePin,
       toggleRead,
@@ -563,6 +568,7 @@ export function ThreadActionsProvider({
       requestArchiveThreads,
       requestDelete,
       requestDeleteThreads,
+      requestMove,
       togglePin,
       toggleRead,
       unarchiveThreadAction,
@@ -600,6 +606,10 @@ export function ThreadActionsProvider({
         pending={archiveThreadAndChildrenMutation.isPending}
         onOpenChange={archiveDialog.onOpenChange}
         onArchive={confirmArchive}
+      />
+      <ThreadMoveDialog
+        thread={moveDialog.target}
+        onOpenChange={moveDialog.onOpenChange}
       />
     </ThreadActionsContext.Provider>
   );
