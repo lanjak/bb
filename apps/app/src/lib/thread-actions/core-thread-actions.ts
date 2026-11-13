@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import {
   experimental_THREAD_ACTION_GROUPS as GROUPS,
   type PluginThreadAction,
@@ -15,7 +16,7 @@ import { useRouteState } from "@/hooks/useRouteState";
 import { copyToClipboardWithToast } from "@/lib/clipboard";
 import { appToast } from "@/components/ui/app-toast";
 import { showMutationErrorToast } from "@/lib/mutation-errors";
-import { resolveThread } from "@/lib/cached-thread";
+import { lookupCachedThread, resolveThread } from "@/lib/cached-thread";
 import { PARENT_NOTIFICATIONS_OPTIONS } from "@/lib/parent-notifications";
 import { getThreadRoutePath } from "@/lib/route-paths";
 import { countPanes, listPanes } from "@/lib/split-layout";
@@ -154,6 +155,7 @@ function childThreads(
 }
 
 interface LifecycleHandlers {
+  requestMove: (threadId: string) => Promise<void>;
   archive: (threadIds: readonly string[]) => Promise<void>;
   requestDelete: (threadIds: readonly string[]) => Promise<void>;
 }
@@ -167,6 +169,18 @@ function useLifecycleHandlers(): LifecycleHandlers {
   });
   return useMemo(
     () => ({
+      requestMove: async (threadId: string) => {
+        try {
+          latest.current.requestMove(
+            await resolveThread(queryClient, threadId),
+          );
+        } catch (error) {
+          showMutationErrorToast({
+            error,
+            fallbackMessage: "Failed to open the move dialog.",
+          });
+        }
+      },
       archive: async (threadIds: readonly string[]) => {
         try {
           latest.current.requestArchiveThreads(
@@ -203,6 +217,25 @@ function useLifecycleHandlers(): LifecycleHandlers {
       },
     }),
     [queryClient],
+  );
+}
+
+interface MoveData {
+  queryClient: QueryClient;
+  requestMove: LifecycleHandlers["requestMove"];
+}
+
+const MOVABLE_PROVIDER_IDS: ReadonlySet<string> = new Set([
+  "claude-code",
+  "codex",
+]);
+
+function useMoveData(): MoveData {
+  const { requestMove } = useLifecycleHandlers();
+  const queryClient = useQueryClient();
+  return useMemo(
+    () => ({ queryClient, requestMove }),
+    [queryClient, requestMove],
   );
 }
 
@@ -477,6 +510,32 @@ export const CORE_THREAD_ACTIONS: readonly PluginThreadActionRegistration<unknow
               });
             }
           },
+        };
+      },
+    }),
+    coreThreadAction({
+      id: "move",
+      group: GROUPS.lifecycle,
+      order: 10,
+      title: "Move to another machine",
+      icon: "ArrowRight",
+      useData: useMoveData,
+      item: ({ thread, data }) => {
+        const cached = lookupCachedThread(data.queryClient, thread.id);
+        if (
+          cached === null ||
+          !MOVABLE_PROVIDER_IDS.has(cached.providerId) ||
+          thread.archivedAt !== null
+        ) {
+          return null;
+        }
+        const idle = thread.status === "idle";
+        return {
+          label: "Move to another machine...",
+          detail: idle ? undefined : "Available when the thread is idle",
+          icon: "ArrowRight",
+          disabled: !idle,
+          run: () => afterMenuCloses(() => void data.requestMove(thread.id)),
         };
       },
     }),

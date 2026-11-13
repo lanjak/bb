@@ -14,6 +14,7 @@ import {
   environmentFilePreviewQueryKey,
   environmentPathsQueryKey,
   environmentQueryKey,
+  projectEnvironmentsQueryKey,
 } from "./query-keys";
 import { requireEnabledQueryArg, type QueryOptions } from "./query-helpers";
 import {
@@ -66,6 +67,26 @@ export function environmentQueryOptions(
         environment,
       );
     },
+  });
+}
+
+export function useProjectEnvironments(
+  projectId: string | null | undefined,
+  options?: QueryOptions,
+) {
+  return useQuery({
+    queryKey: projectEnvironmentsQueryKey(projectId),
+    queryFn: ({ signal }) =>
+      sdk.environments.list({
+        projectId: requireEnabledQueryArg({
+          value: projectId,
+          hookName: "useProjectEnvironments",
+          argName: "projectId",
+        }),
+        signal,
+      }),
+    enabled: (options?.enabled ?? true) && Boolean(projectId),
+    staleTime: 0,
   });
 }
 
@@ -165,4 +186,3 @@ export function useEnvironmentPathSuggestions(
     placeholderData: (previousData) => previousData,
   });
 }
-

@@ -315,6 +315,11 @@ type HostFilePreviewQueryKey = readonly [
   string | null,
 ];
 type EnvironmentQueryKeyPrefix = readonly [typeof ENVIRONMENT_QUERY_KEY];
+type ProjectEnvironmentsQueryKey = readonly [
+  typeof ENVIRONMENT_QUERY_KEY,
+  "project",
+  string | null | undefined,
+];
 type EnvironmentQueryKey = readonly [
   typeof ENVIRONMENT_QUERY_KEY,
   string | null | undefined,
@@ -857,6 +862,12 @@ export function allThreadHostFilePreviewQueryKeyPrefix(): AllThreadHostFilePrevi
 
 export function allEnvironmentQueryKeyPrefix(): EnvironmentQueryKeyPrefix {
   return [ENVIRONMENT_QUERY_KEY];
+}
+
+export function projectEnvironmentsQueryKey(
+  projectId: string | null | undefined,
+): ProjectEnvironmentsQueryKey {
+  return [ENVIRONMENT_QUERY_KEY, "project", projectId];
 }
 
 export function environmentQueryKey(
