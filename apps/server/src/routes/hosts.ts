@@ -519,7 +519,9 @@ export function registerHostRoutes(
           events: result.events,
         });
         if (
-          events.some((event) => event.type === "completed" && event.success)
+          events.some(
+            (event) => event.type === "completed" && event.success,
+          )
         ) {
           deps.providerRegistry.forgetInstalledKey({
             hostId,

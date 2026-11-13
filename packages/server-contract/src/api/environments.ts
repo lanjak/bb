@@ -54,6 +54,7 @@ export const environmentPathsQuerySchema = z.object({
 });
 export type EnvironmentPathsQuery = z.infer<typeof environmentPathsQuerySchema>;
 
+
 export const environmentArchiveThreadsResponseSchema = z.object({
   ok: z.literal(true),
   archivedThreadIds: z.array(z.string().min(1)),
@@ -100,3 +101,4 @@ export const environmentActionApiErrorSchema = apiErrorSchema.extend({
 export type EnvironmentActionApiError = z.infer<
   typeof environmentActionApiErrorSchema
 >;
+

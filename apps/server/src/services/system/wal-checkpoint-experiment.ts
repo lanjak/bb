@@ -19,7 +19,8 @@ export function startGatedWalCheckpointer(options: {
   let pending = Promise.resolve();
 
   const refresh = (): Promise<void> => {
-    const enabled = !stopped && getExperiments(options.db).walCheckpointWorker;
+    const enabled =
+      !stopped && getExperiments(options.db).walCheckpointWorker;
     pending = pending.then(async () => {
       if (enabled && checkpointer === null) {
         checkpointer = startWalCheckpointer({ logger: options.logger });

@@ -524,8 +524,7 @@ async function runMachineAuthPruneSweep(
 }
 
 type CompletedEventOutputMigrationTarget =
-  | (typeof RETAINED_EVENT_OUTPUT_TARGETS)[number]
-  | "legacy-image-generation";
+  (typeof RETAINED_EVENT_OUTPUT_TARGETS)[number] | "legacy-image-generation";
 
 function completedEventOutputMigrationKey(
   target: CompletedEventOutputMigrationTarget,

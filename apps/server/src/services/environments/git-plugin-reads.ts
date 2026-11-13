@@ -5,7 +5,9 @@ import {
   gitDiffResultSchema,
   gitStatusResultSchema,
 } from "bb-plugin-bb--git/contract";
-import type { WorkspaceResolutionFailure } from "@bb/host-daemon-contract/workspace";
+import type {
+  WorkspaceResolutionFailure,
+} from "@bb/host-daemon-contract/workspace";
 import { ApiError } from "../../errors.js";
 import type { PluginService } from "../plugins/plugin-service.js";
 
@@ -55,11 +57,7 @@ async function callGitPlugin(
 ): Promise<unknown> {
   const lookup = plugins.getRpcHandler(GIT_PLUGIN_ID, method);
   if (lookup.outcome !== "found") {
-    throw new ApiError(
-      409,
-      "git_plugin_unavailable",
-      unavailableMessage(lookup),
-    );
+    throw new ApiError(409, "git_plugin_unavailable", unavailableMessage(lookup));
   }
   const outcome = await plugins.invokeRpcHandler(
     lookup.owner,
@@ -93,8 +91,7 @@ function throwUnavailableRead(
     | { outcome: "unavailable"; failure: WorkspaceResolutionFailure },
   workspacePath: string,
 ): never {
-  if (result.outcome === "unavailable")
-    throwWorkspaceUnavailable(result.failure);
+  if (result.outcome === "unavailable") throwWorkspaceUnavailable(result.failure);
   throwWorkspaceUnavailable({
     code: "not_git_repo",
     message: result.message,

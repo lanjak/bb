@@ -139,10 +139,7 @@ export function createJobRegistry<TJob extends { id: string }>(options: {
       if (entry === undefined) return undefined;
       if (entry.finishedAt !== null) return entry.job;
       entry.controller.abort();
-      set(
-        entry,
-        entry.started ? next.running(entry.job) : next.queued(entry.job),
-      );
+      set(entry, entry.started ? next.running(entry.job) : next.queued(entry.job));
       return entry.job;
     },
   };
