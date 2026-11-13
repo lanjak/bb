@@ -150,6 +150,22 @@ function defaultOptions(
   );
 }
 
+function sessionTransferParams(
+  fixture: ConformanceSessionFixture,
+): Record<string, unknown> {
+  const providerOptions = z
+    .record(z.string(), z.unknown())
+    .safeParse(fixture.options?.["providerOptions"]);
+  return {
+    providerThreadId: "bb-conformance-session",
+    cwd: fixture.cwd,
+    options: {},
+    ...(providerOptions.success
+      ? { providerOptions: providerOptions.data }
+      : {}),
+  };
+}
+
 function threadEvents(
   context: ScenarioContext,
   threadId: string,
@@ -436,22 +452,14 @@ export async function runHandshakeScenario(
       ...(await runDeclaredRequestScenario(client, {
         id: "session/files-declared",
         method: BRIDGE_REQUEST_METHODS.sessionFiles,
-        params: {
-          providerThreadId: "bb-conformance-session",
-          cwd: fixture.cwd,
-          options: {},
-        },
+        params: sessionTransferParams(fixture),
         capability: "sessionTransfer",
         declared: parsed.data.capabilities.sessionTransfer,
       })),
       ...(await runDeclaredRequestScenario(client, {
         id: "session/destination-declared",
         method: BRIDGE_REQUEST_METHODS.sessionDestination,
-        params: {
-          providerThreadId: "bb-conformance-session",
-          cwd: fixture.cwd,
-          options: {},
-        },
+        params: sessionTransferParams(fixture),
         capability: "sessionTransfer",
         declared: parsed.data.capabilities.sessionTransfer,
       })),

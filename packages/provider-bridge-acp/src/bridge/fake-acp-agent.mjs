@@ -148,6 +148,7 @@ const modelConfigReply = process.env.FAKE_ACP_MODEL_CONFIG_REPLY;
 const cursorParameterizedModels =
   process.env.FAKE_ACP_CURSOR_PARAMETERIZED_MODELS === "1";
 const requestLog = process.env.FAKE_ACP_REQUEST_LOG;
+const sessionTransfer = process.env.FAKE_ACP_SESSION_TRANSFER;
 const hangInitialize = process.env.FAKE_ACP_HANG_INITIALIZE === "1";
 const authMethods = (process.env.FAKE_ACP_AUTH_METHODS ?? "")
   .split(",")
@@ -909,6 +910,15 @@ async function handleMessage(message) {
           protocolVersion: 1,
           agentCapabilities: {
             loadSession,
+            ...(sessionTransfer !== undefined
+              ? {
+                  _meta: {
+                    "bb.dev/sessionTransfer": {
+                      version: Number(sessionTransfer),
+                    },
+                  },
+                }
+              : {}),
             promptCapabilities: { image: false },
             ...(forkSession ||
             resumeSession ||
@@ -1274,6 +1284,25 @@ async function handleMessage(message) {
         jsonrpc: "2.0",
         id: message.id,
         error: { code: -32602, message: `Unknown config ${configId}` },
+      });
+      return;
+    }
+    case "_bb.dev/session/files":
+    case "_bb.dev/session/destination": {
+      const answer =
+        message.method === "_bb.dev/session/files"
+          ? process.env.FAKE_ACP_TRANSFER_FILES
+          : process.env.FAKE_ACP_TRANSFER_DESTINATION;
+      if (process.env.FAKE_ACP_TRANSFER_LOG) {
+        appendFileSync(
+          process.env.FAKE_ACP_TRANSFER_LOG,
+          `${message.method} ${JSON.stringify(message.params)}\n`,
+        );
+      }
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: JSON.parse(answer ?? "{}"),
       });
       return;
     }

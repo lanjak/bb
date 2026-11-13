@@ -734,7 +734,11 @@ describe("acp bridge", () => {
     });
     expect((await waitForResponse(initializeId)).result).toMatchObject({
       protocolVersion: PROVIDER_BRIDGE_PROTOCOL_VERSION,
-      capabilities: { fork: "tip", approvalEnforcedBy: "runtime" },
+      capabilities: {
+        fork: "tip",
+        approvalEnforcedBy: "runtime",
+        sessionTransfer: true,
+      },
     });
 
     const modelListId = sendModelList({
@@ -764,6 +768,127 @@ describe("acp bridge", () => {
     expect(
       selectedOnly[0]?.supportedReasoningEfforts.map((e) => e.reasoningEffort),
     ).toEqual(["low", "medium", "high"]);
+  });
+
+  describe("session transfer", () => {
+    function sendTransfer(
+      method: "session/files" | "session/destination",
+      envVars: Record<string, string>,
+    ): number {
+      return sendRequest(method, {
+        providerThreadId: "sess-1",
+        cwd: workspaceDir,
+        options: { envVars: { FAKE_ACP_LOAD_SESSION: "1", ...envVars } },
+        providerOptions: { acpLaunchSpec: acpLaunchSpec({}) },
+      });
+    }
+
+    const declared = { FAKE_ACP_SESSION_TRANSFER: "1" };
+
+    it("lists the session files through the agent extension method", async () => {
+      const log = join(workspaceDir, "transfer.log");
+      const id = sendTransfer("session/files", {
+        ...declared,
+        FAKE_ACP_TRANSFER_LOG: log,
+        FAKE_ACP_TRANSFER_FILES: JSON.stringify({
+          files: [
+            { path: "/store/sess-1.jsonl", relativePath: "sess-1.jsonl" },
+            { path: "/store/sess-1/a/b.txt", relativePath: "sess-1/a/b.txt" },
+          ],
+        }),
+      });
+      expect((await waitForResponse(id)).result).toEqual({
+        files: [
+          { path: "/store/sess-1.jsonl", relativePath: "sess-1.jsonl" },
+          { path: "/store/sess-1/a/b.txt", relativePath: "sess-1/a/b.txt" },
+        ],
+      });
+      expect(readFileSync(log, "utf8").trim()).toBe(
+        `_bb.dev/session/files ${JSON.stringify({ sessionId: "sess-1", cwd: workspaceDir })}`,
+      );
+    });
+
+    it("returns the session destination through the agent extension method", async () => {
+      const id = sendTransfer("session/destination", {
+        ...declared,
+        FAKE_ACP_TRANSFER_DESTINATION: JSON.stringify({
+          root: "/store",
+          directory: "/store/projects/p",
+        }),
+      });
+      expect((await waitForResponse(id)).result).toEqual({
+        root: "/store",
+        directory: "/store/projects/p",
+      });
+    });
+
+    it.each(["session/files", "session/destination"] as const)(
+      "refuses %s for an agent that does not declare the capability",
+      async (method) => {
+        const id = sendTransfer(method, {});
+        const response = await waitForResponse(id);
+        expect(response.error?.message).toMatch(
+          /does not declare session transfer support/u,
+        );
+      },
+    );
+
+    it("refuses an agent that declares transfer without loadSession", async () => {
+      const id = sendRequest("session/files", {
+        providerThreadId: "sess-1",
+        cwd: workspaceDir,
+        options: { envVars: declared },
+        providerOptions: { acpLaunchSpec: acpLaunchSpec({}) },
+      });
+      expect((await waitForResponse(id)).error?.message).toMatch(
+        /does not declare session transfer support/u,
+      );
+    });
+
+    it("refuses an unsupported declaration version", async () => {
+      const id = sendTransfer("session/files", {
+        FAKE_ACP_SESSION_TRANSFER: "2",
+      });
+      expect((await waitForResponse(id)).error?.message).toMatch(
+        /does not declare session transfer support/u,
+      );
+    });
+
+    it("rejects unsafe file answers", async () => {
+      const id = sendTransfer("session/files", {
+        ...declared,
+        FAKE_ACP_TRANSFER_FILES: JSON.stringify({
+          files: [{ path: "/store/x", relativePath: "../x" }],
+        }),
+      });
+      expect((await waitForResponse(id)).error?.message).toMatch(
+        /invalid _bb.dev\/session\/files answer/u,
+      );
+    });
+
+    it("rejects a destination outside its root", async () => {
+      const id = sendTransfer("session/destination", {
+        ...declared,
+        FAKE_ACP_TRANSFER_DESTINATION: JSON.stringify({
+          root: "/store",
+          directory: "/elsewhere",
+        }),
+      });
+      expect((await waitForResponse(id)).error?.message).toMatch(
+        /not inside root/u,
+      );
+    });
+
+    it("requires the ACP launch spec", async () => {
+      const id = sendRequest("session/files", {
+        providerThreadId: "sess-1",
+        cwd: workspaceDir,
+        options: {},
+      });
+      expect((await waitForResponse(id)).error?.code).toBe(
+        BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
+      );
+    });
   });
 
   it("answers a minimal model/list (no params) with the synthetic default", async () => {

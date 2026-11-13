@@ -33,8 +33,24 @@ export interface AcpAgentCapabilities {
     additionalDirectories: boolean;
   };
   logout: boolean;
+  sessionTransfer: boolean;
   authMethods: AcpAuthMethod[];
   meta: AcpJsonObject;
+}
+
+export const ACP_SESSION_TRANSFER_META_KEY = "bb.dev/sessionTransfer";
+export const ACP_SESSION_TRANSFER_VERSION = 1;
+
+function declaresSessionTransfer(
+  agent: AcpJsonObject,
+  meta: AcpJsonObject,
+): boolean {
+  const declaration = meta[ACP_SESSION_TRANSFER_META_KEY];
+  return (
+    isTrue(agent, "loadSession") &&
+    isJsonObject(declaration) &&
+    declaration["version"] === ACP_SESSION_TRANSFER_VERSION
+  );
 }
 
 export class AcpUnsupportedProtocolVersionError extends Error {
@@ -141,6 +157,7 @@ export function readAcpAgentCapabilities(
   const mcp = objectAt(agent, "mcpCapabilities");
   const session = objectAt(agent, "sessionCapabilities");
   const auth = objectAt(agent, "auth");
+  const meta = readMeta(agent) ?? {};
   return {
     protocolVersion,
     agentInfo: decodeImplementation(initializeResult["agentInfo"]),
@@ -160,7 +177,8 @@ export function readAcpAgentCapabilities(
       additionalDirectories: isPresent(session, "additionalDirectories"),
     },
     logout: isPresent(auth, "logout"),
+    sessionTransfer: declaresSessionTransfer(agent, meta),
     authMethods: decodeAuthMethods(initializeResult["authMethods"]),
-    meta: readMeta(agent) ?? {},
+    meta,
   };
 }
