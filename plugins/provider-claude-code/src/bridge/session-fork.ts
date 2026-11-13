@@ -5,7 +5,7 @@ import {
   type SessionStoreEntry,
 } from "@anthropic-ai/claude-agent-sdk";
 import { createWriteStream } from "node:fs";
-import { open, readdir, type FileHandle } from "node:fs/promises";
+import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -126,6 +126,41 @@ function* serializeTranscript(entries: SessionStoreEntry[]): Generator<string> {
   for (const entry of entries) {
     yield `${JSON.stringify(entry)}\n`;
   }
+}
+
+export async function findTranscriptProjectDirectory(args: {
+  projectsDirectory: string;
+  sessionId: string;
+  preferredProjectFolderName: string;
+}): Promise<string | null> {
+  let folderNames: string[];
+  try {
+    folderNames = (
+      await readdir(args.projectsDirectory, { withFileTypes: true })
+    )
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    folderNames = [
+      ...folderNames.filter((name) => name === args.preferredProjectFolderName),
+      ...folderNames.filter((name) => name !== args.preferredProjectFolderName),
+    ];
+  } catch {
+    return null;
+  }
+  for (const folderName of folderNames) {
+    const projectDirectory = join(args.projectsDirectory, folderName);
+    try {
+      const stats = await lstat(
+        join(projectDirectory, `${args.sessionId}.jsonl`),
+      );
+      if (stats.isFile()) {
+        return projectDirectory;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 async function findTranscript(

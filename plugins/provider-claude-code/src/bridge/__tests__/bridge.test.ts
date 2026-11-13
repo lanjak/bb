@@ -1193,6 +1193,65 @@ describe("bridge", () => {
     }
   });
 
+  it("advertises session transfer and answers session/files and session/destination from the session config directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "bb-claude-transfer-"));
+    tempDirs.push(root);
+    const configDir = join(root, "config");
+    const sessionId = randomUUID();
+    const projectDir = join(configDir, "projects", "-tmp-old-checkout");
+    mkdirSync(join(projectDir, sessionId, "subagents"), { recursive: true });
+    writeFileSync(join(projectDir, `${sessionId}.jsonl`), "{}\n");
+    writeFileSync(join(projectDir, sessionId, "subagents", "a.jsonl"), "{}\n");
+    const bridge = createBridgeJsonRpcTestHarness(handleLine);
+
+    try {
+      bridge.sendRequest(1, "initialize", {
+        protocolVersion: 2,
+        client: { name: "test", version: "0" },
+      });
+      const handshake = await bridge.waitForResponse(1);
+      expect(handshake.result).toMatchObject({
+        capabilities: { sessionTransfer: true },
+      });
+
+      const params = {
+        providerThreadId: sessionId,
+        cwd: "/tmp/new_checkout",
+        options: { envVars: { CLAUDE_CONFIG_DIR: configDir } },
+      };
+      bridge.sendRequest(2, "session/files", params);
+      const files = await bridge.waitForResponse(2);
+      expect(files.result).toEqual({
+        files: [
+          {
+            path: join(projectDir, `${sessionId}.jsonl`),
+            relativePath: `${sessionId}.jsonl`,
+          },
+          {
+            path: join(projectDir, sessionId, "subagents", "a.jsonl"),
+            relativePath: `${sessionId}/subagents/a.jsonl`,
+          },
+        ],
+      });
+
+      bridge.sendRequest(3, "session/destination", params);
+      const destination = await bridge.waitForResponse(3);
+      expect(destination.result).toEqual({
+        directory: join(configDir, "projects", "-tmp-new-checkout"),
+      });
+
+      bridge.sendRequest(4, "session/files", {
+        ...params,
+        providerThreadId: "../escape",
+      });
+      expect((await bridge.waitForResponse(4)).error?.message).toContain(
+        "Invalid Claude session id",
+      );
+    } finally {
+      bridge.restore();
+    }
+  });
+
   it("answers model/list with the missing-executable code when the Claude CLI is absent", async () => {
     const bridge = createBridgeJsonRpcTestHarness(handleLine);
     queryMock.mockReturnValue({

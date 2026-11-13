@@ -64,6 +64,10 @@ import {
 import { MissingClaudeCliError } from "./missing-cli-error.js";
 import { claudeConfigDirectory, forkClaudeSession } from "./session-fork.js";
 import {
+  claudeSessionDestination,
+  listClaudeSessionFiles,
+} from "./session-transfer.js";
+import {
   createClaudeCodeBridgeModelListMemo,
   listClaudeCodeBridgeModels,
 } from "./model-list.js";
@@ -2298,6 +2302,7 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
           steerMode: "inject",
           skills: { configure: true },
           commands: { list: true },
+          sessionTransfer: true,
         },
       };
       sendResult(request.id, result);
@@ -2334,6 +2339,39 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
         }
         throw error;
       }
+      break;
+    case "session/files": {
+      const configDirectory = claudeConfigDirectory(
+        buildSessionEnv(request.params.options.envVars ?? {}),
+        request.params.cwd,
+      );
+      try {
+        sendResult(request.id, {
+          files: await listClaudeSessionFiles({
+            configDirectory,
+            cwd: request.params.cwd,
+            sessionId: request.params.providerThreadId,
+          }),
+        });
+      } catch (error) {
+        sendError(
+          request.id,
+          -32000,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      break;
+    }
+    case "session/destination":
+      sendResult(request.id, {
+        directory: claudeSessionDestination({
+          configDirectory: claudeConfigDirectory(
+            buildSessionEnv(request.params.options.envVars ?? {}),
+            request.params.cwd,
+          ),
+          cwd: request.params.cwd,
+        }),
+      });
       break;
     case "provider/health":
       sendResult(request.id, await getClaudeProviderHealth());
