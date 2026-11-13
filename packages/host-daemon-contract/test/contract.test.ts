@@ -343,6 +343,11 @@ const ONLINE_RPC_RESPONSE_RESULT_FIXTURES: OnlineRpcResponseResultFixtures = {
       },
     ],
   },
+  "thread.transfer.inspect_workspace": {
+    head: "a".repeat(40),
+    clean: true,
+    containsAncestorCommit: true,
+  },
   "thread.transfer.read_chunk": { offset: 0, contentBase64: "AAEC" },
   "thread.transfer.write_chunk": { sizeBytes: 3 },
   "thread.transfer.commit": { placedFiles: 1, backedUpFiles: 0 },
@@ -707,6 +712,8 @@ const INTENTIONAL_OPTIONAL_HOST_DAEMON_FIELDS: Record<string, string> = {
     "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
   "hostDaemonOnlineRpcCommandSchema.sharedSkillRoots.user.skipIfManifest":
     "a provider-native root names a vendor-plugin marker file only when the plugin that knows that vendor layout declares one; absence means every skill-shaped directory under the root is a skill, and core names no vendor path itself.",
+  "hostDaemonOnlineRpcCommandSchema.workspace":
+    "thread.transfer.export and thread.transfer.commit carry a workspace request only for a move with --carry-changes; absence means the move transfers the session and thread storage and leaves both workspaces alone.",
   "hostDaemonCommandSchema.targetPath":
     "project.clone omits targetPath when the daemon should derive its default checkout location for the project.",
   "hostDaemonOnlineRpcCommandSchema.expectedSha256":

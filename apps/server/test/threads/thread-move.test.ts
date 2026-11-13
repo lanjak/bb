@@ -45,8 +45,18 @@ function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+const TARGET_HEAD = "a".repeat(40);
+const SOURCE_HEAD = "b".repeat(40);
+
+interface FakeWorkspace {
+  clean: boolean;
+  containsAncestorCommit: boolean;
+  head: string | null;
+}
+
 interface FakeDaemonOptions {
   failOn?: Command["type"];
+  workspace?: FakeWorkspace;
   shortWrite?: boolean;
 }
 
@@ -74,6 +84,15 @@ class FakeDaemon {
       };
     }
     switch (command.type) {
+      case "thread.transfer.inspect_workspace":
+        return {
+          ok: true,
+          result: this.options.workspace ?? {
+            head: TARGET_HEAD,
+            clean: true,
+            containsAncestorCommit: true,
+          },
+        };
       case "thread.transfer.export":
         return {
           ok: true,
@@ -244,6 +263,7 @@ describe("thread move", () => {
     await withTestHarness(async (harness) => {
       const fx = setup(harness);
       const result = await moveThread(harness.deps, {
+        carryChanges: false,
         threadId: fx.threadId,
         environmentId: fx.targetEnvironmentId,
       });
@@ -312,6 +332,7 @@ describe("thread move", () => {
 
       await expect(
         moveThread(harness.deps, {
+          carryChanges: false,
           threadId: fx.threadId,
           environmentId: fx.targetEnvironmentId,
         }),
@@ -446,6 +467,7 @@ describe("thread move", () => {
 
           await expect(
             moveThread(harness.deps, {
+              carryChanges: false,
               threadId: fx.threadId,
               environmentId: fx.targetEnvironmentId,
             }),
@@ -467,6 +489,7 @@ describe("thread move", () => {
         insertMove(harness, fx);
         await expect(
           moveThread(harness.deps, {
+            carryChanges: false,
             threadId: fx.threadId,
             environmentId: fx.targetEnvironmentId,
           }),
@@ -598,6 +621,7 @@ describe("thread move", () => {
 
           await expect(
             moveThread(harness.deps, {
+              carryChanges: false,
               threadId: fx.threadId,
               environmentId: fx.targetEnvironmentId,
             }),
@@ -712,6 +736,7 @@ describe("thread move", () => {
         });
         await expect(
           moveThread(harness.deps, {
+            carryChanges: false,
             threadId: fx.threadId,
             environmentId: fx.targetEnvironmentId,
           }),
@@ -722,6 +747,7 @@ describe("thread move", () => {
 
         await expect(
           moveThread(harness.deps, {
+            carryChanges: false,
             threadId: fx.threadId,
             environmentId: fx.targetEnvironmentId,
           }),
@@ -732,6 +758,154 @@ describe("thread move", () => {
         expect(getThreadMove(harness.db, first!.id)?.phase).toBe("rolled_back");
         expect(listCleanupPendingThreadMoves(harness.db, fx.threadId)).toEqual(
           [],
+        );
+      });
+    });
+  });
+
+  describe("carrying workspace changes", () => {
+    const carry = (harness: TestAppHarness, fx: Fixture) =>
+      moveThread(harness.deps, {
+        carryChanges: true,
+        environmentId: fx.targetEnvironmentId,
+        threadId: fx.threadId,
+      });
+
+    it("inspects both workspaces before the fence and sends the target head with export and commit", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness, {
+          source: {
+            workspace: {
+              head: SOURCE_HEAD,
+              clean: false,
+              containsAncestorCommit: true,
+            },
+          },
+        });
+        const result = await carry(harness, fx);
+        expect(result.phase).toBe("done");
+
+        const target = fx.target.commands.map((command) => command.type);
+        expect(target.indexOf("thread.transfer.inspect_workspace")).toBe(0);
+        const sourceCommands = fx.source.commands;
+        expect(sourceCommands[0]).toMatchObject({
+          type: "thread.transfer.inspect_workspace",
+          cwd: "/work/a",
+          ancestorCommit: TARGET_HEAD,
+        });
+        expect(fx.target.commands[0]).toMatchObject({
+          type: "thread.transfer.inspect_workspace",
+          cwd: "/work/b",
+          ancestorCommit: null,
+        });
+        const exportCommand = sourceCommands.find(
+          (command) => command.type === "thread.transfer.export",
+        );
+        expect(exportCommand).toMatchObject({
+          workspace: { targetHead: TARGET_HEAD },
+        });
+        const commitCommand = fx.target.commands.find(
+          (command) => command.type === "thread.transfer.commit",
+        );
+        expect(commitCommand).toMatchObject({
+          workspace: { targetHead: TARGET_HEAD },
+        });
+        expect(
+          operationMessages(harness, fx.threadId).map(
+            (operation) => operation.message,
+          ),
+        ).toEqual([expect.stringContaining("carrying the workspace changes")]);
+      });
+    });
+
+    it("does not inspect workspaces or send a workspace request by default", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness);
+        await moveThread(harness.deps, {
+          carryChanges: false,
+          environmentId: fx.targetEnvironmentId,
+          threadId: fx.threadId,
+        });
+        expect(fx.target.types()).not.toContain(
+          "thread.transfer.inspect_workspace",
+        );
+        expect(fx.source.types()).not.toContain(
+          "thread.transfer.inspect_workspace",
+        );
+        expect(
+          fx.source.commands.find(
+            (command) => command.type === "thread.transfer.export",
+          ),
+        ).not.toHaveProperty("workspace");
+      });
+    });
+
+    it.each([
+      [
+        "the target has uncommitted changes",
+        { head: TARGET_HEAD, clean: false, containsAncestorCommit: false },
+        undefined,
+        /Target workspace has uncommitted changes/,
+      ],
+      [
+        "the target is not a git checkout",
+        { head: null, clean: false, containsAncestorCommit: false },
+        undefined,
+        /Target workspace is not a git checkout/,
+      ],
+      [
+        "the source is not a git checkout",
+        undefined,
+        { head: null, clean: false, containsAncestorCommit: false },
+        /Source workspace is not a git checkout/,
+      ],
+      [
+        "the target is not behind the source",
+        undefined,
+        { head: SOURCE_HEAD, clean: true, containsAncestorCommit: false },
+        /Target branch is not behind the source; push or pull first/,
+      ],
+    ] as Array<
+      [string, FakeWorkspace | undefined, FakeWorkspace | undefined, RegExp]
+    >)(
+      "refuses before the fence when %s",
+      async (_name, targetWorkspace, sourceWorkspace, message) => {
+        await withTestHarness(async (harness) => {
+          const fx = setup(harness, {
+            target: targetWorkspace ? { workspace: targetWorkspace } : {},
+            source: sourceWorkspace ? { workspace: sourceWorkspace } : {},
+          });
+          await expect(carry(harness, fx)).rejects.toMatchObject({
+            status: 409,
+            body: {
+              code: "thread_move_refused",
+              message: expect.stringMatching(message),
+            },
+          });
+          expect(fx.source.types()).not.toContain("thread.stop");
+          expect(fx.source.types()).not.toContain("thread.transfer.export");
+          expect(fx.target.types()).not.toContain("thread.transfer.commit");
+          expect(getUnfinishedThreadMove(harness.db, fx.threadId)).toBeNull();
+          expect(getThread(harness.db, fx.threadId)?.environmentId).toBe(
+            fx.sourceEnvironmentId,
+          );
+        });
+      },
+    );
+
+    it("rolls both sides back when committing the workspace fails", async () => {
+      await withTestHarness(async (harness) => {
+        const fx = setup(harness, {
+          target: { failOn: "thread.transfer.commit" },
+        });
+        await expect(carry(harness, fx)).rejects.toMatchObject({
+          status: 409,
+          body: { code: "thread_move_failed" },
+        });
+        expect(fx.target.types()).toContain("thread.transfer.rollback");
+        expect(fx.source.types()).toContain("thread.transfer.rollback");
+        expect(getThread(harness.db, fx.threadId)?.environmentId).toBe(
+          fx.sourceEnvironmentId,
         );
       });
     });

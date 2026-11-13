@@ -72,6 +72,7 @@ const hostCommandWakePolicy = {
   "provider.installation.run": "work",
   "provider.usage": "work",
   "thread.transfer.export": "never",
+  "thread.transfer.inspect_workspace": "never",
   "thread.transfer.read_chunk": "never",
   "thread.transfer.write_chunk": "never",
   "thread.transfer.commit": "never",

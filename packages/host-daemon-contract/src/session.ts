@@ -547,6 +547,7 @@ const hostDaemonOnlineRpcResponseSuccessSchema = z.discriminatedUnion(
     onlineRpcResponseSuccessSchemaFor("host.read_file"),
     onlineRpcResponseSuccessSchemaFor("host.read_file_chunk"),
     onlineRpcResponseSuccessSchemaFor("thread.transfer.export"),
+    onlineRpcResponseSuccessSchemaFor("thread.transfer.inspect_workspace"),
     onlineRpcResponseSuccessSchemaFor("thread.transfer.read_chunk"),
     onlineRpcResponseSuccessSchemaFor("thread.transfer.write_chunk"),
     onlineRpcResponseSuccessSchemaFor("thread.transfer.commit"),
