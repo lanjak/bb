@@ -1273,7 +1273,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         summary:
           "Run server code when threads change state or environments are removed. With this, a plugin can:",
         bullets: [
-          "React when threads start, finish, fail, change parent, or are read, archived, unarchived, or deleted",
+          "React when threads start, finish, fail, move, reparent, or are read, archived, unarchived or deleted",
           "Follow queued messages, including ones cancelled before dispatch",
           "Get the provider's error and rate-limit windows when a turn fails",
           "Observe successful environment removal with its previous machine and path",

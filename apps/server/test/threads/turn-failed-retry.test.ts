@@ -83,6 +83,7 @@ function recordTurnFailedAnnouncements(): string[] {
     emitThreadArchived: () => {},
     emitThreadDeleted: () => {},
     emitThreadRead: () => {},
+    emitThreadMoved: () => {},
     emitInteractionPending: () => {},
     emitMessageQueued: () => {},
     emitMessageDispatched: () => {},

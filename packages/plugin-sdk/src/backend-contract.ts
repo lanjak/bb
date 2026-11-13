@@ -302,6 +302,18 @@ export interface PluginThreadEventPayloads {
    * it. Experimental: see docs/api_to_audit.md.
    */
   "experimental_thread.read": { thread: ThreadResponse };
+  /**
+   * Fired after a thread move has switched the thread to its target
+   * environment. Experimental: see docs/api_to_audit.md.
+   */
+  "experimental_thread.moved": {
+    threadId: string;
+    moveId: string;
+    sourceEnvironmentId: string;
+    targetEnvironmentId: string;
+    sourceHostId: string;
+    targetHostId: string;
+  };
   /** Real accepted terminal input; excludes output, keepalives and input contents. */
   "experimental_terminal.input": { terminal: TerminalSession };
   /**
