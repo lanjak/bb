@@ -35,6 +35,16 @@ describe("claudeProjectFolderName", () => {
     );
   });
 
+  it("matches the SDK for non-BMP and accented characters", () => {
+    expect(claudeProjectFolderName("/work/\u{1F680}/app")).toBe("-work----app");
+    expect(claudeProjectFolderName("/home/\u00fcn\u00ef/x")).toBe(
+      "-home--n--x",
+    );
+    expect(claudeProjectFolderName(`/${"\u{1F680}".repeat(120)}`)).toBe(
+      `${"-".repeat(200)}-6nzpex`,
+    );
+  });
+
   it("truncates long paths and appends a base36 hash of the full path", () => {
     const cwd = `/${"a".repeat(250)}`;
     const name = claudeProjectFolderName(cwd);
@@ -52,13 +62,12 @@ describe("claudeProjectFolderName", () => {
 });
 
 describe("listClaudeSessionFiles", () => {
-  it("lists the transcript and every regular sidecar file, skipping symlinks", async () => {
+  it("lists the transcript and every regular sidecar file", async () => {
     const configDirectory = makeConfigDir();
     const projectDir = join(configDirectory, "projects", "-other");
     mkdirSync(join(projectDir, "s1", "tool-results"), { recursive: true });
     writeFileSync(join(projectDir, "s1.jsonl"), "t");
     writeFileSync(join(projectDir, "s1", "tool-results", "r.txt"), "r");
-    symlinkSync("/etc/hostname", join(projectDir, "s1", "link"));
     writeFileSync(join(projectDir, "s2.jsonl"), "other session");
 
     const files = await listClaudeSessionFiles({
@@ -72,6 +81,32 @@ describe("listClaudeSessionFiles", () => {
       "s1/tool-results/r.txt",
     ]);
     expect(files[0]?.path).toBe(join(projectDir, "s1.jsonl"));
+  });
+
+  it("fails the listing when a sidecar entry is a symlink", async () => {
+    const configDirectory = makeConfigDir();
+    const projectDir = join(configDirectory, "projects", "-other");
+    mkdirSync(join(projectDir, "s1"), { recursive: true });
+    writeFileSync(join(projectDir, "s1.jsonl"), "t");
+    symlinkSync("/etc/hostname", join(projectDir, "s1", "link"));
+
+    await expect(
+      listClaudeSessionFiles({ configDirectory, cwd: "/x", sessionId: "s1" }),
+    ).rejects.toThrow(/not a regular file/);
+  });
+
+  it("lists only the transcript when the sidecar folder is absent", async () => {
+    const configDirectory = makeConfigDir();
+    const projectDir = join(configDirectory, "projects", "-other");
+    mkdirSync(projectDir, { recursive: true });
+    writeFileSync(join(projectDir, "s1.jsonl"), "t");
+
+    const files = await listClaudeSessionFiles({
+      configDirectory,
+      cwd: "/x",
+      sessionId: "s1",
+    });
+    expect(files.map((file) => file.relativePath)).toEqual(["s1.jsonl"]);
   });
 
   it("prefers the project folder for the cwd when several hold the session", async () => {

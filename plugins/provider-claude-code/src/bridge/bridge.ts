@@ -2362,17 +2362,20 @@ async function handleRequest(request: ClaudeCodeJsonRpcRequest): Promise<void> {
       }
       break;
     }
-    case "session/destination":
+    case "session/destination": {
+      const configDirectory = claudeConfigDirectory(
+        buildSessionEnv(request.params.options.envVars ?? {}),
+        request.params.cwd,
+      );
       sendResult(request.id, {
         directory: claudeSessionDestination({
-          configDirectory: claudeConfigDirectory(
-            buildSessionEnv(request.params.options.envVars ?? {}),
-            request.params.cwd,
-          ),
+          configDirectory,
           cwd: request.params.cwd,
         }),
+        root: configDirectory,
       });
       break;
+    }
     case "provider/health":
       sendResult(request.id, await getClaudeProviderHealth());
       break;

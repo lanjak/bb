@@ -1,4 +1,4 @@
-import { lstat, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { findTranscriptProjectDirectory } from "./session-fork.js";
 
@@ -19,7 +19,7 @@ function javaStringHash(value: string): number {
 }
 
 export function claudeProjectFolderName(cwd: string): string {
-  const encoded = cwd.replace(/[^a-zA-Z0-9]/gu, "-");
+  const encoded = cwd.replace(/[^a-zA-Z0-9]/g, "-");
   if (encoded.length <= MAX_PROJECT_FOLDER_NAME_LENGTH) {
     return encoded;
   }
@@ -43,25 +43,39 @@ function requireSessionId(sessionId: string): void {
   }
 }
 
-async function collectRegularFiles(directory: string): Promise<string[]> {
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+async function collectRegularFiles(
+  directory: string,
+  isSidecarRoot: boolean,
+): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (isSidecarRoot && isMissing(error)) {
+      return [];
+    }
+    throw new Error(
+      `Cannot read Claude session folder ${directory}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   const found: string[] = [];
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
+  for (const entry of entries) {
     const entryPath = join(directory, entry.name);
     if (entry.isDirectory()) {
-      found.push(...(await collectRegularFiles(entryPath)));
+      found.push(...(await collectRegularFiles(entryPath, false)));
     } else if (entry.isFile()) {
       found.push(entryPath);
+    } else {
+      throw new Error(
+        `Claude session entry is not a regular file or folder: ${entryPath}`,
+      );
     }
   }
   return found;
-}
-
-async function isRegularFile(filePath: string): Promise<boolean> {
-  try {
-    return (await lstat(filePath)).isFile();
-  } catch {
-    return false;
-  }
 }
 
 export async function listClaudeSessionFiles(args: {
@@ -78,19 +92,15 @@ export async function listClaudeSessionFiles(args: {
   if (projectDirectory === null) {
     return [];
   }
-  const transcriptPath = join(projectDirectory, `${args.sessionId}.jsonl`);
   const sidecarPaths = await collectRegularFiles(
     join(projectDirectory, args.sessionId),
-  ).catch(() => []);
-  const paths = [transcriptPath, ...sidecarPaths.sort()];
-  const files: ClaudeSessionFile[] = [];
-  for (const filePath of paths) {
-    if (await isRegularFile(filePath)) {
-      files.push({
-        path: filePath,
-        relativePath: relative(projectDirectory, filePath).split(sep).join("/"),
-      });
-    }
-  }
-  return files;
+    true,
+  );
+  return [
+    join(projectDirectory, `${args.sessionId}.jsonl`),
+    ...sidecarPaths.sort(),
+  ].map((filePath) => ({
+    path: filePath,
+    relativePath: relative(projectDirectory, filePath).split(sep).join("/"),
+  }));
 }
