@@ -244,10 +244,24 @@ export function registerThreadActionRoutes(
 
   post(routes.move, async (context, payload) => {
     const thread = requirePublicThread(deps.db, context.req.param("id"));
+    const target =
+      payload.environmentId !== undefined
+        ? { environmentId: payload.environmentId }
+        : payload.hostId !== undefined
+          ? { hostId: payload.hostId }
+          : null;
+    if (target === null) {
+      throw new ApiError(
+        400,
+        "invalid_request",
+        "Provide exactly one of environmentId or hostId",
+      );
+    }
     return context.json(
       await moveThread(deps, {
-        environmentId: payload.environmentId,
+        target,
         threadId: thread.id,
+        withChildren: payload.withChildren ?? false,
       }),
     );
   });

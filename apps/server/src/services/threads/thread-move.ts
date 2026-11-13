@@ -11,6 +11,7 @@ import {
   getThread,
   getThreadMove,
   getUnfinishedThreadMove,
+  listEnvironments,
   listNonDeletedChildThreads,
   listPendingInteractionsByThread,
   listQueuedThreadMessages,
@@ -45,6 +46,7 @@ import {
 } from "../hosts/host-environment.js";
 import { resolvePluginProviderEnv } from "../plugins/plugin-agent-contributions.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
+import { emitPluginThreadMoved } from "../plugins/plugin-thread-events.js";
 
 type MoveDeps = LoggedPendingInteractionWorkSessionDeps;
 
@@ -68,9 +70,18 @@ function refuse(message: string): never {
   throw new ApiError(409, "thread_move_refused", message);
 }
 
+export type ThreadMoveTarget = { environmentId: string } | { hostId: string };
+
+export interface MoveThreadArgs {
+  target: ThreadMoveTarget;
+  threadId: string;
+  withChildren: boolean;
+}
+
 function planThreadMove(
   db: DbQueryConnection,
   args: {
+    inGroup: boolean;
     ownMoveId: string | null;
     targetEnvironmentId: string;
     threadId: string;
@@ -129,6 +140,7 @@ function planThreadMove(
     refuse("Thread has pending interactions; resolve them first.");
   }
   if (
+    !args.inGroup &&
     listNonDeletedChildThreads(db, { parentThreadId: thread.id }).some(
       (child) =>
         child.archivedAt === null &&
@@ -156,6 +168,131 @@ function planThreadMove(
     targetEnvironmentId: target.id,
     targetHostId: target.hostId,
   };
+}
+
+type MoveThreadRow = NonNullable<ReturnType<typeof getThread>>;
+
+function resolveTargetEnvironmentId(
+  deps: MoveDeps,
+  thread: MoveThreadRow,
+  target: ThreadMoveTarget,
+): string {
+  if ("environmentId" in target) return target.environmentId;
+  const host = getHost(deps.db, target.hostId);
+  if (host === null) {
+    throw new ApiError(404, "host_not_found", "Machine not found");
+  }
+  const source =
+    thread.environmentId === null
+      ? null
+      : getEnvironment(deps.db, thread.environmentId);
+  if (source !== null && source.hostId === host.id) {
+    refuse("Target machine is the machine the thread is already on.");
+  }
+  const candidates = listEnvironments(deps.db, {
+    hostId: host.id,
+    projectId: thread.projectId,
+    statuses: ["ready"],
+  }).filter((environment) => {
+    if (environment.path === null) return false;
+    try {
+      resolveReuseThreadRequestEnvironment(
+        deps,
+        { type: "reuse", environmentId: environment.id },
+        thread.projectId,
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof ApiError) return false;
+      throw error;
+    }
+  });
+  if (candidates.length === 0) {
+    refuse(
+      `Project ${thread.projectId} has no ready environment on machine ${host.name} that a move can reuse. Add a project source there first (bb project source add ${thread.projectId} --path <path> --machine ${host.id}), then retry.`,
+    );
+  }
+  const samePath = candidates.filter(
+    (environment) => source !== null && environment.path === source.path,
+  );
+  const [onlySamePath] = samePath;
+  if (onlySamePath !== undefined && samePath.length === 1) {
+    return onlySamePath.id;
+  }
+  const [onlyCandidate] = candidates;
+  if (onlyCandidate !== undefined && candidates.length === 1) {
+    return onlyCandidate.id;
+  }
+  refuse(
+    `Machine ${host.name} has several environments this move can reuse and none matches the source path: ${(samePath.length > 1 ? samePath : candidates).map((environment) => environment.id).join(", ")}. Choose one with --environment.`,
+  );
+}
+
+function collectMoveThreadIds(
+  db: DbQueryConnection,
+  root: MoveThreadRow,
+  withChildren: boolean,
+): string[] {
+  const ids = [root.id];
+  if (!withChildren) return ids;
+  const foreign: string[] = [];
+  const queue = [root.id];
+  for (const parentId of queue) {
+    for (const child of listNonDeletedChildThreads(db, {
+      parentThreadId: parentId,
+    })) {
+      if (child.archivedAt !== null) continue;
+      if (child.environmentId === root.environmentId) {
+        ids.push(child.id);
+        queue.push(child.id);
+      } else {
+        foreign.push(child.id);
+      }
+    }
+  }
+  if (foreign.length > 0) {
+    refuse(
+      `Child threads on another environment or machine cannot move with this thread: ${foreign.join(", ")}.`,
+    );
+  }
+  return ids;
+}
+
+function planMoveGroup(
+  db: DbQueryConnection,
+  args: {
+    targetEnvironmentId: string;
+    threadId: string;
+    withChildren: boolean;
+  },
+): Array<{ plan: MovePlan; threadId: string }> {
+  const root = getThread(db, args.threadId);
+  if (root === null || root.deletedAt !== null) {
+    throw new ApiError(404, "thread_not_found", "Thread not found");
+  }
+  const ids = collectMoveThreadIds(db, root, args.withChildren);
+  return ids.map((threadId) => {
+    try {
+      return {
+        threadId,
+        plan: planThreadMove(db, {
+          inGroup: ids.length > 1,
+          ownMoveId: null,
+          targetEnvironmentId: args.targetEnvironmentId,
+          threadId,
+        }),
+      };
+    } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.body.code === "thread_move_refused" &&
+        threadId !== root.id
+      ) {
+        refuse(`Child thread ${threadId}: ${error.message}`);
+      }
+      throw error;
+    }
+  });
 }
 
 function requireBridgeLaunch(deps: MoveDeps, providerId: string) {
@@ -214,10 +351,15 @@ async function sessionEnvironment(
   };
 }
 
-function toResponse(move: ThreadMoveRow): MoveThreadResponse {
+function toResponse(
+  move: ThreadMoveRow,
+  threadIds: string[],
+): MoveThreadResponse {
   return {
     error: move.error,
+    groupId: move.groupId,
     moveId: move.id,
+    threadIds,
     phase: move.phase,
     sourceEnvironmentId: move.sourceEnvironmentId,
     targetEnvironmentId: move.targetEnvironmentId,
@@ -342,66 +484,84 @@ async function finishBothSides(
   });
 }
 
-function switchThreadEnvironment(deps: MoveDeps, move: ThreadMoveRow): void {
+function switchThreadEnvironments(
+  deps: MoveDeps,
+  moves: ThreadMoveRow[],
+): void {
   deps.db.transaction(
     (tx) => {
-      const current = getThreadMove(tx, move.id);
-      if (current === null || current.phase !== "committing") {
-        throw new Error(`Thread move ${move.id} is not ready to switch`);
-      }
-      const plan = planThreadMove(tx, {
-        ownMoveId: move.id,
-        targetEnvironmentId: move.targetEnvironmentId,
-        threadId: move.threadId,
-      });
-      const thread = getThread(tx, move.threadId);
-      if (
-        thread === null ||
-        thread.environmentId !== move.sourceEnvironmentId ||
-        plan.targetHostId !== move.targetHostId ||
-        plan.sourceHostId !== move.sourceHostId
-      ) {
-        throw new Error("Thread environment changed during the move");
-      }
-      const sourceHost = getHost(tx, move.sourceHostId);
-      const targetHost = getHost(tx, move.targetHostId);
-      updateThread(tx, deps.hub, move.threadId, {
-        environmentId: move.targetEnvironmentId,
-      });
-      updateThreadMovePhase(tx, {
-        id: move.id,
-        expectedPhase: "committing",
-        phase: "switched",
-        now: Date.now(),
-      });
-      appendThreadEventInTransaction(tx, {
-        threadId: move.threadId,
-        environmentId: move.targetEnvironmentId,
-        type: "system/operation",
-        scope: threadScope(),
-        data: {
-          operation: THREAD_MOVE_OPERATION,
-          operationId: createEventId(),
-          status: "completed",
-          message: `Moved from ${sourceHost?.name ?? move.sourceHostId} (${move.sourceCwd}) to ${targetHost?.name ?? move.targetHostId} (${move.targetCwd})`,
-          metadata: {
-            moveId: move.id,
-            sourceEnvironmentId: move.sourceEnvironmentId,
-            targetEnvironmentId: move.targetEnvironmentId,
-            sourceHostId: move.sourceHostId,
-            targetHostId: move.targetHostId,
+      for (const move of moves) {
+        const current = getThreadMove(tx, move.id);
+        if (current === null || current.phase !== "committing") {
+          throw new Error(`Thread move ${move.id} is not ready to switch`);
+        }
+        const plan = planThreadMove(tx, {
+          inGroup: moves.length > 1,
+          ownMoveId: move.id,
+          targetEnvironmentId: move.targetEnvironmentId,
+          threadId: move.threadId,
+        });
+        const thread = getThread(tx, move.threadId);
+        if (
+          thread === null ||
+          thread.environmentId !== move.sourceEnvironmentId ||
+          plan.targetHostId !== move.targetHostId ||
+          plan.sourceHostId !== move.sourceHostId
+        ) {
+          throw new Error("Thread environment changed during the move");
+        }
+        const sourceHost = getHost(tx, move.sourceHostId);
+        const targetHost = getHost(tx, move.targetHostId);
+        updateThread(tx, deps.hub, move.threadId, {
+          environmentId: move.targetEnvironmentId,
+        });
+        updateThreadMovePhase(tx, {
+          id: move.id,
+          expectedPhase: "committing",
+          phase: "switched",
+          now: Date.now(),
+        });
+        appendThreadEventInTransaction(tx, {
+          threadId: move.threadId,
+          environmentId: move.targetEnvironmentId,
+          type: "system/operation",
+          scope: threadScope(),
+          data: {
+            operation: THREAD_MOVE_OPERATION,
+            operationId: createEventId(),
+            status: "completed",
+            message: `Moved from ${sourceHost?.name ?? move.sourceHostId} (${move.sourceCwd}) to ${targetHost?.name ?? move.targetHostId} (${move.targetCwd})`,
+            metadata: {
+              moveId: move.id,
+              sourceEnvironmentId: move.sourceEnvironmentId,
+              targetEnvironmentId: move.targetEnvironmentId,
+              sourceHostId: move.sourceHostId,
+              targetHostId: move.targetHostId,
+            },
           },
-        },
-      });
+        });
+      }
     },
     { behavior: "immediate" },
   );
-  deps.hub.notifyThread(move.threadId, ["events-appended"], {
-    timelineSequence: getLatestThreadSequence(deps.db, {
+  for (const move of moves) {
+    emitPluginThreadMoved({
       threadId: move.threadId,
-    }),
-    eventTypes: ["system/operation"],
-  });
+      moveId: move.id,
+      sourceEnvironmentId: move.sourceEnvironmentId,
+      targetEnvironmentId: move.targetEnvironmentId,
+      sourceHostId: move.sourceHostId,
+      targetHostId: move.targetHostId,
+    });
+  }
+  for (const move of moves) {
+    deps.hub.notifyThread(move.threadId, ["events-appended"], {
+      timelineSequence: getLatestThreadSequence(deps.db, {
+        threadId: move.threadId,
+      }),
+      eventTypes: ["system/operation"],
+    });
+  }
 }
 
 async function finishAfterSwitch(
@@ -431,87 +591,121 @@ async function finishAfterSwitch(
 
 export async function moveThread(
   deps: MoveDeps,
-  args: { environmentId: string; threadId: string },
+  args: MoveThreadArgs,
 ): Promise<MoveThreadResponse> {
-  const thread = getThread(deps.db, args.threadId);
-  if (thread === null || thread.deletedAt !== null) {
+  const rootThread = getThread(deps.db, args.threadId);
+  if (rootThread === null || rootThread.deletedAt !== null) {
     throw new ApiError(404, "thread_not_found", "Thread not found");
   }
-  const preflight = planThreadMove(deps.db, {
-    ownMoveId: null,
-    targetEnvironmentId: args.environmentId,
+  const targetEnvironmentId = resolveTargetEnvironmentId(
+    deps,
+    rootThread,
+    args.target,
+  );
+  const groupArgs = {
+    targetEnvironmentId,
     threadId: args.threadId,
-  });
+    withChildren: args.withChildren,
+  };
+  const preflight = planMoveGroup(deps.db, groupArgs);
   resolveReuseThreadRequestEnvironment(
     deps,
-    { type: "reuse", environmentId: args.environmentId },
-    thread.projectId,
+    { type: "reuse", environmentId: targetEnvironmentId },
+    rootThread.projectId,
   );
   const bridgeLaunch = requireBridgeLaunch(deps, MOVABLE_PROVIDER_ID);
-  requireConnectedHostSession(deps, preflight.sourceHostId);
-  requireConnectedHostSession(deps, preflight.targetHostId);
-  await settleEarlierCleanups(deps, args.threadId);
+  for (const hostId of new Set(
+    preflight.flatMap(({ plan }) => [plan.sourceHostId, plan.targetHostId]),
+  )) {
+    requireConnectedHostSession(deps, hostId);
+  }
+  for (const { threadId } of preflight) {
+    await settleEarlierCleanups(deps, threadId);
+  }
 
-  let move = deps.db.transaction(
-    (tx) => {
-      const plan = planThreadMove(tx, {
-        ownMoveId: null,
-        targetEnvironmentId: args.environmentId,
-        threadId: args.threadId,
-      });
-      return createThreadMove(tx, {
-        ...plan,
-        id: `mv_${randomUUID()}`,
-        now: Date.now(),
-        providerId: MOVABLE_PROVIDER_ID,
-        threadId: args.threadId,
-      });
-    },
+  const groupId = `mvg_${randomUUID()}`;
+  const moves = deps.db.transaction(
+    (tx) =>
+      planMoveGroup(tx, groupArgs).map(({ plan, threadId }) =>
+        createThreadMove(tx, {
+          ...plan,
+          groupId,
+          id: `mv_${randomUUID()}`,
+          now: Date.now(),
+          providerId: MOVABLE_PROVIDER_ID,
+          threadId,
+        }),
+      ),
     { behavior: "immediate" },
   );
-  activeMoveIds.add(move.id);
+  for (const move of moves) activeMoveIds.add(move.id);
+  const [rootMove] = moves;
+  if (rootMove === undefined) {
+    throw new Error("Thread move group is empty");
+  }
   try {
     try {
-      await stopThreadForCurrentState(
-        deps,
-        thread,
-        { id: move.sourceEnvironmentId, hostId: move.sourceHostId },
-        { requireStopped: true },
-      );
-      move = advance(deps, move, "preparing", "exporting");
-      const exported = await rpc(deps, move.sourceHostId, {
-        type: "thread.transfer.export",
-        transferId: move.id,
-        ...sessionArgs(move, move.sourceCwd),
-        bridgeLaunch,
-        sessionEnvironment: await sessionEnvironment(deps, move, "source"),
-      });
-      move = advance(deps, move, "exporting", "copying");
-      for (const file of exported.files) {
-        await copyFile(deps, move, file);
-      }
-      move = advance(deps, move, "copying", "committing");
-      await rpc(deps, move.targetHostId, {
-        type: "thread.transfer.commit",
-        transferId: move.id,
-        ...sessionArgs(move, move.targetCwd),
-        files: exported.files,
-        bridgeLaunch,
-        sessionEnvironment: await sessionEnvironment(deps, move, "target"),
-      });
-      switchThreadEnvironment(deps, move);
-    } catch (error) {
-      const latest = getThreadMove(deps.db, move.id) ?? move;
-      if (isThreadMovePreSwitch(latest.phase)) {
-        const rollbackFailures = await rollbackBothSides(deps, move);
-        const message = [errorMessage(error), ...rollbackFailures].join("; ");
-        updateThreadMovePhase(deps.db, {
-          id: move.id,
-          expectedPhase: latest.phase,
-          phase: rollbackFailures.length === 0 ? "failed" : "cleanup_pending",
-          now: Date.now(),
-          error: message,
+      for (const created of moves) {
+        const thread = getThread(deps.db, created.threadId);
+        if (thread === null) {
+          throw new Error(`Thread ${created.threadId} no longer exists`);
+        }
+        let move = created;
+        await stopThreadForCurrentState(
+          deps,
+          thread,
+          { id: move.sourceEnvironmentId, hostId: move.sourceHostId },
+          { requireStopped: true },
+        );
+        move = advance(deps, move, "preparing", "exporting");
+        const exported = await rpc(deps, move.sourceHostId, {
+          type: "thread.transfer.export",
+          transferId: move.id,
+          ...sessionArgs(move, move.sourceCwd),
+          bridgeLaunch,
+          sessionEnvironment: await sessionEnvironment(deps, move, "source"),
         });
+        move = advance(deps, move, "exporting", "copying");
+        for (const file of exported.files) {
+          await copyFile(deps, move, file);
+        }
+        move = advance(deps, move, "copying", "committing");
+        await rpc(deps, move.targetHostId, {
+          type: "thread.transfer.commit",
+          transferId: move.id,
+          ...sessionArgs(move, move.targetCwd),
+          files: exported.files,
+          bridgeLaunch,
+          sessionEnvironment: await sessionEnvironment(deps, move, "target"),
+        });
+      }
+      switchThreadEnvironments(deps, moves);
+    } catch (error) {
+      const failedMoves = moves.filter((move) =>
+        isThreadMovePreSwitch(getThreadMove(deps.db, move.id)?.phase ?? "done"),
+      );
+      if (failedMoves.length > 0) {
+        const messages = [errorMessage(error)];
+        const rollbackFailuresByMove = new Map<string, string[]>();
+        for (const move of failedMoves) {
+          const failures = await rollbackBothSides(deps, move);
+          rollbackFailuresByMove.set(move.id, failures);
+          messages.push(...failures);
+        }
+        const message = messages.join("; ");
+        for (const move of failedMoves) {
+          const latest = getThreadMove(deps.db, move.id) ?? move;
+          updateThreadMovePhase(deps.db, {
+            id: move.id,
+            expectedPhase: latest.phase,
+            phase:
+              (rollbackFailuresByMove.get(move.id) ?? []).length === 0
+                ? "failed"
+                : "cleanup_pending",
+            now: Date.now(),
+            error: message,
+          });
+        }
         throw new ApiError(
           409,
           "thread_move_failed",
@@ -520,14 +714,24 @@ export async function moveThread(
       }
       throw error;
     }
-    move = getThreadMove(deps.db, move.id) ?? move;
-    return toResponse(await finishAfterSwitch(deps, move));
+    let rootResult = rootMove;
+    for (const move of moves) {
+      const switched = getThreadMove(deps.db, move.id) ?? move;
+      const finished = await finishAfterSwitch(deps, switched);
+      if (move.id === rootMove.id) rootResult = finished;
+    }
+    return toResponse(
+      rootResult,
+      moves.map((move) => move.threadId),
+    );
   } finally {
-    activeMoveIds.delete(move.id);
-    requestQueuedMessageDispatch(deps, {
-      kind: "thread-ready",
-      threadId: args.threadId,
-    });
+    for (const move of moves) {
+      activeMoveIds.delete(move.id);
+      requestQueuedMessageDispatch(deps, {
+        kind: "thread-ready",
+        threadId: move.threadId,
+      });
+    }
   }
 }
 
