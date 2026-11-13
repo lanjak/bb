@@ -14,6 +14,7 @@ import {
   listNonDeletedChildThreads,
   listPendingInteractionsByThread,
   listQueuedThreadMessages,
+  listCleanupPendingThreadMoves,
   listUnfinishedThreadMoves,
   updateThread,
   updateThreadMovePhase,
@@ -27,6 +28,7 @@ import {
   type HostDaemonRetryableOnlineRpcCommand,
   type HostDaemonOnlineRpcResultForCommand,
   type ThreadTransferFile,
+  type ThreadTransferSessionEnvironment,
 } from "@bb/host-daemon-contract";
 import type { MoveThreadResponse } from "@bb/server-contract";
 import { ApiError } from "../../errors.js";
@@ -37,6 +39,11 @@ import { requireConnectedHostSession } from "../lib/entity-lookup.js";
 import { resolveReuseThreadRequestEnvironment } from "./thread-request-eligibility.js";
 import { stopThreadForCurrentState } from "./thread-lifecycle.js";
 import { appendThreadEventInTransaction } from "./thread-events.js";
+import {
+  mergeHostAndProviderEnvironment,
+  resolveHostEnvironment,
+} from "../hosts/host-environment.js";
+import { resolvePluginProviderEnv } from "../plugins/plugin-agent-contributions.js";
 import { requestQueuedMessageDispatch } from "./queued-message-dispatch.js";
 
 type MoveDeps = LoggedPendingInteractionWorkSessionDeps;
@@ -180,6 +187,33 @@ function sessionArgs(move: ThreadMoveRow, cwd: string) {
   };
 }
 
+async function sessionEnvironment(
+  deps: MoveDeps,
+  move: ThreadMoveRow,
+  side: "source" | "target",
+): Promise<ThreadTransferSessionEnvironment> {
+  const thread = getThread(deps.db, move.threadId);
+  if (thread === null) {
+    throw new Error(`Thread ${move.threadId} no longer exists`);
+  }
+  const hostId = side === "source" ? move.sourceHostId : move.targetHostId;
+  return {
+    projectId: thread.projectId,
+    environmentId:
+      side === "source" ? move.sourceEnvironmentId : move.targetEnvironmentId,
+    contributedEnv: mergeHostAndProviderEnvironment(
+      await resolveHostEnvironment(deps, {
+        hostId,
+        projectId: thread.projectId,
+      }),
+      await resolvePluginProviderEnv({
+        providerId: move.providerId,
+        context: { threadId: thread.id, projectId: thread.projectId, hostId },
+      }),
+    ),
+  };
+}
+
 function toResponse(move: ThreadMoveRow): MoveThreadResponse {
   return {
     error: move.error,
@@ -297,12 +331,14 @@ async function finishBothSides(
     transferId: move.id,
     setAsideSession: sessionArgs(move, move.sourceCwd),
     bridgeLaunch: requireBridgeLaunch(deps, move.providerId),
+    sessionEnvironment: await sessionEnvironment(deps, move, "source"),
   });
   await rpc(deps, move.targetHostId, {
     type: "thread.transfer.finish",
     transferId: move.id,
     setAsideSession: null,
     bridgeLaunch: null,
+    sessionEnvironment: await sessionEnvironment(deps, move, "target"),
   });
 }
 
@@ -414,6 +450,7 @@ export async function moveThread(
   const bridgeLaunch = requireBridgeLaunch(deps, MOVABLE_PROVIDER_ID);
   requireConnectedHostSession(deps, preflight.sourceHostId);
   requireConnectedHostSession(deps, preflight.targetHostId);
+  await settleEarlierCleanups(deps, args.threadId);
 
   let move = deps.db.transaction(
     (tx) => {
@@ -447,6 +484,7 @@ export async function moveThread(
         transferId: move.id,
         ...sessionArgs(move, move.sourceCwd),
         bridgeLaunch,
+        sessionEnvironment: await sessionEnvironment(deps, move, "source"),
       });
       move = advance(deps, move, "exporting", "copying");
       for (const file of exported.files) {
@@ -459,6 +497,7 @@ export async function moveThread(
         ...sessionArgs(move, move.targetCwd),
         files: exported.files,
         bridgeLaunch,
+        sessionEnvironment: await sessionEnvironment(deps, move, "target"),
       });
       switchThreadEnvironment(deps, move);
     } catch (error) {
@@ -469,7 +508,7 @@ export async function moveThread(
         updateThreadMovePhase(deps.db, {
           id: move.id,
           expectedPhase: latest.phase,
-          phase: "failed",
+          phase: rollbackFailures.length === 0 ? "failed" : "cleanup_pending",
           now: Date.now(),
           error: message,
         });
@@ -492,25 +531,79 @@ export async function moveThread(
   }
 }
 
-async function recoverMove(deps: MoveDeps, move: ThreadMoveRow): Promise<void> {
-  if (isThreadMovePreSwitch(move.phase)) {
-    const failures = await rollbackBothSides(deps, move);
-    if (failures.length > 0) {
-      deps.logger.warn(
-        { failures, moveId: move.id },
-        "Thread move rollback is incomplete; will retry",
-      );
-      return;
-    }
+function hostsConnected(deps: MoveDeps, move: ThreadMoveRow): boolean {
+  return (
+    deps.hub.getDaemonSessionIdForHost(move.sourceHostId) !== null &&
+    deps.hub.getDaemonSessionIdForHost(move.targetHostId) !== null
+  );
+}
+
+async function cleanUpMove(
+  deps: MoveDeps,
+  move: ThreadMoveRow,
+): Promise<string[]> {
+  const failures = await rollbackBothSides(deps, move);
+  if (failures.length === 0) {
     updateThreadMovePhase(deps.db, {
       id: move.id,
-      expectedPhase: move.phase,
+      expectedPhase: "cleanup_pending",
       phase: "rolled_back",
       now: Date.now(),
-      error: "Rolled back after a server restart",
     });
   } else {
-    await finishAfterSwitch(deps, move);
+    deps.logger.warn(
+      { failures, moveId: move.id },
+      "Thread move cleanup is incomplete; will retry",
+    );
+  }
+  return failures;
+}
+
+async function settleEarlierCleanups(
+  deps: MoveDeps,
+  threadId: string,
+): Promise<void> {
+  for (const earlier of listCleanupPendingThreadMoves(deps.db, threadId)) {
+    if (activeMoveIds.has(earlier.id)) continue;
+    activeMoveIds.add(earlier.id);
+    try {
+      const failures = hostsConnected(deps, earlier)
+        ? await cleanUpMove(deps, earlier)
+        : ["a host is offline"];
+      if (failures.length > 0) {
+        refuse(
+          `An earlier move of this thread is still cleaning up (${failures.join("; ")}). Reconnect both machines and try again.`,
+        );
+      }
+    } finally {
+      activeMoveIds.delete(earlier.id);
+    }
+  }
+}
+
+async function recoverMove(deps: MoveDeps, move: ThreadMoveRow): Promise<void> {
+  let current = move;
+  if (isThreadMovePreSwitch(current.phase)) {
+    updateThreadMovePhase(deps.db, {
+      id: current.id,
+      expectedPhase: current.phase,
+      phase: "cleanup_pending",
+      now: Date.now(),
+      error: "Interrupted before the switch; the thread stayed on its source",
+    });
+    current = getThreadMove(deps.db, current.id) ?? current;
+    requestQueuedMessageDispatch(deps, {
+      kind: "thread-ready",
+      threadId: current.threadId,
+    });
+  }
+  if (!hostsConnected(deps, current)) {
+    return;
+  }
+  if (current.phase === "cleanup_pending") {
+    await cleanUpMove(deps, current);
+  } else {
+    await finishAfterSwitch(deps, current);
   }
   requestQueuedMessageDispatch(deps, {
     kind: "thread-ready",
@@ -528,12 +621,6 @@ export async function recoverThreadMoves(
       args.hostId !== undefined &&
       move.sourceHostId !== args.hostId &&
       move.targetHostId !== args.hostId
-    ) {
-      continue;
-    }
-    if (
-      deps.hub.getDaemonSessionIdForHost(move.sourceHostId) === null ||
-      deps.hub.getDaemonSessionIdForHost(move.targetHostId) === null
     ) {
       continue;
     }

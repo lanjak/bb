@@ -198,22 +198,6 @@ export type HostDaemonBridgeLaunch = z.infer<
   typeof hostDaemonBridgeLaunchSchema
 >;
 
-const threadTransferExportWithLaunchSchema =
-  threadTransferExportCommandSchema.extend({
-    bridgeLaunch: hostDaemonBridgeLaunchSchema,
-    envVars: z.record(z.string(), z.string()),
-  });
-const threadTransferCommitWithLaunchSchema =
-  threadTransferCommitCommandSchema.extend({
-    bridgeLaunch: hostDaemonBridgeLaunchSchema,
-    envVars: z.record(z.string(), z.string()),
-  });
-const threadTransferFinishWithLaunchSchema =
-  threadTransferFinishCommandSchema.extend({
-    bridgeLaunch: hostDaemonBridgeLaunchSchema.nullable(),
-    envVars: z.record(z.string(), z.string()),
-  });
-
 export const hostDaemonContributedEnvEntrySchema = z
   .object({
     name: z.string().regex(/^[A-Z_][A-Z0-9_]*$/u),
@@ -1320,6 +1304,33 @@ function defineHostDaemonCommandDescriptor<
 > {
   return descriptor;
 }
+
+const threadTransferSessionEnvironmentSchema = z
+  .object({
+    projectId: z.string().min(1),
+    environmentId: z.string().min(1),
+    contributedEnv: z.array(hostDaemonContributedEnvEntrySchema),
+  })
+  .strict();
+export type ThreadTransferSessionEnvironment = z.infer<
+  typeof threadTransferSessionEnvironmentSchema
+>;
+
+const threadTransferExportWithLaunchSchema =
+  threadTransferExportCommandSchema.extend({
+    bridgeLaunch: hostDaemonBridgeLaunchSchema,
+    sessionEnvironment: threadTransferSessionEnvironmentSchema,
+  });
+const threadTransferCommitWithLaunchSchema =
+  threadTransferCommitCommandSchema.extend({
+    bridgeLaunch: hostDaemonBridgeLaunchSchema,
+    sessionEnvironment: threadTransferSessionEnvironmentSchema,
+  });
+const threadTransferFinishWithLaunchSchema =
+  threadTransferFinishCommandSchema.extend({
+    bridgeLaunch: hostDaemonBridgeLaunchSchema.nullable(),
+    sessionEnvironment: threadTransferSessionEnvironmentSchema,
+  });
 
 export const hostDaemonCommandRegistry = {
   "desktop.broker.prove": defineHostDaemonCommandDescriptor({

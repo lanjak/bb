@@ -1,5 +1,9 @@
 import { and, asc, eq, notInArray } from "drizzle-orm";
-import type { ThreadMovePhase } from "@bb/domain";
+import {
+  threadMoveReleasedPhaseValues,
+  threadMoveSettledPhaseValues,
+  type ThreadMovePhase,
+} from "@bb/domain";
 import type { DbQueryConnection } from "../connection.js";
 import { threadMoves } from "../schema.js";
 
@@ -27,7 +31,8 @@ export interface UpdateThreadMovePhaseArgs {
   phase: ThreadMovePhase;
 }
 
-const FINISHED_PHASES: ThreadMovePhase[] = ["done", "failed", "rolled_back"];
+const RELEASED_PHASES: ThreadMovePhase[] = [...threadMoveReleasedPhaseValues];
+const SETTLED_PHASES: ThreadMovePhase[] = [...threadMoveSettledPhaseValues];
 
 export function createThreadMove(
   db: DbQueryConnection,
@@ -75,7 +80,7 @@ export function getUnfinishedThreadMove(
       .where(
         and(
           eq(threadMoves.threadId, threadId),
-          notInArray(threadMoves.phase, FINISHED_PHASES),
+          notInArray(threadMoves.phase, RELEASED_PHASES),
         ),
       )
       .get() ?? null
@@ -88,7 +93,24 @@ export function listUnfinishedThreadMoves(
   return db
     .select()
     .from(threadMoves)
-    .where(notInArray(threadMoves.phase, FINISHED_PHASES))
+    .where(notInArray(threadMoves.phase, SETTLED_PHASES))
+    .orderBy(asc(threadMoves.createdAt), asc(threadMoves.id))
+    .all();
+}
+
+export function listCleanupPendingThreadMoves(
+  db: DbQueryConnection,
+  threadId: string,
+): ThreadMoveRow[] {
+  return db
+    .select()
+    .from(threadMoves)
+    .where(
+      and(
+        eq(threadMoves.threadId, threadId),
+        eq(threadMoves.phase, "cleanup_pending"),
+      ),
+    )
     .orderBy(asc(threadMoves.createdAt), asc(threadMoves.id))
     .all();
 }

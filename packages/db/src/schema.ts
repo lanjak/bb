@@ -750,7 +750,9 @@ export const threadMoves = sqliteTable(
   (table) => [
     uniqueIndex("thread_moves_unfinished_thread_idx")
       .on(table.threadId)
-      .where(sql`${table.phase} NOT IN ('done', 'failed', 'rolled_back')`),
+      .where(
+        sql`${table.phase} NOT IN ('done', 'failed', 'cleanup_pending', 'rolled_back')`,
+      ),
     index("thread_moves_thread_idx").on(table.threadId),
   ],
 );

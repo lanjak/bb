@@ -748,7 +748,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
       type,
       providerThreadId: args.providerThreadId,
       cwd: args.cwd,
-      envVars: args.envVars,
+      envVars: resolveRuntimeThreadEnvironment({
+        contributedEnv: args.sessionEnvironment.contributedEnv,
+        environmentId: args.sessionEnvironment.environmentId,
+        projectId: args.sessionEnvironment.projectId,
+        threadId: args.threadId,
+      }).envVars,
     });
     if (plan.kind === "noop") {
       throw new Error(

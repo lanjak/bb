@@ -128,7 +128,11 @@ async function exportFrom(source: Side, transferId = "t1") {
       type: "thread.transfer.export",
       transferId,
       bridgeLaunch,
-      envVars: {},
+      sessionEnvironment: {
+        projectId: "proj_1",
+        environmentId: "env_1",
+        contributedEnv: [],
+      },
       ...session,
     },
     source.options,
@@ -176,7 +180,11 @@ function commitCommand(
     type: "thread.transfer.commit" as const,
     transferId,
     bridgeLaunch,
-    envVars: {},
+    sessionEnvironment: {
+      projectId: "proj_1",
+      environmentId: "env_1",
+      contributedEnv: [],
+    },
     files,
     ...session,
   };
@@ -362,7 +370,11 @@ describe("thread transfer", () => {
       type: "thread.transfer.finish" as const,
       transferId: "t1",
       bridgeLaunch,
-      envVars: {},
+      sessionEnvironment: {
+        projectId: "proj_1",
+        environmentId: "env_1",
+        contributedEnv: [],
+      },
       setAsideSession: session,
     };
     await expect(
@@ -399,7 +411,11 @@ describe("thread transfer", () => {
       type: "thread.transfer.finish" as const,
       transferId: "t1",
       bridgeLaunch: null,
-      envVars: {},
+      sessionEnvironment: {
+        projectId: "proj_1",
+        environmentId: "env_1",
+        contributedEnv: [],
+      },
       setAsideSession: null,
     };
     await finishThreadTransfer(finishTarget, target.options);
@@ -597,7 +613,11 @@ describe("thread transfer", () => {
       type: "thread.transfer.finish" as const,
       transferId: "t1",
       bridgeLaunch,
-      envVars: {},
+      sessionEnvironment: {
+        projectId: "proj_1",
+        environmentId: "env_1",
+        contributedEnv: [],
+      },
       setAsideSession: session,
     };
     const conflict = path.join(

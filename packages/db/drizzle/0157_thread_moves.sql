@@ -16,5 +16,5 @@ CREATE TABLE IF NOT EXISTS `thread_moves` (
 	FOREIGN KEY (`thread_id`) REFERENCES `threads`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX IF NOT EXISTS `thread_moves_unfinished_thread_idx` ON `thread_moves` (`thread_id`) WHERE "thread_moves"."phase" NOT IN ('done', 'failed', 'rolled_back');--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS `thread_moves_unfinished_thread_idx` ON `thread_moves` (`thread_id`) WHERE "thread_moves"."phase" NOT IN ('done', 'failed', 'cleanup_pending', 'rolled_back');--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `thread_moves_thread_idx` ON `thread_moves` (`thread_id`);

@@ -9,23 +9,24 @@ export const threadMovePhaseValues = [
   "finishing",
   "done",
   "failed",
+  "cleanup_pending",
   "rolled_back",
 ] as const;
 export const threadMovePhaseSchema = z.enum(threadMovePhaseValues);
 export type ThreadMovePhase = z.infer<typeof threadMovePhaseSchema>;
 
-export const threadMoveUnfinishedPhaseValues = [
-  "preparing",
-  "exporting",
-  "copying",
-  "committing",
-  "switched",
-  "finishing",
-] as const;
+export const threadMoveReleasedPhaseValues = [
+  "done",
+  "failed",
+  "cleanup_pending",
+  "rolled_back",
+] as const satisfies readonly ThreadMovePhase[];
 
-export function isThreadMoveFinished(phase: ThreadMovePhase): boolean {
-  return phase === "done" || phase === "failed" || phase === "rolled_back";
-}
+export const threadMoveSettledPhaseValues = [
+  "done",
+  "failed",
+  "rolled_back",
+] as const satisfies readonly ThreadMovePhase[];
 
 export function isThreadMovePreSwitch(phase: ThreadMovePhase): boolean {
   return (

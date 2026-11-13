@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2ad50889-0700-4094-ac8d-31d3994e2943",
+  "id": "65cf676f-4c68-4e64-afc9-9a815994af9a",
   "prevId": "5dbdf9dc-b8ed-4174-8b53-552ff92f814d",
   "tables": {
     "app_settings": {
@@ -4482,7 +4482,7 @@
             "thread_id"
           ],
           "isUnique": true,
-          "where": "\"thread_moves\".\"phase\" NOT IN ('done', 'failed', 'rolled_back')"
+          "where": "\"thread_moves\".\"phase\" NOT IN ('done', 'failed', 'cleanup_pending', 'rolled_back')"
         },
         "thread_moves_thread_idx": {
           "name": "thread_moves_thread_idx",

@@ -151,6 +151,7 @@ export {
 } from "./app-settings.js";
 export { getStoredThreadTabs, replaceStoredThreadTabs } from "./thread-tabs.js";
 export {
+  listCleanupPendingThreadMoves,
   createThreadMove,
   getThreadMove,
   getUnfinishedThreadMove,

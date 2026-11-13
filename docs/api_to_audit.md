@@ -1189,8 +1189,11 @@ Docs: `bb-guide-threads.md`.
    providers opt in and whether the route should list supported providers.
 2. **Target selection.** The caller must name an environment. Decide whether
    to accept a machine and choose or create the environment.
-3. **Stuck moves.** A move interrupted before the switch keeps the thread
-   fenced until both daemons reconnect. Decide whether an owner can abandon it.
+3. **Leftover files.** A move that fails or is interrupted before the switch
+   releases the thread at once and is kept as `cleanup_pending` until both
+   daemons confirm the rollback. A later move of the thread first finishes
+   that cleanup, or is refused while a machine is offline. Decide whether
+   the daemon should also expire old transfer folders on its own.
 4. **Events.** No plugin event announces a move. Decide whether a
    `thread.moved` event is needed.
 

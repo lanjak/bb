@@ -1,3 +1,4 @@
+import type { ThreadTransferSessionEnvironment } from "@bb/host-daemon-contract";
 import type { DesktopBrowserBroker } from "./desktop-browser-broker.js";
 import {
   CompetingTurnError,
@@ -78,14 +79,16 @@ export interface CommandDispatchOptions {
     bridgeLaunch: AgentRuntimeBridgeLaunch;
     providerThreadId: string;
     cwd: string;
-    envVars: Record<string, string>;
+    threadId: string;
+    sessionEnvironment: ThreadTransferSessionEnvironment;
   }) => Promise<SessionFilesResult>;
   resolveSessionDestination: (args: {
     providerId: string;
     bridgeLaunch: AgentRuntimeBridgeLaunch;
     providerThreadId: string;
     cwd: string;
-    envVars: Record<string, string>;
+    threadId: string;
+    sessionEnvironment: ThreadTransferSessionEnvironment;
   }) => Promise<SessionDestinationResult>;
   providerHealth: (args: {
     providerId: string;

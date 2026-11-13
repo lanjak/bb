@@ -8,6 +8,7 @@ import {
   getThread,
   getThreadMove,
   getUnfinishedThreadMove,
+  listCleanupPendingThreadMoves,
   updateThreadMovePhase,
 } from "@bb/db";
 import type { HostDaemonOnlineRpcRequestMessage } from "@bb/host-daemon-contract";
@@ -18,6 +19,7 @@ import {
   recoverThreadMoves,
 } from "../../src/services/threads/thread-move.js";
 import { sendThreadMessage } from "../../src/services/threads/thread-send.js";
+import { isThreadMoveInProgress } from "../../src/services/threads/thread-move-fence.js";
 import {
   EMPTY_WORKSPACE_AGENT_CONTEXT,
   registerHostRpcResponder,
@@ -677,7 +679,7 @@ describe("thread move", () => {
       });
     });
 
-    it("leaves a move alone while a daemon is disconnected", async () => {
+    it("releases the thread at once when a daemon is disconnected", async () => {
       await withTestHarness(async (harness) => {
         const fx = setup(harness);
         insertMove(harness, fx);
@@ -687,8 +689,50 @@ describe("thread move", () => {
 
         await recoverThreadMoves(harness.deps);
 
-        expect(getThreadMove(harness.db, "mv_test")?.phase).toBe("preparing");
+        expect(getThreadMove(harness.db, "mv_test")?.phase).toBe(
+          "cleanup_pending",
+        );
+        expect(isThreadMoveInProgress(harness.db, fx.threadId)).toBe(false);
+        expect(getThread(harness.db, fx.threadId)?.environmentId).toBe(
+          fx.sourceEnvironmentId,
+        );
         expect(fx.source.commands).toEqual([]);
+        expect(fx.target.commands).toEqual([]);
+      });
+    });
+
+    it("keeps cleaning up after a failed rollback without fencing the thread", async () => {
+      await withTestHarness(async (harness) => {
+        const targetOptions: FakeDaemonOptions = {
+          failOn: "thread.transfer.rollback",
+        };
+        const fx = setup(harness, {
+          source: { failOn: "thread.transfer.export" },
+          target: targetOptions,
+        });
+        await expect(
+          moveThread(harness.deps, {
+            threadId: fx.threadId,
+            environmentId: fx.targetEnvironmentId,
+          }),
+        ).rejects.toMatchObject({ body: { code: "thread_move_failed" } });
+        const [first] = listCleanupPendingThreadMoves(harness.db, fx.threadId);
+        expect(first?.phase).toBe("cleanup_pending");
+        expect(isThreadMoveInProgress(harness.db, fx.threadId)).toBe(false);
+
+        await expect(
+          moveThread(harness.deps, {
+            threadId: fx.threadId,
+            environmentId: fx.targetEnvironmentId,
+          }),
+        ).rejects.toMatchObject({ body: { code: "thread_move_refused" } });
+
+        targetOptions.failOn = undefined;
+        await recoverThreadMoves(harness.deps);
+        expect(getThreadMove(harness.db, first!.id)?.phase).toBe("rolled_back");
+        expect(listCleanupPendingThreadMoves(harness.db, fx.threadId)).toEqual(
+          [],
+        );
       });
     });
   });

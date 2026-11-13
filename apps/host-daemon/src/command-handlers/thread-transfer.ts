@@ -10,6 +10,7 @@ import {
   type HostDaemonBridgeLaunch,
   type HostDaemonOnlineRpcResult,
   type ThreadTransferFile,
+  type ThreadTransferSessionEnvironment,
 } from "@bb/host-daemon-contract";
 import { z } from "zod";
 import {
@@ -378,7 +379,7 @@ function threadStorageDirectory(
 
 interface ProviderCall extends SessionRef {
   bridgeLaunch: HostDaemonBridgeLaunch;
-  envVars: Record<string, string>;
+  sessionEnvironment: ThreadTransferSessionEnvironment;
 }
 
 async function providerArgs(command: ProviderCall, options: TransferOptions) {
@@ -390,7 +391,8 @@ async function providerArgs(command: ProviderCall, options: TransferOptions) {
     ),
     providerThreadId: command.providerThreadId,
     cwd: command.cwd,
-    envVars: command.envVars,
+    threadId: command.threadId,
+    sessionEnvironment: command.sessionEnvironment,
   };
 }
 
@@ -984,7 +986,7 @@ export function finishThreadTransfer(
           {
             ...command.setAsideSession,
             bridgeLaunch: command.bridgeLaunch,
-            envVars: command.envVars,
+            sessionEnvironment: command.sessionEnvironment,
           },
           options,
         );
