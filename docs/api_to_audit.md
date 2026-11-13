@@ -1169,17 +1169,25 @@ Docs: `backend-sdk.md`.
 
 ## `bb.sdk.threads.experimental_move`
 
-`POST /threads/:id/move` with `{ environmentId }` moves an idle claude-code
-thread to a ready environment of the same project on another machine. The
+`POST /threads/:id/move` with exactly one of `{ environmentId }` or
+`{ hostId }`, and optional `withChildren`, moves an idle claude-code thread to
+a ready environment of the same project on another machine. `hostId` picks the
+environment: the one reusable ready environment on that machine, preferring one
+whose path equals the source path, refusing none or several. `withChildren`
+moves the thread and its non-archived descendants on the same environment as
+one group: one `thread_moves` row each sharing a `group_id`, rolled back
+together before the switch and switched in one transaction. The
 thread keeps its id, timeline, provider session and thread storage; the
 workspace code does not move. The server fences the thread, stops its
 provider runtime, copies the session and thread storage between the two host
 daemons with the `thread.transfer.*` commands, commits them on the target and
 switches `environmentId` in one transaction. A failure before the switch
-rolls both hosts back and leaves the thread where it was. Returns
-`{ moveId, phase, error, threadId, sourceEnvironmentId, targetEnvironmentId }`;
+rolls both hosts back and leaves the thread where it was. After the switch the
+source daemon sets the old session files and the thread storage folder aside.
+Returns `{ moveId, groupId, phase, error, threadId, threadIds,
+sourceEnvironmentId, targetEnvironmentId }` for the requested thread;
 refusals are 409 `thread_move_refused`, failures 409 `thread_move_failed`.
-First caller: `bb thread move <id> --environment <env-id>`.
+First caller: `bb thread move <id> --environment <env-id> | --machine <id>`.
 
 Docs: `bb-guide-threads.md`.
 
@@ -1187,15 +1195,16 @@ Docs: `bb-guide-threads.md`.
 
 1. **Providers.** Only claude-code supports session transfer. Decide how other
    providers opt in and whether the route should list supported providers.
-2. **Target selection.** The caller must name an environment. Decide whether
-   to accept a machine and choose or create the environment.
+2. **Target selection.** A machine picks an existing environment but never
+   creates one. Decide whether the move should create the environment from a
+   project source.
 3. **Leftover files.** A move that fails or is interrupted before the switch
    releases the thread at once and is kept as `cleanup_pending` until both
    daemons confirm the rollback. A later move of the thread first finishes
    that cleanup, or is refused while a machine is offline. Decide whether
    the daemon should also expire old transfer folders on its own.
-4. **Events.** No plugin event announces a move. Decide whether a
-   `thread.moved` event is needed.
+4. **Events.** `experimental_thread.moved` announces each switched thread; see
+   its own entry below.
 
 ## `bb.sdk.threads.experimental_listCascade`
 
@@ -4044,6 +4053,20 @@ Docs: `backend-sdk.md`.
 
 Stabilization requires deciding whether a general `thread.updated` event
 should replace it, and a second consumer.
+
+## Thread move notifications
+
+`experimental_thread.moved` delivers `{ threadId, moveId, sourceEnvironmentId,
+targetEnvironmentId, sourceHostId, targetHostId }` once per thread after
+`threads.experimental_move` switched it to the target environment, including
+each child moved with `withChildren`. It fires from the same server path that
+appends the "Moved from ... to ..." timeline entry, after the switch commits and
+before the source copy is set aside. No first-party plugin consumes it yet.
+
+Docs: `backend-sdk.md`, `backend-events.md`.
+
+Stabilization requires a consumer, and deciding whether the payload should carry
+the thread DTO like the other thread events.
 
 ## Thread read notifications
 
