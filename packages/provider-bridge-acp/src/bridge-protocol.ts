@@ -9,6 +9,8 @@ import {
   providerInstallationStatusParamsSchema,
   providerMaintenanceParamsSchema,
   modelListParamsSchema as canonicalModelListParamsSchema,
+  sessionDestinationParamsSchema,
+  sessionFilesParamsSchema,
   skillsConfigureParamsSchema,
   threadDiscardParamsSchema as canonicalThreadDiscardParamsSchema,
   threadForkParamsSchema as canonicalThreadForkParamsSchema,
@@ -36,6 +38,10 @@ export type AcpBridgePermissionCli = z.infer<
 const acpModelListParamsSchema = canonicalModelListParamsSchema.extend({
   providerOptions: z.record(z.string(), z.unknown()).optional(),
 });
+
+const acpSessionTransferFields = {
+  providerOptions: z.record(z.string(), z.unknown()).optional(),
+};
 
 export const acpBridgeCommandSchema = z.discriminatedUnion("method", [
   z.object({
@@ -89,6 +95,14 @@ export const acpBridgeCommandSchema = z.discriminatedUnion("method", [
   z.object({
     method: z.literal("thread/discard"),
     params: canonicalThreadDiscardParamsSchema,
+  }),
+  z.object({
+    method: z.literal("session/files"),
+    params: sessionFilesParamsSchema.extend(acpSessionTransferFields),
+  }),
+  z.object({
+    method: z.literal("session/destination"),
+    params: sessionDestinationParamsSchema.extend(acpSessionTransferFields),
   }),
   z.object({
     method: z.literal("skills/configure"),

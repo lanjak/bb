@@ -214,6 +214,29 @@ Rules:
   outline, and `bb thread log`.
 - Third-party ACP agents (for example Amp) register the same way, with a
   bridge built from the published ACP kit.
+- An ACP agent opts in to thread moves between machines by advertising
+  `agentCapabilities.loadSession = true` and
+  `agentCapabilities._meta["bb.dev/sessionTransfer"] = { "version": 1 }` in its
+  `initialize` result, and by implementing two extension methods. The ACP
+  bridge answers the bridge requests `session/files` and `session/destination`
+  by calling them on a short-lived instance of the agent, and refuses with a
+  clear error when the agent does not declare the capability. It validates
+  every answer: absolute paths, a `directory` inside `root`, and safe
+  `relativePath` values (forward slashes, no `..`).
+  - `_bb.dev/session/files`, params `{ sessionId, cwd }`, result
+    `{ files: [{ path, relativePath }] }`: every regular file that makes up the
+    session now, with `path` absolute and `relativePath` relative to the
+    session's own root folder. An unknown session returns `{ files: [] }`. A
+    symlink or unreadable entry is an error.
+  - `_bb.dev/session/destination`, params `{ sessionId, cwd }`, result
+    `{ root, directory }`: the agent's session store root and the absolute
+    directory inside it where those relative paths must be placed for this
+    session and `cwd`.
+
+  After the files are placed, bb resumes the session with the standard
+  `session/load` and the target `cwd`. The agent must accept a session whose
+  files another machine wrote and whose recorded `cwd` differs from the new
+  one, and use the new `cwd` for tools from then on.
 
 ## 2. Bridge (plugin `bb.host` artifact, runs on the host)
 

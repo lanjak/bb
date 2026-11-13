@@ -383,6 +383,7 @@ describe("agent capabilities", () => {
         additionalDirectories: false,
       },
       logout: false,
+      sessionTransfer: false,
       authMethods: [
         {
           id: "cached_token",
@@ -401,6 +402,25 @@ describe("agent capabilities", () => {
       ],
       meta: { "x.ai/fs_notify": true },
     });
+  });
+
+  it("declares session transfer only for loadSession with a version 1 declaration", () => {
+    const read = (agentCapabilities: Record<string, unknown>) =>
+      readAcpAgentCapabilities({ protocolVersion: 1, agentCapabilities })
+        .sessionTransfer;
+    const declaration = { "bb.dev/sessionTransfer": { version: 1 } };
+    expect(read({ loadSession: true, _meta: declaration })).toBe(true);
+    expect(read({ _meta: declaration })).toBe(false);
+    expect(read({ loadSession: true })).toBe(false);
+    expect(
+      read({
+        loadSession: true,
+        _meta: { "bb.dev/sessionTransfer": { version: 2 } },
+      }),
+    ).toBe(false);
+    expect(
+      read({ loadSession: true, _meta: { "bb.dev/sessionTransfer": true } }),
+    ).toBe(false);
   });
 
   it("refuses an agent that answers in another protocol generation", () => {

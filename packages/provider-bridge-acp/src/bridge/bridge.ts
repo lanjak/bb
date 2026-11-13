@@ -15,6 +15,16 @@ import type {
   SessionOptionSelections,
   ThreadSessionOption,
 } from "@bb/domain";
+import {
+  ACP_SESSION_DESTINATION_METHOD,
+  ACP_SESSION_FILES_METHOD,
+  decodeAcpSessionDestination,
+  decodeAcpSessionFiles,
+} from "./session-transfer.js";
+import {
+  ACP_SESSION_TRANSFER_META_KEY,
+  ACP_SESSION_TRANSFER_VERSION,
+} from "../client/capabilities.js";
 import { acpLaunchSpecSchema, type AcpLaunchSpec } from "../launch-spec.js";
 import {
   BRIDGE_INBOUND_REQUEST_METHODS,
@@ -615,6 +625,7 @@ const ACP_DEFAULT_MODEL: AvailableModel = {
 };
 
 const MODEL_LIST_TIMEOUT_MS = 30_000;
+const SESSION_TRANSFER_TIMEOUT_MS = 60_000;
 const ACP_NATIVE_REASONING_DISCOVERY_TIMEOUT_MS = 5_000;
 const AUTH_REQUIRED_MODEL_LIST_ERROR_MESSAGE =
   "ACP agent is not authenticated.";
@@ -3820,6 +3831,84 @@ function maintenanceTarget(
   };
 }
 
+async function handleSessionTransferRequest(
+  request: AcpBridgeCommand & {
+    id: string | number;
+    method: "session/files" | "session/destination";
+  },
+): Promise<void> {
+  const launchSpec = decodeLaunchSpec(request.params.providerOptions);
+  if (launchSpec === null) {
+    sendError(
+      request.id,
+      BRIDGE_JSON_RPC_ERRORS.INVALID_PARAMS,
+      `Invalid params for "${request.method}": providerOptions.acpLaunchSpec is required by the ACP bridge`,
+    );
+    return;
+  }
+  const childEnv = {
+    ...withoutBridgeRuntimeEnv(process.env),
+    ...launchSpec.env,
+    ...(request.params.options.envVars ?? {}),
+  };
+  let connection: AcpAgentConnection | undefined;
+  try {
+    connection = createBridgeAgentConnection({
+      command: launchSpec.command,
+      args: launchSpec.args,
+      cwd: request.params.cwd,
+      env: childEnv,
+      recordThreadId: null,
+      onNotification: () => {},
+      onRequest: (_method, _params, responder) => {
+        responder.error(
+          -32601,
+          "bb is transferring a session and does not serve requests",
+        );
+      },
+      onExit: () => {},
+    });
+    const capabilities = await requestAcpInitialize(connection, {
+      parameterizedModelPicker: false,
+      fsAccess: false,
+    });
+    if (!capabilities.sessionTransfer) {
+      throw new Error(
+        `ACP agent "${launchSpec.displayName}" does not declare session transfer support (agentCapabilities.loadSession with _meta["${ACP_SESSION_TRANSFER_META_KEY}"].version ${ACP_SESSION_TRANSFER_VERSION}).`,
+      );
+    }
+    const params = {
+      sessionId: request.params.providerThreadId,
+      cwd: request.params.cwd,
+    };
+    if (request.method === "session/files") {
+      const answer = await connection.request({
+        method: ACP_SESSION_FILES_METHOD,
+        params,
+        resultSchema: z.unknown(),
+        timeoutMs: SESSION_TRANSFER_TIMEOUT_MS,
+      });
+      sendResult(request.id, { files: decodeAcpSessionFiles(answer) });
+    } else {
+      const answer = await connection.request({
+        method: ACP_SESSION_DESTINATION_METHOD,
+        params,
+        resultSchema: z.unknown(),
+        timeoutMs: SESSION_TRANSFER_TIMEOUT_MS,
+      });
+      sendResult(request.id, decodeAcpSessionDestination(answer));
+    }
+  } catch (error) {
+    sendError(
+      request.id,
+      -32000,
+      error instanceof Error ? error.message : String(error),
+    );
+  } finally {
+    await connection?.kill().catch(() => undefined);
+  }
+}
+
 async function handleRequest(
   request: AcpBridgeCommand & { id: string | number },
 ): Promise<void> {
@@ -3839,7 +3928,7 @@ async function handleRequest(
           steerMode: "queue",
           skills: { configure: true },
           commands: { list: false },
-          sessionTransfer: false,
+          sessionTransfer: true,
         },
       };
       sendResult(request.id, result);
@@ -4060,6 +4149,11 @@ async function handleRequest(
 
     case "thread/discard":
       sendResult(request.id, { ok: true });
+      return;
+
+    case "session/files":
+    case "session/destination":
+      await handleSessionTransferRequest(request);
       return;
 
     case "skills/configure":

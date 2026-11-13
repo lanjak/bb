@@ -81,7 +81,9 @@ function parseArgs(argv) {
     }
   }
   if (!args.recording || !args.dialect || !args.state) {
-    throw new Error("usage: --recording <dir> --dialect <json-rpc|claude-cli|pi-rpc> --state <dir>");
+    throw new Error(
+      "usage: --recording <dir> --dialect <json-rpc|claude-cli|pi-rpc> --state <dir>",
+    );
   }
   return args;
 }
@@ -93,7 +95,10 @@ function readLane(dir, direction) {
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line))
-    .map((entry) => ({ ...entry, run: typeof entry.run === "number" ? entry.run : 0 }));
+    .map((entry) => ({
+      ...entry,
+      run: typeof entry.run === "number" ? entry.run : 0,
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -103,7 +108,8 @@ function readLane(dir, direction) {
 const DIALECTS = {
   "json-rpc": {
     classify(message) {
-      const hasId = typeof message.id === "string" || typeof message.id === "number";
+      const hasId =
+        typeof message.id === "string" || typeof message.id === "number";
       if (hasId && typeof message.method === "string") {
         return { kind: "request", id: message.id, key: message.method };
       }
@@ -135,7 +141,11 @@ const DIALECTS = {
         };
       }
       if (message.type === "control_response") {
-        return { kind: "response", id: message.response?.request_id, key: "control_response" };
+        return {
+          kind: "response",
+          id: message.response?.request_id,
+          key: "control_response",
+        };
       }
       return {
         kind: "notification",
@@ -143,7 +153,10 @@ const DIALECTS = {
       };
     },
     isInitialize(classified) {
-      return classified.kind === "request" && classified.key === "control_request:initialize";
+      return (
+        classified.kind === "request" &&
+        classified.key === "control_request:initialize"
+      );
     },
     withResponseId(message, id) {
       return { ...message, response: { ...message.response, request_id: id } };
@@ -183,9 +196,18 @@ const DIALECTS = {
           };
         }
         if (channel.kind === "tool-result" || channel.kind === "reply") {
-          return { kind: "response", id: channel.id, key: "channel:response", channel: true };
+          return {
+            kind: "response",
+            id: channel.id,
+            key: "channel:response",
+            channel: true,
+          };
         }
-        return { kind: "notification", key: `channel:${channel.kind ?? "?"}`, channel: true };
+        return {
+          kind: "notification",
+          key: `channel:${channel.kind ?? "?"}`,
+          channel: true,
+        };
       }
       if (message.type === "response") {
         return { kind: "response", id: message.id, key: "response" };
@@ -239,8 +261,14 @@ function buildSegments(entries, dialect) {
   let current = null;
   for (const entry of entries) {
     const message = parseLine(entry.line);
-    const classified = message === null ? { kind: "raw", key: "raw" } : dialect.classify(message);
-    const startsSegment = entry.dir === "bridge→provider" && message !== null && dialect.isInitialize(classified);
+    const classified =
+      message === null
+        ? { kind: "raw", key: "raw" }
+        : dialect.classify(message);
+    const startsSegment =
+      entry.dir === "bridge→provider" &&
+      message !== null &&
+      dialect.isInitialize(classified);
     if (current === null || startsSegment) {
       current = [];
       segments.push(current);
@@ -294,7 +322,10 @@ function readCursor(stateDir) {
 function cursorAllows(cursor, entry) {
   if (cursor === null) return true;
   if (cursor === false) return false;
-  return entry.run < cursor.run || (entry.run === cursor.run && entry.seq < cursor.seq);
+  return (
+    entry.run < cursor.run ||
+    (entry.run === cursor.run && entry.seq < cursor.seq)
+  );
 }
 
 function firstSessionDefiningKey(script) {
@@ -456,9 +487,12 @@ function main() {
     process.argv.includes("--no-session-persistence");
   const segmentIndex = diagnosticFork ? null : claimSegmentIndex(args.state);
   let script = segmentIndex === null ? [] : (segments[segmentIndex] ?? []);
-  const log = (text) => process.stderr.write(`[replay-child #${segmentIndex}] ${text}\n`);
+  const log = (text) =>
+    process.stderr.write(`[replay-child #${segmentIndex}] ${text}\n`);
   if (script.length === 0) {
-    log(`no recorded segment ${segmentIndex} (recording has ${segments.length}); answering generically`);
+    log(
+      `no recorded segment ${segmentIndex} (recording has ${segments.length}); answering generically`,
+    );
   }
   const segmentSessionKey = firstSessionDefiningKey(script);
   let sawSessionDefiningRequest = false;
@@ -478,7 +512,11 @@ function main() {
   const channel = dialect.channel ?? null;
   const channelSocket = channel ? connectChannel(channel) : null;
   function emit(message) {
-    if (channel && typeof message[channel.key] === "object" && message[channel.key] !== null) {
+    if (
+      channel &&
+      typeof message[channel.key] === "object" &&
+      message[channel.key] !== null
+    ) {
       channelSocket.write(`${JSON.stringify(message[channel.key])}\n`);
       return;
     }
@@ -489,7 +527,12 @@ function main() {
     const { message, classified } = step;
     if (classified.kind === "response") {
       const liveId = liveIdByRecordedId.get(String(classified.id));
-      emit(dialect.withResponseId(message, liveId === undefined ? classified.id : liveId));
+      emit(
+        dialect.withResponseId(
+          message,
+          liveId === undefined ? classified.id : liveId,
+        ),
+      );
       return;
     }
     if (
@@ -500,7 +543,10 @@ function main() {
     ) {
       emit({
         ...message,
-        request: { ...message.request, callback_id: hookIds.get(message.request.callback_id) },
+        request: {
+          ...message.request,
+          callback_id: hookIds.get(message.request.callback_id),
+        },
       });
       return;
     }
@@ -586,7 +632,10 @@ function main() {
       }
       if (step.classified.kind === "request") {
         liveIdByRecordedId.set(String(step.classified.id), live.classified.id);
-        if (dialect.isInitialize(step.classified) && args.dialect === "claude-cli") {
+        if (
+          dialect.isInitialize(step.classified) &&
+          args.dialect === "claude-cli"
+        ) {
           hookIds = hookCallbackIdMap(step.message, live.message);
         }
       }
@@ -629,7 +678,9 @@ function main() {
             emitRecorded(between);
           }
         }
-        log(`bridge skipped recorded ${skipped.join(", ")}; resuming at ${live.classified.key}`);
+        log(
+          `bridge skipped recorded ${skipped.join(", ")}; resuming at ${live.classified.key}`,
+        );
         position = index;
         advance();
         armStall();
@@ -640,10 +691,14 @@ function main() {
 
   function answerGenerically(live, reason) {
     if (live.classified.kind === "request") {
-      log(`${reason}: answering ${live.classified.key} (${String(live.classified.id)}) generically`);
+      log(
+        `${reason}: answering ${live.classified.key} (${String(live.classified.id)}) generically`,
+      );
       emit(dialect.genericResponse(live.classified.id, live.classified));
     } else {
-      log(`${reason}: dropping unmatched ${live.classified.kind} ${live.classified.key}`);
+      log(
+        `${reason}: dropping unmatched ${live.classified.kind} ${live.classified.key}`,
+      );
     }
   }
 
@@ -653,7 +708,9 @@ function main() {
     const expected = script[position];
     log(
       `stalled for ${STALL_MS}ms at step ${position}/${script.length}` +
-        (expected ? ` (expecting ${expected.dir} ${expected.classified.key})` : ""),
+        (expected
+          ? ` (expecting ${expected.dir} ${expected.classified.key})`
+          : ""),
     );
     for (const live of pendingLive.splice(0)) {
       answerGenerically(live, "stall");
@@ -665,7 +722,8 @@ function main() {
     if (stallTimer !== null) clearTimeout(stallTimer);
     if (lookaheadTimer !== null) clearTimeout(lookaheadTimer);
     stallTimer = pendingLive.length > 0 ? setTimeout(onStall, STALL_MS) : null;
-    lookaheadTimer = pendingLive.length > 0 ? setTimeout(lookAhead, LOOKAHEAD_MS) : null;
+    lookaheadTimer =
+      pendingLive.length > 0 ? setTimeout(lookAhead, LOOKAHEAD_MS) : null;
   }
 
   /**
@@ -692,7 +750,10 @@ function main() {
       SESSION_DEFINING_KEY.test(live.classified.key)
     ) {
       sawSessionDefiningRequest = true;
-      if (segmentSessionKey !== null && live.classified.key !== segmentSessionKey) {
+      if (
+        segmentSessionKey !== null &&
+        live.classified.key !== segmentSessionKey
+      ) {
         releaseSegment(live);
       }
     }
