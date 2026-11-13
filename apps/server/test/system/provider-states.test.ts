@@ -302,6 +302,7 @@ describe("getProviderStates", () => {
               supportsNativeUserQuestion: false,
               supportsFork: false,
               supportsSessionRewind: false,
+              supportsSessionTransfer: false,
               modelCatalogScope: "workspace",
               permissionModes: ["full"],
             },

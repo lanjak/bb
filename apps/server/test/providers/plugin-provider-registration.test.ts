@@ -59,6 +59,7 @@ describe("buildPluginProviderRegistration", () => {
         supportsNativeUserQuestion: true,
         supportsFork: true,
         supportsSessionRewind: true,
+        supportsSessionTransfer: false,
         modelCatalogScope: "workspace",
         permissionModes: ["accept-edits", "full"],
       },
@@ -259,19 +260,23 @@ describe("buildPluginProviderRegistration", () => {
       return {
         supportsFork: capabilities.supportsFork,
         supportsSessionRewind: capabilities.supportsSessionRewind,
+        supportsSessionTransfer: false,
       };
     };
     expect(projection("none")).toStrictEqual({
       supportsFork: false,
       supportsSessionRewind: false,
+      supportsSessionTransfer: false,
     });
     expect(projection("tip")).toStrictEqual({
       supportsFork: true,
       supportsSessionRewind: false,
+      supportsSessionTransfer: false,
     });
     expect(projection("checkpoint")).toStrictEqual({
       supportsFork: true,
       supportsSessionRewind: true,
+      supportsSessionTransfer: false,
     });
   });
 

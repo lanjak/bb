@@ -21,9 +21,15 @@ import {
   type PluginThreadActionsInlineItem,
 } from "@get-bb/plugin-sdk";
 import type { ThreadListEntry } from "@bb/domain";
-import { makeThreadListEntry } from "@bb/test-helpers/domain-fixtures";
+import {
+  makeProviderInfo,
+  makeThreadListEntry,
+} from "@bb/test-helpers/domain-fixtures";
 import { CompactViewportOverrideProvider } from "@bb/shared-ui/hooks/use-compact-viewport";
-import { threadQueryKey } from "@/hooks/queries/query-keys";
+import {
+  SYSTEM_EXECUTION_OPTIONS_QUERY_KEY,
+  threadQueryKey,
+} from "@/hooks/queries/query-keys";
 import {
   resetPluginSlotStoreForTest,
   setPluginSlotRegistrations,
@@ -277,6 +283,14 @@ function renderSurface(
   const queryClient = new QueryClient();
   const store = createStore();
   if (layout !== null) store.set(splitLayoutAtom, layout);
+  queryClient.setQueryData([SYSTEM_EXECUTION_OPTIONS_QUERY_KEY], {
+    providers: [
+      makeProviderInfo({
+        id: options.thread.providerId,
+        capabilities: { supportsSessionTransfer: true },
+      }),
+    ],
+  });
   if (cached) {
     queryClient.setQueryData(threadQueryKey(options.thread.id), options.thread);
   }

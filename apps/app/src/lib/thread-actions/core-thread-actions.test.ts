@@ -2,9 +2,12 @@
 
 import { QueryClient } from "@tanstack/react-query";
 import type { PluginThreadActionTarget } from "@get-bb/plugin-sdk";
-import { makeThread } from "@bb/test-helpers/domain-fixtures";
+import { makeProviderInfo, makeThread } from "@bb/test-helpers/domain-fixtures";
 import { describe, expect, it, vi } from "vitest";
-import { threadQueryKey } from "@/hooks/queries/query-keys";
+import {
+  SYSTEM_EXECUTION_OPTIONS_QUERY_KEY,
+  threadQueryKey,
+} from "@/hooks/queries/query-keys";
 import { CORE_THREAD_ACTIONS } from "./core-thread-actions";
 
 const moveAction = CORE_THREAD_ACTIONS.find((action) => action.id === "move");
@@ -14,6 +17,19 @@ function moveItem(
   status: PluginThreadActionTarget["status"],
 ) {
   const queryClient = new QueryClient();
+  queryClient.setQueryData([SYSTEM_EXECUTION_OPTIONS_QUERY_KEY], {
+    providers: [
+      makeProviderInfo({
+        id: "claude-code",
+        capabilities: { supportsSessionTransfer: true },
+      }),
+      makeProviderInfo({
+        id: "acp-mover",
+        capabilities: { supportsSessionTransfer: true },
+      }),
+      makeProviderInfo({ id: "opencode" }),
+    ],
+  });
   queryClient.setQueryData(
     threadQueryKey("thr_test"),
     makeThread({ providerId }),
@@ -39,15 +55,16 @@ function moveItem(
 }
 
 describe("move thread action", () => {
-  it("is offered for claude-code and codex threads", () => {
+  it("is offered for providers that support session transfer", () => {
     expect(moveItem("claude-code", "idle").item?.disabled).toBe(false);
-    expect(moveItem("codex", "idle").item?.label).toBe(
+    expect(moveItem("acp-mover", "idle").item?.label).toBe(
       "Move to another machine...",
     );
   });
 
-  it("is hidden for other providers", () => {
+  it("is hidden for providers without session transfer or unknown providers", () => {
     expect(moveItem("opencode", "idle").item).toBeNull();
+    expect(moveItem("unknown", "idle").item).toBeNull();
   });
 
   it("is disabled with a reason while the thread is not idle", () => {

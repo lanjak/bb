@@ -105,6 +105,8 @@ describe("ThreadMoveDialog", () => {
   it("moves the thread to the selected environment and closes", async () => {
     vi.mocked(sdk.threads.experimental_move).mockResolvedValue({
       moveId: "move_1",
+      groupId: "mvg_1",
+      threadIds: ["thr_test"],
       threadId: "thr_test",
       phase: "done",
       sourceEnvironmentId: "env_local",
@@ -157,6 +159,8 @@ describe("ThreadMoveDialog", () => {
   it("shows the failure message of a move that ended unfinished", async () => {
     vi.mocked(sdk.threads.experimental_move).mockResolvedValue({
       moveId: "move_1",
+      groupId: "mvg_1",
+      threadIds: ["thr_test"],
       threadId: "thr_test",
       phase: "cleanup_pending",
       sourceEnvironmentId: "env_local",
