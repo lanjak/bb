@@ -406,6 +406,34 @@ describe("thread transfer", () => {
     await expect(
       fs.stat(path.join(source.dataDir, "thread-transfer", "t1")),
     ).rejects.toThrow();
+    expect(
+      await fs.readFile(
+        path.join(
+          source.dataDir,
+          "thread-transfer",
+          "set-aside",
+          "t1",
+          "storage",
+          "notes",
+          "n.md",
+        ),
+        "utf8",
+      ),
+    ).toBe("note\n");
+    await expect(
+      fs.stat(path.join(source.options.threadStorageRootPath, "thr_1")),
+    ).rejects.toThrow();
+    expect(
+      await fs.readFile(
+        path.join(
+          target.options.threadStorageRootPath,
+          "thr_1",
+          "notes",
+          "n.md",
+        ),
+        "utf8",
+      ),
+    ).toBe("note\n");
 
     const finishTarget = {
       type: "thread.transfer.finish" as const,
@@ -649,5 +677,76 @@ describe("thread transfer", () => {
     ).rejects.toThrow();
     expect(await fs.readFile(conflict, "utf8")).toBe("sub\n");
     expect(files.length).toBe(3);
+  });
+
+  it("resumes the thread storage set-aside and keeps the target storage", async () => {
+    await exportFrom(source);
+    const finish = {
+      type: "thread.transfer.finish" as const,
+      transferId: "t1",
+      bridgeLaunch,
+      sessionEnvironment: {
+        projectId: "proj_1",
+        environmentId: "env_1",
+        contributedEnv: [],
+      },
+      setAsideSession: session,
+    };
+    const setAsideStorage = path.join(
+      source.dataDir,
+      "thread-transfer",
+      "set-aside",
+      "t1",
+      "storage",
+      "notes",
+      "n.md",
+    );
+    await fs.mkdir(path.dirname(setAsideStorage), { recursive: true });
+    await fs.writeFile(setAsideStorage, "different");
+    const storageDirectory = path.join(
+      source.options.threadStorageRootPath,
+      "thr_1",
+    );
+    await expect(finishThreadTransfer(finish, source.options)).rejects.toThrow(
+      /differs/,
+    );
+    expect(
+      await fs.readFile(path.join(storageDirectory, "notes", "n.md"), "utf8"),
+    ).toBe("note\n");
+    await fs.rm(setAsideStorage);
+    await expect(finishThreadTransfer(finish, source.options)).resolves.toEqual(
+      { ok: true },
+    );
+    expect(await fs.readFile(setAsideStorage, "utf8")).toBe("note\n");
+    await expect(fs.stat(storageDirectory)).rejects.toThrow();
+  });
+
+  it("leaves thread storage alone when no session is set aside", async () => {
+    await exportFrom(source);
+    await finishThreadTransfer(
+      {
+        type: "thread.transfer.finish",
+        transferId: "t1",
+        bridgeLaunch: null,
+        sessionEnvironment: {
+          projectId: "proj_1",
+          environmentId: "env_1",
+          contributedEnv: [],
+        },
+        setAsideSession: null,
+      },
+      source.options,
+    );
+    expect(
+      await fs.readFile(
+        path.join(
+          source.options.threadStorageRootPath,
+          "thr_1",
+          "notes",
+          "n.md",
+        ),
+        "utf8",
+      ),
+    ).toBe("note\n");
   });
 });
