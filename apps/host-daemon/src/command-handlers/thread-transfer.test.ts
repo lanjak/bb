@@ -68,7 +68,7 @@ async function makeSide(name: string): Promise<Side> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), `bb-transfer-${name}-`));
   roots.push(root);
   const dataDir = path.join(root, "data");
-  const sessionDir = path.join(root, "claude-projects", "-proj");
+  const sessionDir = path.join(root, "claude", "projects", "-proj");
   await fs.mkdir(path.join(dataDir, "thread-storage"), { recursive: true });
   await fs.mkdir(sessionDir, { recursive: true });
   return {
@@ -93,7 +93,10 @@ async function makeSide(name: string): Promise<Side> {
         }
         return { files };
       },
-      resolveSessionDestination: async () => ({ directory: sessionDir }),
+      resolveSessionDestination: async () => ({
+        directory: sessionDir,
+        root: path.dirname(path.dirname(sessionDir)),
+      }),
     },
   };
 }
@@ -121,7 +124,13 @@ async function seedSource(side: Side): Promise<void> {
 
 async function exportFrom(source: Side, transferId = "t1") {
   return exportThreadTransfer(
-    { type: "thread.transfer.export", transferId, bridgeLaunch, ...session },
+    {
+      type: "thread.transfer.export",
+      transferId,
+      bridgeLaunch,
+      envVars: {},
+      ...session,
+    },
     source.options,
   );
 }
@@ -167,6 +176,7 @@ function commitCommand(
     type: "thread.transfer.commit" as const,
     transferId,
     bridgeLaunch,
+    envVars: {},
     files,
     ...session,
   };
@@ -352,6 +362,7 @@ describe("thread transfer", () => {
       type: "thread.transfer.finish" as const,
       transferId: "t1",
       bridgeLaunch,
+      envVars: {},
       setAsideSession: session,
     };
     await expect(
@@ -388,6 +399,7 @@ describe("thread transfer", () => {
       type: "thread.transfer.finish" as const,
       transferId: "t1",
       bridgeLaunch: null,
+      envVars: {},
       setAsideSession: null,
     };
     await finishThreadTransfer(finishTarget, target.options);
@@ -492,5 +504,130 @@ describe("thread transfer", () => {
       commitThreadTransfer(commitCommand(files), target.options),
     ).rejects.toThrow(/symbolic link/);
     expect(await fs.readFile(outside, "utf8")).toBe("keep");
+  });
+
+  it("refuses a destination whose ancestor below the provider root is a symlink", async () => {
+    const { files } = await exportFrom(source);
+    await copyAll(source, target, files);
+    const outside = path.join(target.dataDir, "outside");
+    await fs.mkdir(path.join(outside, "-proj"), { recursive: true });
+    const projects = path.dirname(target.sessionDir);
+    await fs.rm(projects, { recursive: true });
+    await fs.symlink(outside, projects);
+    await expect(
+      commitThreadTransfer(commitCommand(files), target.options),
+    ).rejects.toThrow(/symbolic link/);
+    expect(await fs.readdir(path.join(outside, "-proj"))).toEqual([]);
+  });
+
+  it("refuses to overwrite a file that appears after planning and keeps it on rollback", async () => {
+    const { files } = await exportFrom(source);
+    await copyAll(source, target, files);
+    const foreign = path.join(target.sessionDir, "s1.jsonl");
+    const realpath = fs.realpath.bind(fs);
+    let calls = 0;
+    const spy = vi.spyOn(fs, "realpath").mockImplementation(async (...args) => {
+      calls += 1;
+      if (calls === 3) {
+        await fs.writeFile(foreign, "foreign\n");
+      }
+      return realpath(...args);
+    });
+    await expect(
+      commitThreadTransfer(commitCommand(files), target.options),
+    ).rejects.toThrow(/Unexpected file appeared|unexpected file/);
+    spy.mockRestore();
+    expect(await fs.readFile(foreign, "utf8")).toBe("foreign\n");
+    await expect(
+      fs.stat(path.join(target.sessionDir, "s1", "subagents", "a.jsonl")),
+    ).rejects.toThrow();
+  });
+
+  it("seals staging when commit starts so a racing or later write cannot change placed bytes", async () => {
+    const { files } = await exportFrom(source);
+    await copyAll(source, target, files);
+    const write = (text: string) =>
+      writeThreadTransferChunk(
+        {
+          type: "thread.transfer.write_chunk",
+          transferId: "t1",
+          relativePath: "session/s1.jsonl",
+          offset: 0,
+          contentBase64: Buffer.from(text).toString("base64"),
+        },
+        target.options,
+      );
+    const results = await Promise.allSettled([
+      commitThreadTransfer(commitCommand(files), target.options),
+      write("TRANSCRIPT\n"),
+    ]);
+    const placed = path.join(target.sessionDir, "s1.jsonl");
+    const placedText = await fs.readFile(placed, "utf8").catch(() => null);
+    expect(placedText === null || placedText === "transcript\n").toBe(true);
+    if (results[0].status === "fulfilled") {
+      expect(placedText).toBe("transcript\n");
+    }
+    await expect(write("late\n")).rejects.toThrow(/sealed|gap/);
+  });
+
+  it("enforces the staged file count limit during writes", async () => {
+    const write = (name: string) =>
+      writeThreadTransferChunk(
+        {
+          type: "thread.transfer.write_chunk",
+          transferId: "t1",
+          relativePath: `session/f${name}`,
+          offset: 0,
+          contentBase64: "",
+        },
+        target.options,
+      );
+    for (let start = 0; start < 10_000; start += 500) {
+      await Promise.all(
+        Array.from({ length: 500 }, (_, i) => write(String(start + i))),
+      );
+    }
+    await expect(write("extra")).rejects.toThrow(/exceeds/);
+    await expect(write("5")).resolves.toEqual({ sizeBytes: 0 });
+  }, 60_000);
+
+  it("resumes set-aside after a failure partway through", async () => {
+    const { files } = await exportFrom(source);
+    const finish = {
+      type: "thread.transfer.finish" as const,
+      transferId: "t1",
+      bridgeLaunch,
+      envVars: {},
+      setAsideSession: session,
+    };
+    const conflict = path.join(
+      source.dataDir,
+      "thread-transfer",
+      "set-aside",
+      "t1",
+      "session",
+      "s1",
+      "subagents",
+      "a.jsonl",
+    );
+    await fs.mkdir(path.dirname(conflict), { recursive: true });
+    await fs.writeFile(conflict, "different");
+    await expect(finishThreadTransfer(finish, source.options)).rejects.toThrow(
+      /differs/,
+    );
+    await expect(
+      fs.stat(path.join(source.sessionDir, "s1.jsonl")),
+    ).rejects.toThrow();
+    await fs.rm(conflict);
+    await expect(finishThreadTransfer(finish, source.options)).resolves.toEqual(
+      {
+        ok: true,
+      },
+    );
+    await expect(
+      fs.stat(path.join(source.sessionDir, "s1", "subagents", "a.jsonl")),
+    ).rejects.toThrow();
+    expect(await fs.readFile(conflict, "utf8")).toBe("sub\n");
+    expect(files.length).toBe(3);
   });
 });

@@ -349,7 +349,7 @@ export function createFakeRuntime() {
       return { files: [] };
     },
     async resolveSessionDestination() {
-      return { directory: "/tmp/unexpected-session-destination" };
+      return { directory: "/tmp/unexpected-session-destination", root: "/tmp" };
     },
     async providerHealth() {
       return { supported: false as const };

@@ -302,7 +302,7 @@ function createFakeRuntime(): AgentRuntime {
       return { files: [] };
     },
     async resolveSessionDestination() {
-      return { directory: "/tmp/session-destination" };
+      return { directory: "/tmp/session-destination", root: "/tmp" };
     },
     async providerHealth() {
       return { supported: false as const };
