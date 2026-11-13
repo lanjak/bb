@@ -14,6 +14,8 @@ import {
   providerInstallationRunResultSchema,
   providerInstallationStatusSchema,
   providerUsageResultSchema,
+  sessionDestinationResultSchema,
+  sessionFilesResultSchema,
   ThreadEventGrammar,
   threadIdentityResultSchema,
 } from "@bb/provider-bridge-protocol";
@@ -67,6 +69,7 @@ import type {
   AgentRuntimeSkillRoot,
   ReapedIdleProviderSession,
   RunTurnResult,
+  SessionTransferArgs,
 } from "./types.js";
 import {
   resolveContributedEnvironment,
@@ -723,6 +726,36 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
     throw new Error(
       `Adapter "${args.providerId}" returned no provider request for ${args.commandType}: ${args.plan.reason}`,
     );
+  }
+
+  async function requestSessionTransfer<TResult>(
+    type: "session/files" | "session/destination",
+    args: SessionTransferArgs,
+    resultSchema: z.ZodType<TResult>,
+  ): Promise<TResult> {
+    await runtime.ensureProvider({
+      providerId: args.providerId,
+      bridgeLaunch: args.bridgeLaunch,
+    });
+    const proc = providerProcesses.requireProviderProcess({
+      processKey: resolveProviderProcessKey({
+        bridgeLaunch: args.bridgeLaunch,
+        providerId: args.providerId,
+      }),
+      providerId: args.providerId,
+    });
+    const plan = proc.adapter.buildCommandPlan({
+      type,
+      providerThreadId: args.providerThreadId,
+      cwd: args.cwd,
+      envVars: {},
+    });
+    if (plan.kind === "noop") {
+      throw new Error(
+        `Provider ${args.providerId} does not support moving sessions`,
+      );
+    }
+    return await sendCommand({ proc, message: plan, resultSchema });
   }
 
   function setThreadRuntimeConfig(
@@ -2484,6 +2517,22 @@ export function createAgentRuntime(options: AgentRuntimeOptions): AgentRuntime {
         message: plan,
         resultSchema: commandListResultSchema,
       });
+    },
+
+    async listSessionFiles(args) {
+      return await requestSessionTransfer(
+        "session/files",
+        args,
+        sessionFilesResultSchema,
+      );
+    },
+
+    async resolveSessionDestination(args) {
+      return await requestSessionTransfer(
+        "session/destination",
+        args,
+        sessionDestinationResultSchema,
+      );
     },
 
     async providerHealth({ providerId, bridgeLaunch, cwd }) {

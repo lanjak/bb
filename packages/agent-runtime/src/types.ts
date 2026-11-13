@@ -18,6 +18,8 @@ import type {
 import type {
   ProviderHealthResult,
   CommandListResult,
+  SessionDestinationResult,
+  SessionFilesResult,
   ProviderInstallationRunResult,
   ProviderInstallationStatus,
   ProviderUsageResult,
@@ -303,6 +305,13 @@ export interface ListCommandsArgs {
   cwd: string;
 }
 
+export interface SessionTransferArgs {
+  providerId: string;
+  bridgeLaunch: AgentRuntimeBridgeLaunch;
+  providerThreadId: string;
+  cwd: string;
+}
+
 interface ProviderMaintenanceArgs {
   providerId: string;
   bridgeLaunch: AgentRuntimeBridgeLaunch;
@@ -347,6 +356,12 @@ export interface AgentRuntime {
   }>;
 
   listCommands(args: ListCommandsArgs): Promise<CommandListResult>;
+
+  listSessionFiles(args: SessionTransferArgs): Promise<SessionFilesResult>;
+
+  resolveSessionDestination(
+    args: SessionTransferArgs,
+  ): Promise<SessionDestinationResult>;
 
   providerHealth(args: ProviderMaintenanceArgs): Promise<ProviderHealthResult>;
 

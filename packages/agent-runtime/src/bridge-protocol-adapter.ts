@@ -230,6 +230,26 @@ export function createBridgeProtocolAdapter(
             method: BRIDGE_REQUEST_METHODS.commandList,
             params: cwdAndStaticProviderOptions(command.cwd),
           };
+        case "session/files":
+        case "session/destination":
+          if (!handshake.sessionTransfer) {
+            return { kind: "noop", reason: "sessionTransfer not advertised" };
+          }
+          return {
+            kind: "request",
+            method:
+              command.type === "session/files"
+                ? BRIDGE_REQUEST_METHODS.sessionFiles
+                : BRIDGE_REQUEST_METHODS.sessionDestination,
+            params: {
+              providerThreadId: command.providerThreadId,
+              cwd: command.cwd,
+              options: { envVars: command.envVars },
+              ...(options.staticProviderOptions !== undefined
+                ? { providerOptions: options.staticProviderOptions }
+                : {}),
+            },
+          };
         case "provider/health":
           return {
             kind: "request",

@@ -46,6 +46,12 @@ export type AdapterCommand =
       envVars: Record<string, string>;
     }
   | { type: "commands/list"; cwd: string }
+  | {
+      type: "session/files" | "session/destination";
+      providerThreadId: string;
+      cwd: string;
+      envVars: Record<string, string>;
+    }
   | { type: "provider/health"; cwd?: string }
   | { type: "provider/usage"; cwd?: string }
   | {
