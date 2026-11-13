@@ -731,6 +731,7 @@ export const threadMoves = sqliteTable(
   "thread_moves",
   {
     id: text("id").primaryKey(),
+    groupId: text("group_id").notNull(),
     threadId: text("thread_id")
       .notNull()
       .references(() => threads.id, { onDelete: "cascade" }),
@@ -754,6 +755,7 @@ export const threadMoves = sqliteTable(
         sql`${table.phase} NOT IN ('done', 'failed', 'cleanup_pending', 'rolled_back')`,
       ),
     index("thread_moves_thread_idx").on(table.threadId),
+    index("thread_moves_group_idx").on(table.groupId),
   ],
 );
 

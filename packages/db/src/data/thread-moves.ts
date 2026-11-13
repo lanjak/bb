@@ -10,6 +10,7 @@ import { threadMoves } from "../schema.js";
 export type ThreadMoveRow = typeof threadMoves.$inferSelect;
 
 export interface CreateThreadMoveArgs {
+  groupId: string;
   id: string;
   now: number;
   providerId: string;
@@ -42,6 +43,7 @@ export function createThreadMove(
     .insert(threadMoves)
     .values({
       id: args.id,
+      groupId: args.groupId,
       threadId: args.threadId,
       sourceEnvironmentId: args.sourceEnvironmentId,
       targetEnvironmentId: args.targetEnvironmentId,
