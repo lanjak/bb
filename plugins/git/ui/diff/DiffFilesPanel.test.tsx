@@ -29,6 +29,8 @@ import type { DiffPatchState } from "./diff-data.js";
 import { DiffFilesPanel } from "./DiffFilesPanel.js";
 import { makeDiffFileEntry } from "./diff-file-fixtures.js";
 import { useDiffFilesCollapseControls } from "./diffFilesStore.js";
+import { DiffCommentsProvider } from "../comments/DiffCommentsContext.js";
+import type { GitComment } from "../../contract.js";
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
@@ -55,7 +57,12 @@ vi.mock("./DiffFileCard.js", () => ({
     patchState,
     onLoadPatch,
     onRetry,
+    lineSelection,
   }: {
+    lineSelection?: {
+      lineAnnotations?: readonly { id: string }[];
+      selectionActions?: readonly { id: string }[];
+    };
     entry: { path: string };
     isViewed: boolean;
     isViewedDisabled: boolean;
@@ -82,6 +89,10 @@ vi.mock("./DiffFileCard.js", () => ({
       <output aria-label={`Patch ${entry.path}`} data-status={patchState.status}>
         {patchState.patch ?? patchState.error ?? ""}
       </output>
+      <output aria-label={`Comments ${entry.path}`}>
+        {lineSelection?.lineAnnotations?.map((annotation) => annotation.id).join(",") || "none"}
+        :{lineSelection?.selectionActions?.map((action) => action.id).join(",") || "none"}
+      </output>
       <button aria-label={`Load ${entry.path}`} onClick={onLoadPatch} />
       <button aria-label={`Retry ${entry.path}`} onClick={onRetry} />
     </div>
@@ -93,6 +104,26 @@ const TARGET: WorkspaceDiffTarget = { type: "uncommitted" };
 
 type Handlers = Partial<PluginRpcTestHandlers<typeof gitRpcContract>>;
 
+function WithComments({
+  comments,
+  children,
+}: {
+  comments: readonly GitComment[] | undefined;
+  children: React.ReactNode;
+}) {
+  return comments === undefined ? (
+    <>{children}</>
+  ) : (
+    <DiffCommentsProvider
+      environmentId={ENVIRONMENT_ID}
+      target={TARGET}
+      comments={comments}
+    >
+      {children}
+    </DiffCommentsProvider>
+  );
+}
+
 function renderPanel(
   props: {
     files: DiffFileEntry[];
@@ -102,12 +133,13 @@ function renderPanel(
     isPlaceholder?: boolean;
     scrollToPath?: string;
     onScrolledToPath?: () => void;
+    comments?: readonly GitComment[];
   },
   rpc: Handlers,
   extra?: React.ReactNode,
 ) {
   const panel = (next: typeof props) => (
-    <>
+    <WithComments comments={next.comments}>
       {extra}
       <DiffFilesPanel
         environmentId={ENVIRONMENT_ID}
@@ -128,7 +160,7 @@ function renderPanel(
         scrollToPath={next.scrollToPath ?? null}
         onScrolledToPath={next.onScrolledToPath}
       />
-    </>
+    </WithComments>
   );
   const rendered = renderSlot(
     { component: () => panel(props) },
@@ -557,4 +589,49 @@ it("reads no patches or Viewed marks while the panel is closed", async () => {
   await new Promise((resolve) => setTimeout(resolve, 200));
   expect(inspection.rpcCalls).toEqual([]);
   expect(patchOf("a.ts").getAttribute("data-status")).toBe("loading");
+});
+
+it("hands each card its file's comment annotations and the Comment action, and filters to commented files", async () => {
+  const comment: GitComment = {
+    id: "dcm_0000000000000001",
+    environmentId: ENVIRONMENT_ID,
+    path: "b.ts",
+    side: "new",
+    startLine: 4,
+    endLine: 5,
+    lines: ["x", "y"],
+    contextBefore: [],
+    contextAfter: [],
+    body: "Look",
+    author: { kind: "user" },
+    state: "unsent",
+    placement: { kind: "current", startLine: 4, endLine: 5 },
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  const files = [
+    makeDiffFileEntry({ path: "a.ts", revision: "rev-a" }),
+    makeDiffFileEntry({ path: "b.ts", revision: "rev-b" }),
+  ];
+  const { rerenderPanel } = renderPanel(
+    { files, comments: [comment] },
+    {
+      viewed: () => ({ files: [] }),
+      patches: ({ keys }) => availablePatches(keys),
+    },
+  );
+  const annotationsOf = (path: string) =>
+    screen.getByRole("status", { name: `Comments ${path}` }).textContent;
+  expect(annotationsOf("a.ts")).toBe("none:git.comment");
+  expect(annotationsOf("b.ts")).toBe("dcm_0000000000000001:git.comment");
+
+  rerenderPanel({
+    files,
+    comments: [comment],
+    filters: { ...DEFAULT_DIFF_FILE_FILTERS, onlyCommented: true },
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole("status", { name: "Comments a.ts" })).toBeNull(),
+  );
+  expect(annotationsOf("b.ts")).toBe("dcm_0000000000000001:git.comment");
 });

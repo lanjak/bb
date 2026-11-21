@@ -5,13 +5,17 @@ export interface DiffFileFilters {
   selectedExtensions: readonly string[];
   showDeleted: boolean;
   showViewed: boolean;
+  onlyCommented: boolean;
 }
 
 export const DEFAULT_DIFF_FILE_FILTERS: DiffFileFilters = {
   selectedExtensions: [],
   showDeleted: true,
   showViewed: true,
+  onlyCommented: false,
 };
+
+const NO_COMMENTED_PATHS: ReadonlySet<string> = new Set();
 
 export function diffFileExtension(path: string): string {
   const name = path.slice(path.lastIndexOf("/") + 1);
@@ -32,7 +36,8 @@ export function hasDiffFileFilters(filters: DiffFileFilters): boolean {
   return (
     filters.selectedExtensions.length > 0 ||
     !filters.showDeleted ||
-    !filters.showViewed
+    !filters.showViewed ||
+    filters.onlyCommented
   );
 }
 
@@ -41,6 +46,7 @@ export function filterDiffFiles(
   query: string,
   filters: DiffFileFilters,
   viewedRevisionByPath: ReadonlyMap<string, string>,
+  commentedPaths: ReadonlySet<string> = NO_COMMENTED_PATHS,
 ): readonly DiffFileEntry[] {
   return filterDiffFilesByPath(files, query).filter(
     (file) =>
@@ -48,6 +54,7 @@ export function filterDiffFiles(
         filters.selectedExtensions.includes(diffFileExtension(file.path))) &&
       (filters.showDeleted || file.changeKind !== "deleted") &&
       (filters.showViewed ||
-        viewedRevisionByPath.get(file.path) !== file.revision),
+        viewedRevisionByPath.get(file.path) !== file.revision) &&
+      (!filters.onlyCommented || commentedPaths.has(file.path)),
   );
 }

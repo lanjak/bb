@@ -21,9 +21,16 @@ import {
 } from "./diff-file-filters.js";
 import { useDiffFiles, useDiffViewedRevisions } from "./diff-data.js";
 import {
+  readDiffFileCardState,
+  resolveDiffFileCardInitialState,
   summarizeDiffFileEntries,
   useDiffFilesCollapseControls,
+  writeDiffFileCardStates,
 } from "./diffFilesStore.js";
+import { useGitComments } from "../comments/comment-data.js";
+import { commentedPaths as collectCommentedPaths } from "../comments/comment-model.js";
+import { CommentsListButton } from "../comments/CommentsList.js";
+import { DiffCommentsProvider } from "../comments/DiffCommentsContext.js";
 import {
   useGitDiffIgnoreWhitespacePreference,
   useGitDiffLineOverflowModePreference,
@@ -252,6 +259,40 @@ function EnvironmentDiffTab({
     paths: diffPaths,
     enabled: isLive,
   });
+  const { comments } = useGitComments({
+    environmentId,
+    target: shownTarget,
+    enabled: isLive,
+  });
+  const commentedPaths = useMemo(
+    () => collectCommentedPaths(comments),
+    [comments],
+  );
+  const [listScrollPath, setListScrollPath] = useState<string | null>(null);
+  const jumpToComment = useCallback(
+    (path: string) => {
+      const entry = diffFiles.find((file) => file.path === path);
+      if (entry !== undefined) {
+        const current =
+          readDiffFileCardState(diffIdentity, path) ??
+          resolveDiffFileCardInitialState({
+            entry,
+            fileCount: diffFiles.length,
+          });
+        if (current.collapsed) {
+          writeDiffFileCardStates(diffIdentity, [
+            [path, { ...current, collapsed: false }],
+          ]);
+        }
+      }
+      setListScrollPath(path);
+    },
+    [diffFiles, diffIdentity],
+  );
+  const clearScrollIntent = useCallback(() => {
+    clearPendingIntent();
+    setListScrollPath(null);
+  }, [clearPendingIntent]);
   const extensionCounts = useMemo(
     () => diffExtensionCounts(diffFiles),
     [diffFiles],
@@ -263,8 +304,15 @@ function EnvironmentDiffTab({
         gitDiffFileFilter ?? "",
         gitDiffFilters,
         viewedRevisionByPath,
+        commentedPaths,
       ),
-    [diffFiles, gitDiffFileFilter, gitDiffFilters, viewedRevisionByPath],
+    [
+      commentedPaths,
+      diffFiles,
+      gitDiffFileFilter,
+      gitDiffFilters,
+      viewedRevisionByPath,
+    ],
   );
   const gitDiffStats = useMemo(
     () => summarizeDiffFileEntries(filteredDiffFiles),
@@ -287,7 +335,7 @@ function EnvironmentDiffTab({
     [gitDiffDisplayMode, gitDiffLineOverflowMode],
   );
 
-  return (
+  const content = (
     <div ref={rootRef} className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className={DIFF_TOOLBAR_CHROME_CLASS}>
         <GitDiffToolbar
@@ -322,6 +370,11 @@ function EnvironmentDiffTab({
           onLineOverflowModeChange={setGitDiffLineOverflowMode}
           ignoreWhitespace={gitDiffIgnoreWhitespace}
           onIgnoreWhitespaceChange={setGitDiffIgnoreWhitespace}
+          commentsAction={
+            shownTarget === undefined ? null : (
+              <CommentsListButton onJump={jumpToComment} />
+            )
+          }
         />
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -340,15 +393,26 @@ function EnvironmentDiffTab({
           isLive={isLive}
           fileFilter={gitDiffFileFilter ?? ""}
           filters={gitDiffFilters}
-          onClearPendingGitDiffIntent={clearPendingIntent}
+          onClearPendingGitDiffIntent={clearScrollIntent}
           onOpenFileInEditor={
             workspacePath === null ? undefined : openFileInEditor
           }
           onOpenFilePreview={openFilePreview}
-          pendingGitDiffScrollPath={pendingScrollPath}
+          pendingGitDiffScrollPath={pendingScrollPath ?? listScrollPath}
           workspaceRootPath={workspacePath}
         />
       </div>
     </div>
+  );
+  return shownTarget === undefined ? (
+    content
+  ) : (
+    <DiffCommentsProvider
+      environmentId={environmentId}
+      target={shownTarget}
+      comments={comments}
+    >
+      {content}
+    </DiffCommentsProvider>
   );
 }

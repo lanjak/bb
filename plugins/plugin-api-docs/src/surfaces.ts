@@ -1870,6 +1870,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "bb connect",
           "Docs",
           "File Editor",
+          "Git",
           "GitHub",
           "Inline visualizations",
           "Provider usage",

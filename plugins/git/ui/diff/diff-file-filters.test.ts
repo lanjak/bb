@@ -4,6 +4,7 @@ import {
   DEFAULT_DIFF_FILE_FILTERS,
   diffExtensionCounts,
   filterDiffFiles,
+  hasDiffFileFilters,
 } from "./diff-file-filters.js";
 
 const files = [
@@ -28,6 +29,7 @@ it("combines filename, extension, deleted and revision-aware Viewed filters", ()
         selectedExtensions: [".ts"],
         showDeleted: false,
         showViewed: false,
+        onlyCommented: false,
       },
       viewed,
     ).map((file) => file.path),
@@ -80,4 +82,19 @@ it("selects only the chosen extensions and restores all types with an empty sele
       ).map((file) => file.path),
     ).toEqual(expected);
   }
+});
+
+it("keeps only files with open comments when asked", () => {
+  expect(
+    filterDiffFiles(
+      files,
+      "",
+      { ...DEFAULT_DIFF_FILE_FILTERS, onlyCommented: true },
+      viewed,
+      new Set(["src/b.ts"]),
+    ).map((file) => file.path),
+  ).toEqual(["src/b.ts"]);
+  expect(
+    hasDiffFileFilters({ ...DEFAULT_DIFF_FILE_FILTERS, onlyCommented: true }),
+  ).toBe(true);
 });

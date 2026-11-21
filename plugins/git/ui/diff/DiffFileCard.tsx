@@ -7,6 +7,7 @@ import {
   getGitDiffCardImageSizeStat,
   GitDiffCardBody,
   GitDiffCardImagePreviewBody,
+  type GitDiffCardLineSelection,
   useGitDiffCardBody,
   type DiffFileContentsResult,
   type DiffImageSizeStat,
@@ -134,6 +135,7 @@ export interface DiffFileCardProps {
   onOpenFileInEditor?: (path: string) => void;
   onOpenFilePreview?: (path: string) => void;
   onRequestFileContents?: RequestDiffFileContents;
+  lineSelection?: GitDiffCardLineSelection | undefined;
 }
 
 function arePatchStatesEqual(a: DiffPatchState, b: DiffPatchState): boolean {
@@ -164,6 +166,7 @@ function areDiffFileCardPropsEqual(
     previous.onOpenFileInEditor === next.onOpenFileInEditor &&
     previous.onOpenFilePreview === next.onOpenFilePreview &&
     previous.onRequestFileContents === next.onRequestFileContents &&
+    previous.lineSelection === next.lineSelection &&
     arePatchStatesEqual(previous.patchState, next.patchState)
   );
 }
@@ -269,6 +272,7 @@ export const DiffFileCard = memo(function DiffFileCard({
   onOpenFileInEditor,
   onOpenFilePreview,
   onRequestFileContents,
+  lineSelection,
 }: DiffFileCardProps) {
   const headerModel = useMemo(() => buildDiffEntryHeaderModel(entry), [entry]);
   const parsedFile = useMemo<ParsedGitDiffFile | null>(() => {
@@ -393,6 +397,7 @@ export const DiffFileCard = memo(function DiffFileCard({
             onRetry={onRetry}
             onOpenFilePreview={onOpenFilePreview}
             onRequestFileContents={onRequestFileContents}
+            lineSelection={lineSelection}
             binaryImagePreviewState={
               shouldDirectlyPreviewBinaryImage
                 ? binaryImagePreviewState
@@ -417,6 +422,7 @@ interface DiffFileCardBodyProps {
   onOpenFilePreview?: (path: string) => void;
   onRequestFileContents?: RequestDiffFileContents;
   binaryImagePreviewState?: BinaryImagePreviewState;
+  lineSelection?: GitDiffCardLineSelection | undefined;
 }
 
 const DIFF_FILE_CARD_NOTICE_CLASS =
@@ -464,6 +470,7 @@ function DiffFileCardBody({
   onOpenFilePreview,
   onRequestFileContents,
   binaryImagePreviewState,
+  lineSelection,
 }: DiffFileCardBodyProps) {
   if (binaryImagePreviewState !== undefined) {
     if (
@@ -584,6 +591,7 @@ function DiffFileCardBody({
       truncated={patchState.truncated ?? false}
       onOpenFilePreview={onOpenFilePreview}
       onRequestFileContents={onRequestFileContents}
+      lineSelection={lineSelection}
     />
   );
 }
@@ -597,6 +605,7 @@ interface DiffFileCardRenderedBodyProps {
   truncated: boolean;
   onOpenFilePreview?: (path: string) => void;
   onRequestFileContents?: RequestDiffFileContents;
+  lineSelection?: GitDiffCardLineSelection | undefined;
 }
 
 function DiffFileCardRenderedBody({
@@ -608,6 +617,7 @@ function DiffFileCardRenderedBody({
   truncated,
   onOpenFilePreview,
   onRequestFileContents,
+  lineSelection,
 }: DiffFileCardRenderedBodyProps) {
   const bodyState = useGitDiffCardBody({
     fileDiff: parsedFile,
@@ -623,6 +633,7 @@ function DiffFileCardRenderedBody({
         svgDisplayMode={svgDisplayMode}
         reservesCollapseGutter
         defersOffscreenRendering={false}
+        lineSelection={lineSelection}
       />
       {truncated ? (
         <div className={DIFF_FILE_CARD_NOTICE_CLASS}>

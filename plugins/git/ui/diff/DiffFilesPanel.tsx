@@ -18,6 +18,9 @@ import {
   useSetDiffFileViewed,
 } from "./diff-data.js";
 import { DiffFileCard } from "./DiffFileCard.js";
+import { useFileLineSelection } from "../comments/DiffCommentsContext.js";
+import { commentedPaths as collectCommentedPaths } from "../comments/comment-model.js";
+import { useDiffComments } from "../comments/comments-context.js";
 import {
   type DiffFileCardUiState,
   estimateCardHeight,
@@ -108,9 +111,22 @@ export function DiffFilesPanel({
 
   const setViewed = useSetDiffFileViewed({ environmentId, target, paths });
 
+  const diffComments = useDiffComments();
+  const comments = diffComments?.comments;
+  const commentedPaths = useMemo(
+    () => collectCommentedPaths(comments ?? []),
+    [comments],
+  );
   const visibleFiles = useMemo(
-    () => filterDiffFiles(files, fileFilter, filters, viewedRevisionByPath),
-    [files, fileFilter, filters, viewedRevisionByPath],
+    () =>
+      filterDiffFiles(
+        files,
+        fileFilter,
+        filters,
+        viewedRevisionByPath,
+        commentedPaths,
+      ),
+    [files, fileFilter, filters, viewedRevisionByPath, commentedPaths],
   );
 
   const cardStates = useDiffFileCardStates(diffIdentity);
@@ -320,6 +336,7 @@ function DiffFileRow({
     (viewed: boolean) => setViewed(entry, viewed),
     [entry, setViewed],
   );
+  const lineSelection = useFileLineSelection(entry);
 
   return (
     <DiffFileCard
@@ -340,6 +357,7 @@ function DiffFileRow({
       }
       onOpenFilePreview={onOpenFilePreview}
       onRequestFileContents={onRequestFileContents}
+      lineSelection={lineSelection}
     />
   );
 }

@@ -3,7 +3,7 @@ import {
   hasDiffFileFilters,
   type DiffFileFilters,
 } from "./diff-file-filters.js";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Button } from "@bb/shared-ui/button";
 import { useMeasuredValue } from "@bb/shared-ui/hooks/use-measured-value";
 import {
@@ -235,6 +235,8 @@ interface GitDiffToolbarProps {
 
   ignoreWhitespace: boolean;
   onIgnoreWhitespaceChange: (ignoreWhitespace: boolean) => void;
+
+  commentsAction?: ReactNode;
 }
 
 function readContentBoxWidth(element: HTMLElement): number {
@@ -271,6 +273,7 @@ export function GitDiffToolbar({
   onLineOverflowModeChange,
   ignoreWhitespace,
   onIgnoreWhitespaceChange,
+  commentsAction,
 }: GitDiffToolbarProps) {
   const collapseAllLabel = areAllFilesCollapsed
     ? "Expand all files"
@@ -361,6 +364,7 @@ export function GitDiffToolbar({
             className="ml-auto flex min-w-0 shrink-0 items-center justify-end gap-1"
             data-testid="git-diff-toolbar-actions"
           >
+            {commentsAction}
             <Button
               type="button"
               variant="ghost"
@@ -456,6 +460,15 @@ export function GitDiffToolbar({
                   }
                 >
                   Viewed files
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  checked={filters.onlyCommented}
+                  onSelect={(event) => event.preventDefault()}
+                  onCheckedChange={(onlyCommented) =>
+                    onFiltersChange({ ...filters, onlyCommented })
+                  }
+                >
+                  Files with comments
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
