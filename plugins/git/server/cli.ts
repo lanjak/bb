@@ -4,9 +4,15 @@ import {
   defineCli,
   experimental_PluginRpcRefusal,
   PluginCliError,
+  type PluginCliContext,
   type PluginCliResult,
 } from "@get-bb/plugin-sdk";
-import type { GitFileSideQuery, WorkspaceDiffTarget } from "../contract.js";
+import type {
+  GitComment,
+  GitFileSideQuery,
+  WorkspaceDiffTarget,
+} from "../contract.js";
+import type { GitCommentsService } from "./comment-service.js";
 import type { GitReads } from "./reads.js";
 import type { GitViewed } from "./viewed.js";
 import { BRANCH_LIST_LIMIT_MAX } from "bb-environment-provider-host/git-types";
@@ -64,11 +70,14 @@ function branchName(value: string): string {
 }
 
 function withCoreErrors<Input extends { options: object }>(
-  run: (input: Input) => Promise<PluginCliResult>,
+  run: (input: Input, ctx: PluginCliContext) => Promise<PluginCliResult>,
 ) {
-  return async (input: Input): Promise<PluginCliResult> => {
+  return async (
+    input: Input,
+    ctx: PluginCliContext,
+  ): Promise<PluginCliResult> => {
     try {
-      return await run(input);
+      return await run(input, ctx);
     } catch (error) {
       if (!(error instanceof PluginCliError)) throw error;
       const hint = error.hint === undefined ? {} : { hint: error.hint };
@@ -226,7 +235,132 @@ function guarded<Args extends unknown[], Result>(
   return (...args) => read(...args).catch(toCliError);
 }
 
-export function createGitCli(gitReads: GitReads, gitViewed: GitViewed) {
+const OPTIONAL_TARGET_OPTIONS = {
+  ...TARGET_OPTIONS,
+  target: { ...TARGET_OPTIONS.target, required: false },
+} as const;
+
+function guardedComments<Args extends unknown[], Result>(
+  run: (...args: Args) => Promise<Result>,
+): (...args: Args) => Promise<Result> {
+  return (...args) =>
+    run(...args).catch((error: unknown) => {
+      if (error instanceof experimental_PluginRpcRefusal) {
+        throw new PluginCliError(error.message, { code: error.code });
+      }
+      return toCliError(error);
+    });
+}
+
+function parseLineRange(value: string): { start: number; end: number } {
+  const match = /^(\d+)(?:-(\d+))?$/u.exec(value);
+  if (match === null) fail(`Invalid --line "${value}". Use N or N-M.`);
+  const start = Number(match[1]);
+  const end = match[2] === undefined ? start : Number(match[2]);
+  if (start < 1 || end < start) fail(`Invalid --line "${value}".`);
+  return { start, end };
+}
+
+function describePlacement(comment: GitComment): string {
+  const { placement } = comment;
+  switch (placement.kind) {
+    case "current":
+      return `lines ${placement.startLine}-${placement.endLine}`;
+    case "moved":
+      return `moved to lines ${placement.startLine}-${placement.endLine} (was ${placement.fromStartLine})`;
+    case "outdated":
+      return "outdated: the commented code changed";
+    case "not_in_diff":
+      return "file no longer differs from the merge base";
+    case "unknown":
+      return "position unknown";
+  }
+}
+
+function describeComment(comment: GitComment): string[] {
+  const author =
+    comment.author.kind === "thread"
+      ? `thread:${comment.author.threadId}`
+      : comment.author.kind;
+  const path = comment.currentPath ?? comment.path;
+  const side = comment.side === "old" ? " [removed code]" : "";
+  const resolution = comment.resolution;
+  return [
+    `${comment.id}  ${comment.state}  ${path}${side}  ${describePlacement(comment)}  by ${author}`,
+    ...comment.body.split("\n").map((line) => `  ${line}`),
+    ...(resolution?.note === undefined
+      ? []
+      : [`  Resolved: ${resolution.note}`]),
+  ];
+}
+
+export function createGitCli(
+  gitReads: GitReads,
+  gitViewed: GitViewed,
+  gitComments: GitCommentsService,
+  threadEnvironmentId: (threadId: string) => Promise<string | null>,
+) {
+  const comments = {
+    environmentTarget: guardedComments(gitComments.environmentTarget),
+    list: guardedComments(gitComments.list),
+    addFromFile: guardedComments(gitComments.addFromFile),
+    edit: guardedComments(async (id: string, body: string) =>
+      gitComments.edit(id, body),
+    ),
+    remove: guardedComments(async (id: string) => gitComments.remove(id)),
+    resolve: guardedComments(
+      async (
+        id: string,
+        resolution: {
+          note?: string | undefined;
+          byThreadId?: string | undefined;
+        },
+      ) => gitComments.resolve(id, resolution),
+    ),
+    reopen: guardedComments(async (id: string) => gitComments.reopen(id)),
+    send: guardedComments(gitComments.send),
+  };
+  async function commentTarget(
+    environmentId: string,
+    options: {
+      target?:
+        | "uncommitted"
+        | "branch_committed"
+        | "all"
+        | "commit"
+        | undefined;
+      "merge-base-branch"?: string | undefined;
+      sha?: string | undefined;
+    },
+  ): Promise<WorkspaceDiffTarget> {
+    if (options.target === undefined) {
+      if (
+        options["merge-base-branch"] !== undefined ||
+        options.sha !== undefined
+      ) {
+        fail("--merge-base-branch and --sha need --target.");
+      }
+      return comments.environmentTarget(environmentId);
+    }
+    return buildTarget({ ...options, target: options.target });
+  }
+  async function environmentOf(
+    positional: string | undefined,
+    threadId: string | undefined,
+  ): Promise<string> {
+    if (positional !== undefined) return positional;
+    if (threadId === undefined) {
+      fail("Provide an environment id, or run this from an agent thread.");
+    }
+    const environmentId = await threadEnvironmentId(threadId).catch(
+      (error: unknown) => toCliError(error),
+    );
+    if (environmentId === null) {
+      fail("This thread has no environment. Provide an environment id.");
+    }
+    return environmentId;
+  }
+
   const reads = {
     status: guarded(gitReads.status),
     diff: guarded(gitReads.diff),
@@ -506,6 +640,200 @@ export function createGitCli(gitReads: GitReads, gitViewed: GitViewed) {
               patch.truncated ? "(patch truncated)" : null,
             ]),
           );
+        }),
+      }),
+      "comments list": cliCommand({
+        summary: "List review comments saved on an environment's diff",
+        description:
+          "Shows open comments with their current lines. Comments follow the code through edits: placement says current, moved, outdated, or that the file no longer differs from the merge base. Defaults to the calling thread's environment and the diff against its merge base.",
+        positionals: [
+          {
+            name: "environment-id",
+            description: "Environment (default: the calling thread's)",
+          },
+        ],
+        options: {
+          ...OPTIONAL_TARGET_OPTIONS,
+          all: {
+            type: "boolean",
+            description: "Include resolved comments",
+          },
+          json: JSON_OPTION,
+        },
+        run: withCoreErrors(async ({ positionals, options }, ctx) => {
+          const environmentId = await environmentOf(
+            positionals["environment-id"],
+            ctx.threadId,
+          );
+          const target = await commentTarget(environmentId, options);
+          const result = await comments.list(
+            environmentId,
+            target,
+            options.all,
+          );
+          if (options.json) return json(result);
+          if (result.comments.length === 0) {
+            return print(options.all ? "No comments." : "No open comments.");
+          }
+          return print(...result.comments.flatMap(describeComment));
+        }),
+      }),
+      "comments add": cliCommand({
+        summary: "Save a review comment on diff lines",
+        description:
+          "Reads the lines from the file so the comment is anchored the way a comment made in the Diff tab is. --line is N or N-M, on the new file by default; --side old comments on removed code.",
+        positionals: ENVIRONMENT_POSITIONAL,
+        options: {
+          ...OPTIONAL_TARGET_OPTIONS,
+          path: {
+            type: "string",
+            required: true,
+            description: "Repository-relative path of a changed file",
+          },
+          line: {
+            type: "string",
+            required: true,
+            description: "Line N or range N-M, at most 50 lines",
+          },
+          side: {
+            type: "enum",
+            values: ["new", "old"],
+            default: "new",
+            description: "File side: new (default) or old (removed code)",
+          },
+          body: {
+            type: "string",
+            required: true,
+            description: "Comment text",
+          },
+          json: JSON_OPTION,
+        },
+        run: withCoreErrors(async ({ positionals, options }, ctx) => {
+          const environmentId = positionals["environment-id"];
+          const range = parseLineRange(options.line);
+          const result = await comments.addFromFile({
+            environmentId,
+            target: await commentTarget(environmentId, options),
+            path: options.path,
+            side: options.side,
+            startLine: range.start,
+            endLine: range.end,
+            body: options.body,
+            authorThreadId: ctx.threadId,
+            byPerson: ctx.threadId === undefined ? true : undefined,
+          });
+          return options.json
+            ? json(result)
+            : print(`Saved comment ${result.comment.id}`);
+        }),
+      }),
+      "comments edit": cliCommand({
+        summary: "Change a comment's text",
+        positionals: [
+          { name: "comment-id", description: "Comment id", required: true },
+        ],
+        options: {
+          body: { type: "string", required: true, description: "New text" },
+          json: JSON_OPTION,
+        },
+        run: withCoreErrors(async ({ positionals, options }) => {
+          const result = await comments.edit(
+            positionals["comment-id"],
+            options.body,
+          );
+          return options.json ? json(result) : print("Comment updated.");
+        }),
+      }),
+      "comments delete": cliCommand({
+        summary: "Delete a comment",
+        positionals: [
+          { name: "comment-id", description: "Comment id", required: true },
+        ],
+        options: { json: JSON_OPTION },
+        run: withCoreErrors(async ({ positionals, options }) => {
+          const result = await comments.remove(positionals["comment-id"]);
+          return options.json ? json(result) : print("Comment deleted.");
+        }),
+      }),
+      "comments resolve": cliCommand({
+        summary: "Mark a comment resolved, with a note",
+        description:
+          "Run this after addressing a comment, with a note that says what changed, or why the code stays as it is.",
+        positionals: [
+          { name: "comment-id", description: "Comment id", required: true },
+        ],
+        options: {
+          note: {
+            type: "string",
+            description: "What changed, or why nothing did",
+          },
+          json: JSON_OPTION,
+        },
+        run: withCoreErrors(async ({ positionals, options }, ctx) => {
+          const result = await comments.resolve(positionals["comment-id"], {
+            note: options.note,
+            byThreadId: ctx.threadId,
+          });
+          return options.json ? json(result) : print("Comment resolved.");
+        }),
+      }),
+      "comments reopen": cliCommand({
+        summary: "Reopen a resolved comment",
+        positionals: [
+          { name: "comment-id", description: "Comment id", required: true },
+        ],
+        options: { json: JSON_OPTION },
+        run: withCoreErrors(async ({ positionals, options }) => {
+          const result = await comments.reopen(positionals["comment-id"]);
+          return options.json ? json(result) : print("Comment reopened.");
+        }),
+      }),
+      "comments send": cliCommand({
+        summary: "Send open comments to a thread as one message",
+        description:
+          "The thread must work in the same environment. The agent receives each comment with its current lines and the command that resolves it. By default every open comment that was not sent yet goes.",
+        positionals: ENVIRONMENT_POSITIONAL,
+        options: {
+          thread: {
+            type: "string",
+            required: true,
+            description: "Thread that receives the comments",
+          },
+          id: {
+            type: "string",
+            repeatable: true,
+            description: "Send only this comment (repeatable)",
+          },
+          "include-sent": {
+            type: "boolean",
+            description: "Include comments that were already sent",
+          },
+          path: {
+            type: "string",
+            description: "Send only comments on this file",
+          },
+          message: {
+            type: "string",
+            description: "Text to add after the comments",
+          },
+          json: JSON_OPTION,
+        },
+        run: withCoreErrors(async ({ positionals, options }) => {
+          const result = await comments.send({
+            environmentId: positionals["environment-id"],
+            threadId: options.thread,
+            ids: options.id.length > 0 ? options.id : undefined,
+            includeSent: options["include-sent"],
+            path: options.path,
+            message: options.message,
+          });
+          return options.json
+            ? json(result)
+            : print(
+                `Sent ${result.count} comments to ${options.thread}.`,
+                result.omitted > 0 &&
+                  `${result.omitted} more were not included (a message carries at most 200); run the command again to send them.`,
+              );
         }),
       }),
       "viewed list": cliCommand({

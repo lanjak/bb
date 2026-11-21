@@ -6,7 +6,15 @@ import {
   GIT_DIFF_MAX_FILE_LIST_BYTES,
   GIT_PATCHES_MAX_KEYS,
   GIT_STATUS_MAX_KEYS,
+  GIT_COMMENT_BODY_MAX,
+  GIT_COMMENT_NOTE_MAX,
   GIT_VIEWED_MAX_PATHS,
+  gitCommentAnchorSchema,
+  gitCommentIdSchema,
+  gitCommentBatchIdSchema,
+  gitCommentSchema,
+  gitCommentSelectionSchema,
+  gitCommentsTag,
   gitDiffResultSchema,
   gitFileSideQuerySchema,
   gitFileSideResultSchema,
@@ -169,6 +177,106 @@ export const gitRpcContract = defineRpcContract({
       })
       .strict(),
     output: z.object({ ok: z.literal(true) }).strict(),
+  },
+  comments: {
+    experimental_description:
+      "Review comments saved on diff lines for an environment, with where each one sits in the given diff target now (current, moved, outdated, not_in_diff or unknown). Resolved comments are included only when asked for.",
+    input: environmentInputSchema
+      .extend({
+        target: gitDiffQuerySchema,
+        includeResolved: z.boolean().optional(),
+      })
+      .strict(),
+    output: z.object({ comments: z.array(gitCommentSchema) }).strict(),
+    tags: ({ environmentId }) => [
+      gitCommentsTag(environmentId),
+      gitFilesTag(environmentId),
+    ],
+  },
+  addComment: {
+    experimental_description:
+      "Save a review comment on diff lines. Pass the revision of the file entry the lines were read from so the comment can follow the code through later edits. The comment's author is what the caller states and the server cannot verify it: authorThreadId marks an agent's comment, byPerson marks a person's, and a comment with neither is shown as unspecified.",
+    input: environmentInputSchema
+      .extend({
+        target: gitDiffQuerySchema,
+        revision: z.string().min(1).max(1024),
+        anchor: gitCommentAnchorSchema,
+        body: z.string().trim().min(1).max(GIT_COMMENT_BODY_MAX),
+        authorThreadId: z.string().min(1).optional(),
+        byPerson: z.literal(true).optional(),
+      })
+      .strict(),
+    output: z.object({ comment: gitCommentSchema }).strict(),
+  },
+  editComment: {
+    experimental_description:
+      "Change a comment's text. An edited comment is no longer marked sent.",
+    input: z
+      .object({
+        id: gitCommentIdSchema,
+        body: z.string().trim().min(1).max(GIT_COMMENT_BODY_MAX),
+      })
+      .strict(),
+    output: z.object({ ok: z.literal(true) }).strict(),
+  },
+  deleteComment: {
+    experimental_description: "Delete a review comment.",
+    input: z.object({ id: gitCommentIdSchema }).strict(),
+    output: z.object({ ok: z.literal(true) }).strict(),
+  },
+  resolveComment: {
+    experimental_description:
+      "Mark a review comment resolved, with a note about what changed or why nothing did. Pass resolvedByThreadId when an agent thread resolves it.",
+    input: z
+      .object({
+        id: gitCommentIdSchema,
+        note: z.string().trim().min(1).max(GIT_COMMENT_NOTE_MAX).optional(),
+        resolvedByThreadId: z.string().min(1).optional(),
+      })
+      .strict(),
+    output: z.object({ ok: z.literal(true) }).strict(),
+  },
+  reopenComment: {
+    experimental_description:
+      "Reopen a resolved comment. It becomes unsent again.",
+    input: z.object({ id: gitCommentIdSchema }).strict(),
+    output: z.object({ ok: z.literal(true) }).strict(),
+  },
+  createCommentBatch: {
+    experimental_description:
+      "Group open comments into a batch for a thread in the same environment. Insert the returned batchId as a mention chip (provider review-comments) in that thread's composer; the comments reach the agent when the message is sent. By default every open comment that was not sent yet is included, up to 200; omitted counts the rest. The same selection for the same thread returns the same batch, and a comment that an earlier chip already delivered is not repeated unless includeSent is set.",
+    input: environmentInputSchema
+      .extend({
+        threadId: z.string().min(1),
+        ...gitCommentSelectionSchema.shape,
+      })
+      .strict(),
+    output: z
+      .object({
+        batchId: gitCommentBatchIdSchema,
+        count: z.number().int().min(1),
+        omitted: z.number().int().min(0),
+        label: z.string().min(1),
+      })
+      .strict(),
+  },
+  sendComments: {
+    experimental_description:
+      "Send open comments to a thread in the same environment as one message, without a composer. The agent gets the same context as a composer chip.",
+    input: environmentInputSchema
+      .extend({
+        threadId: z.string().min(1),
+        message: z.string().max(GIT_COMMENT_BODY_MAX).optional(),
+        ...gitCommentSelectionSchema.shape,
+      })
+      .strict(),
+    output: z
+      .object({
+        batchId: gitCommentBatchIdSchema,
+        count: z.number().int().min(1),
+        omitted: z.number().int().min(0),
+      })
+      .strict(),
   },
   setMergeBase: {
     experimental_description:

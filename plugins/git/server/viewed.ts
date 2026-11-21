@@ -1,5 +1,4 @@
 import {
-  experimental_BbHttpError,
   experimental_PluginRpcRefusal,
   type BbPluginApi,
 } from "@get-bb/plugin-sdk";
@@ -10,7 +9,9 @@ import {
   type GitViewedFile,
   type WorkspaceDiffTarget,
 } from "../contract.js";
-import { requireGitEnvironment } from "./reads.js";
+import { environmentExists, requireGitEnvironment } from "./reads.js";
+import type { GitDatabase } from "./storage.js";
+import { targetKey } from "./target-key.js";
 
 export interface GitViewed {
   list(
@@ -33,17 +34,6 @@ export interface GitViewed {
 
 export const VIEWED_MARKS_FROM_CORE_KEY = "viewedMarksFromCore";
 
-const VIEWED_MIGRATIONS = [
-  `CREATE TABLE viewed_files (
-    environment_id TEXT NOT NULL,
-    target_key TEXT NOT NULL,
-    path TEXT NOT NULL,
-    revision TEXT NOT NULL,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (environment_id, target_key, path)
-  ) WITHOUT ROWID`,
-];
-
 const coreMarksSchema = z.array(
   z.object({
     environmentId: z.string(),
@@ -54,24 +44,11 @@ const coreMarksSchema = z.array(
   }),
 );
 
-function targetKey(target: WorkspaceDiffTarget): string {
-  switch (target.type) {
-    case "uncommitted":
-      return "uncommitted";
-    case "branch_committed":
-    case "all":
-      return `${target.type}:${target.mergeBaseBranch}`;
-    case "commit":
-      return `commit:${target.sha.toLowerCase()}`;
-  }
-}
-
 export function createGitViewed(
   bb: BbPluginApi,
+  db: GitDatabase,
   changed: (environmentId: string) => void,
 ): GitViewed {
-  const db = bb.storage.database();
-  bb.storage.migrate(db, VIEWED_MIGRATIONS);
   const insert = db.prepare(
     `INSERT INTO viewed_files (environment_id, target_key, path, revision, updated_at)
      VALUES (?, ?, ?, ?, ?)
@@ -97,18 +74,6 @@ export function createGitViewed(
     await bb.storage.kv.delete(VIEWED_MARKS_FROM_CORE_KEY);
   }
 
-  async function environmentExists(environmentId: string): Promise<boolean> {
-    try {
-      await bb.sdk.environments.get({ environmentId });
-      return true;
-    } catch (error) {
-      if (error instanceof experimental_BbHttpError && error.status === 404) {
-        return false;
-      }
-      throw error;
-    }
-  }
-
   async function forgetDeletedEnvironments(): Promise<void> {
     const marked = z
       .array(z.string())
@@ -122,7 +87,7 @@ export function createGitViewed(
       "DELETE FROM viewed_files WHERE environment_id = ?",
     );
     for (const id of marked) {
-      if (!(await environmentExists(id))) remove.run(id);
+      if (!(await environmentExists(bb, id))) remove.run(id);
     }
   }
 

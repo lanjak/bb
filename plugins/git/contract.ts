@@ -172,6 +172,150 @@ export function gitViewedTag(environmentId: string): string {
   return `viewed:${environmentId}`;
 }
 
+export const GIT_COMMENTS_MAX_PER_ENVIRONMENT = 500;
+export const GIT_COMMENT_BODY_MAX = 8000;
+export const GIT_COMMENT_NOTE_MAX = 4000;
+export const GIT_COMMENT_MAX_LINES = 50;
+export const GIT_COMMENT_CONTEXT_LINES = 3;
+export const GIT_COMMENT_CODE_MAX_BYTES = 8 * 1024;
+export const GIT_COMMENT_BATCH_MAX_COMMENTS = 200;
+export const GIT_COMMENT_MENTION_PROVIDER_ID = "review-comments";
+
+export function gitCommentsTag(environmentId: string): string {
+  return `comments:${environmentId}`;
+}
+
+export const gitCommentIdSchema = z.string().regex(/^dcm_[0-9a-f]{16}$/u);
+export const gitCommentBatchIdSchema = z.string().regex(/^dcb_[0-9a-f]{16}$/u);
+
+export const gitCommentPathSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine(
+    (path) =>
+      !path.startsWith("/") &&
+      !path.includes("\u0000") &&
+      !path.split("/").some((segment) => segment === ".." || segment === ""),
+    { message: "Invalid path" },
+  );
+
+const gitCommentSideSchema = z.enum(["new", "old"]);
+
+const utf8Encoder = new TextEncoder();
+
+function utf8Length(lines: readonly string[]): number {
+  return lines.reduce(
+    (total, line) => total + utf8Encoder.encode(line).length + 1,
+    0,
+  );
+}
+
+export const gitCommentAnchorSchema = z
+  .object({
+    path: gitCommentPathSchema,
+    side: gitCommentSideSchema,
+    startLine: z.number().int().min(1),
+    endLine: z.number().int().min(1),
+    lines: z.array(z.string()).min(1).max(GIT_COMMENT_MAX_LINES),
+    contextBefore: z.array(z.string()).max(GIT_COMMENT_CONTEXT_LINES),
+    contextAfter: z.array(z.string()).max(GIT_COMMENT_CONTEXT_LINES),
+  })
+  .strict()
+  .refine(
+    (anchor) =>
+      anchor.endLine >= anchor.startLine &&
+      anchor.lines.length === anchor.endLine - anchor.startLine + 1,
+    { message: "lines must cover startLine through endLine" },
+  )
+  .refine(
+    (anchor) =>
+      utf8Length(anchor.lines) +
+        utf8Length(anchor.contextBefore) +
+        utf8Length(anchor.contextAfter) <=
+      GIT_COMMENT_CODE_MAX_BYTES,
+    { message: "Commented code is too large" },
+  );
+export type GitCommentAnchor = z.infer<typeof gitCommentAnchorSchema>;
+
+export const gitCommentPlacementSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("current"),
+      startLine: z.number().int(),
+      endLine: z.number().int(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("moved"),
+      startLine: z.number().int(),
+      endLine: z.number().int(),
+      fromStartLine: z.number().int(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("outdated") }).strict(),
+  z.object({ kind: z.literal("not_in_diff") }).strict(),
+  z.object({ kind: z.literal("unknown") }).strict(),
+]);
+export type GitCommentPlacement = z.infer<typeof gitCommentPlacementSchema>;
+
+export const gitCommentSchema = z
+  .object({
+    id: gitCommentIdSchema,
+    environmentId: z.string().min(1),
+    path: z.string().min(1),
+    currentPath: z.string().min(1).optional(),
+    side: gitCommentSideSchema,
+    startLine: z.number().int(),
+    endLine: z.number().int(),
+    lines: z.array(z.string()),
+    contextBefore: z.array(z.string()),
+    contextAfter: z.array(z.string()),
+    body: z.string(),
+    author: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("user") }).strict(),
+      z
+        .object({ kind: z.literal("thread"), threadId: z.string().min(1) })
+        .strict(),
+      z.object({ kind: z.literal("unspecified") }).strict(),
+    ]),
+    state: z.enum(["unsent", "sent", "resolved"]),
+    sent: z
+      .object({
+        batchId: gitCommentBatchIdSchema,
+        threadId: z.string().min(1),
+        at: z.number().int(),
+      })
+      .strict()
+      .optional(),
+    resolution: z
+      .object({
+        at: z.number().int(),
+        note: z.string().optional(),
+        byThreadId: z.string().min(1).optional(),
+      })
+      .strict()
+      .optional(),
+    placement: gitCommentPlacementSchema,
+    createdAt: z.number().int(),
+    updatedAt: z.number().int(),
+  })
+  .strict();
+export type GitComment = z.infer<typeof gitCommentSchema>;
+
+export const gitCommentSelectionSchema = z
+  .object({
+    ids: z
+      .array(gitCommentIdSchema)
+      .min(1)
+      .max(GIT_COMMENT_BATCH_MAX_COMMENTS)
+      .optional(),
+    includeSent: z.boolean().optional(),
+    path: gitCommentPathSchema.optional(),
+  })
+  .strict();
+
 export const gitViewedFileSchema = z
   .object({
     path: z.string().min(1),

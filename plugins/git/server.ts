@@ -6,6 +6,8 @@ import {
 import {
   GIT_SHOW_CHANGES_SETTING,
   GIT_SHOW_COMMIT_BUTTON_SETTING,
+  GIT_COMMENT_MENTION_PROVIDER_ID,
+  gitCommentsTag,
   gitFilesTag,
   gitRefsTag,
   gitStatusTag,
@@ -24,7 +26,11 @@ import {
 } from "./server/invalidation.js";
 import { createGitReads } from "./server/reads.js";
 import { createReadGenerations } from "./server/generations.js";
+import { environmentExists } from "./server/reads.js";
 import { createGitViewed } from "./server/viewed.js";
+import { createGitCommentStore } from "./server/comments.js";
+import { createGitCommentsService } from "./server/comment-service.js";
+import { openGitDatabase } from "./server/storage.js";
 
 const DEFAULT_BRANCH_LIMIT = 50;
 const THREAD_ENVIRONMENT_CACHE_LIMIT = 1024;
@@ -56,9 +62,34 @@ export default function gitPlugin(bb: BbPluginApi): void {
   const invalidator = createCoalescedInvalidator((tags) =>
     bb.rpc.experimental_invalidate(tags),
   );
-  const viewed = createGitViewed(bb, (environmentId) => {
+  const database = openGitDatabase(bb);
+  const viewed = createGitViewed(bb, database, (environmentId) => {
     if (watchedEnvironments.has(environmentId))
       invalidator.invalidate(environmentId, [gitViewedTag(environmentId)]);
+  });
+  const comments = createGitCommentsService({
+    bb,
+    reads,
+    store: createGitCommentStore(database),
+    changed: (environmentId) => {
+      if (watchedEnvironments.has(environmentId))
+        invalidator.invalidate(environmentId, [gitCommentsTag(environmentId)]);
+    },
+  });
+  void comments
+    .forgetDeletedEnvironments((environmentId) =>
+      environmentExists(bb, environmentId),
+    )
+    .catch((error: unknown) =>
+      bb.log.warn(
+        `Could not forget deleted environments' comments: ${String(error)}`,
+      ),
+    );
+  bb.ui.registerMentionProvider({
+    id: GIT_COMMENT_MENTION_PROVIDER_ID,
+    label: "Review comments",
+    search: () => [],
+    resolve: (batchId) => comments.resolveBatchContext(batchId),
   });
 
   let stopEnvironmentEvents: (() => void) | null = null;
@@ -318,6 +349,66 @@ export default function gitPlugin(bb: BbPluginApi): void {
         viewed.mark(environmentId, target, path, revision),
       clearViewed: ({ environmentId, target, path }) =>
         viewed.clear(environmentId, target, path),
+      comments: ({ environmentId, target, includeResolved }, context) =>
+        comments.list(
+          environmentId,
+          target,
+          includeResolved ?? false,
+          context.experimental_signal,
+        ),
+      addComment: ({
+        environmentId,
+        target,
+        revision,
+        anchor,
+        body,
+        authorThreadId,
+        byPerson,
+      }) =>
+        comments.add({
+          environmentId,
+          target,
+          revision,
+          anchor,
+          body,
+          authorThreadId,
+          byPerson,
+        }),
+      editComment: ({ id, body }) => comments.edit(id, body),
+      deleteComment: ({ id }) => comments.remove(id),
+      resolveComment: ({ id, note, resolvedByThreadId }) =>
+        comments.resolve(id, { note, byThreadId: resolvedByThreadId }),
+      reopenComment: ({ id }) => comments.reopen(id),
+      createCommentBatch: ({
+        environmentId,
+        threadId,
+        ids,
+        includeSent,
+        path,
+      }) =>
+        comments.createBatch({
+          environmentId,
+          threadId,
+          ids,
+          includeSent,
+          path,
+        }),
+      sendComments: ({
+        environmentId,
+        threadId,
+        ids,
+        includeSent,
+        path,
+        message,
+      }) =>
+        comments.send({
+          environmentId,
+          threadId,
+          ids,
+          includeSent,
+          path,
+          message,
+        }),
       async setMergeBase({ environmentId, mergeBaseBranch }) {
         const environment = await bb.sdk.environments.get({ environmentId });
         if (environment.status !== "ready" || environment.path === null) {
@@ -367,6 +458,7 @@ export default function gitPlugin(bb: BbPluginApi): void {
     "patches",
     "branches",
     "viewed",
+    "comments",
   ] as const) {
     bb.rpc.experimental_whileWatched(method, (read, signal) => {
       if ("key" in read) {
@@ -389,7 +481,12 @@ export default function gitPlugin(bb: BbPluginApi): void {
     });
   }
 
-  bb.cli.register(createGitCli(reads, viewed));
+  bb.cli.register(
+    createGitCli(reads, viewed, comments, async (threadId) => {
+      const thread = await bb.sdk.threads.get({ threadId });
+      return thread.environmentId;
+    }),
+  );
   bb.onDispose(() => {
     stopEnvironmentEvents?.();
     stopEnvironmentEvents = null;

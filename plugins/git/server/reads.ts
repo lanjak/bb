@@ -111,6 +111,21 @@ export async function requireGitEnvironment(
   }
 }
 
+export async function environmentExists(
+  bb: BbPluginApi,
+  environmentId: string,
+): Promise<boolean> {
+  try {
+    await bb.sdk.environments.get({ environmentId });
+    return true;
+  } catch (error) {
+    if (error instanceof experimental_BbHttpError && error.status === 404) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 const KEY_SEPARATOR = "\u0000";
 
 function createReadMemo<T extends { outcome: string }>() {
