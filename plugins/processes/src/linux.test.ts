@@ -42,7 +42,7 @@ async function fakeProc(
   }>,
   tcp: string,
 ): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "dev-servers-proc-"));
+  const root = await mkdtemp(path.join(tmpdir(), "processes-proc-"));
   roots.push(root);
   await mkdir(path.join(root, "net"));
   await writeFile(path.join(root, "net", "tcp"), HEADER + tcp);

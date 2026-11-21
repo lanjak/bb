@@ -48,7 +48,7 @@ function renderDetails(servers: HostDevServer[]) {
   );
 }
 
-describe("dev servers segment", () => {
+describe("servers segment", () => {
   it("summarizes the servers and their first ports", () => {
     expect(summaryLabel([server()])).toBe("1 server · :5173");
     expect(

@@ -16,8 +16,8 @@ import {
 import { devServersContract, type HostDevServer } from "./contract.js";
 
 const REFRESH_MS = 15_000;
-const TOGGLE_ID = "thread-prompt-banner-dev-servers-toggle";
-const BODY_ID = "thread-prompt-banner-dev-servers-body";
+const TOGGLE_ID = "thread-prompt-banner-processes-toggle";
+const BODY_ID = "thread-prompt-banner-processes-body";
 const SEGMENT_GROUP = "4_devServers";
 
 export function useDevServers(threadId: string): HostDevServer[] {
@@ -211,7 +211,7 @@ function useDevServersVisible({
 
 export default definePluginApp((app) => {
   app.slots.experimental_threadContextSegment({
-    id: "dev-servers",
+    id: "servers",
     title: "Servers",
     group: SEGMENT_GROUP,
     order: 10,

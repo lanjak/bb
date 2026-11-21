@@ -72,7 +72,7 @@ function createDeps(
   return { deps, signals, alive };
 }
 
-describe("dev servers host entry", () => {
+describe("processes host entry", () => {
   it("lists a thread's server with its command, directory and start time", async () => {
     const { deps } = createDeps();
     const harness = experimental_createHostEntryHarness(

@@ -83,7 +83,7 @@ async function start(scenario: Scenario = {}) {
   return host;
 }
 
-describe("dev servers server entry", () => {
+describe("processes server entry", () => {
   it("lists a thread's servers from the machine of its environment", async () => {
     const host = await start();
     await expect(

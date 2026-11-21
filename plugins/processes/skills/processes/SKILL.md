@@ -56,4 +56,4 @@ address; otherwise the row names the machine.
 When a thread is archived or deleted, the plugin stops its servers if the
 thread's machine is online; it does not retry later. Deleting a whole project
 can remove an environment first, and then its servers are not stopped. Turn
-this off with `bb plugin config bb--dev-servers set stopOnArchive false`.
+this off with `bb plugin config bb--processes set stopOnArchive false`.
