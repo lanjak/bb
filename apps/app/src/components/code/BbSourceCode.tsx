@@ -37,6 +37,7 @@ import {
   truncateSourceCode,
   type SourceCodeTruncation,
 } from "./source-code-budget";
+import type { CodeLineSelection } from "./line-selection-actions";
 import type { BbSourceCodeProps } from "./code-rendering";
 
 interface SourceCodeWorkerPoolStats {
@@ -237,7 +238,7 @@ function BbSourceCode({
   highlightedLines,
   className,
   scrollToHighlightedLines = false,
-  onSelectionAddToChat,
+  selectionActions,
 }: BbSourceCodeProps) {
   const fileCacheKey = cacheKey ?? path;
   const file = useMemo<PierreFileContents>(
@@ -258,45 +259,44 @@ function BbSourceCode({
   const [fullFileRequestedFor, setFullFileRequestedFor] = useState<
     string | null
   >(null);
-  const buildSelectionText = useCallback(
-    (range: SelectedLineRange) =>
-      buildLineSelectionText({ contents: content, path, range }),
+  const buildSelection = useCallback(
+    (range: SelectedLineRange): CodeLineSelection | null => {
+      const text = buildLineSelectionText({ contents: content, path, range });
+      return text === null ? null : { text };
+    },
     [content, path],
   );
   const lineSelectionActions = usePierreLineSelectionActions({
-    buildSelectionText,
+    actions: selectionActions,
+    buildSelection,
     containerRef,
-    enabled: onSelectionAddToChat !== undefined,
-    onSelectionAddToChat,
   });
+  const hasSelectionActions = selectionActions.length > 0;
   const baseOptions = useMemo<FileOptions<undefined>>(
     () => ({
       themeType: preferredTheme,
       theme: codeTheme,
       overflow,
       disableFileHeader: true,
-      enableGutterUtility: onSelectionAddToChat !== undefined,
-      enableLineSelection:
-        highlightedLines !== null || onSelectionAddToChat !== undefined,
-      lineHoverHighlight:
-        onSelectionAddToChat === undefined ? "disabled" : "number",
-      onGutterUtilityClick:
-        onSelectionAddToChat === undefined
-          ? undefined
-          : lineSelectionActions.onGutterUtilityClick,
+      enableGutterUtility: hasSelectionActions,
+      enableLineSelection: highlightedLines !== null || hasSelectionActions,
+      lineHoverHighlight: hasSelectionActions ? "number" : "disabled",
+      onGutterUtilityClick: hasSelectionActions
+        ? lineSelectionActions.onGutterUtilityClick
+        : undefined,
       onLineSelectionChange: lineSelectionActions.onLineSelectionChange,
       onLineSelectionEnd: lineSelectionActions.onLineSelectionEnd,
       onLineSelectionStart: lineSelectionActions.onLineSelectionStart,
     }),
     [
       codeTheme,
+      hasSelectionActions,
       highlightedLines,
       overflow,
       lineSelectionActions.onGutterUtilityClick,
       lineSelectionActions.onLineSelectionChange,
       lineSelectionActions.onLineSelectionEnd,
       lineSelectionActions.onLineSelectionStart,
-      onSelectionAddToChat,
       preferredTheme,
     ],
   );

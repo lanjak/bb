@@ -13,6 +13,11 @@ import { resetAllCrashedPluginSlotsForTest } from "@/components/plugin/PluginSlo
 import { PluginSourceCode } from "@/components/plugin/PluginSourceCode";
 import { SelectionAddToChatContext } from "@/components/thread/SelectionAddToChatContext";
 import { SourceCodeHost } from "./SourceCodeHost";
+import {
+  ADD_TO_CHAT_ACTION_ID,
+  type CodeLineSelection,
+  type LineSelectionAction,
+} from "./line-selection-actions";
 import { makePluginRegistrationSet } from "@/test/fixtures/plugins";
 
 const bbSourceCode = vi.hoisted(() => ({
@@ -64,6 +69,11 @@ afterEach(() => {
   resetPluginSlotStoreForTest();
   vi.restoreAllMocks();
 });
+
+function codeActionsOf(): readonly LineSelectionAction<CodeLineSelection>[] {
+  const actions = bbSourceCode.lastProps?.selectionActions;
+  return Array.isArray(actions) ? actions : [];
+}
 
 describe("SourceCodeHost", () => {
   it("hands the replacement resolved semantic props, not BB's host-only inputs", async () => {
@@ -144,7 +154,7 @@ describe("experimental_SourceCode", () => {
       <PluginSourceCode content={CONTENT} path="src/app.ts" />,
     );
     await screen.findByTestId("bb-source-code");
-    expect(bbSourceCode.lastProps?.onSelectionAddToChat).toBeUndefined();
+    expect(codeActionsOf()).toEqual([]);
     unmount();
 
     render(
@@ -153,6 +163,9 @@ describe("experimental_SourceCode", () => {
       </SelectionAddToChatContext.Provider>,
     );
     await screen.findByTestId("bb-source-code");
-    expect(bbSourceCode.lastProps?.onSelectionAddToChat).toBe(addToChat);
+    const actions = codeActionsOf();
+    expect(actions.map((action) => action.id)).toEqual([ADD_TO_CHAT_ACTION_ID]);
+    actions[0]?.run({ text: "  quoted  " });
+    expect(addToChat).toHaveBeenCalledWith("quoted");
   });
 });

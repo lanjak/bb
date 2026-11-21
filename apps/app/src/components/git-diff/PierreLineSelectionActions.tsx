@@ -17,23 +17,36 @@ import {
   type SelectionAnchorPoint,
   type SelectionAnchorSide,
 } from "@/components/thread/timeline/SelectableMessageProse.js";
-import { TimelineSelectionMenu } from "@/components/thread/timeline/TimelineSelectionMenu.js";
+import {
+  TimelineSelectionMenu,
+  type TimelineSelectionMenuAction,
+} from "@/components/thread/timeline/TimelineSelectionMenu.js";
 import { getDiffShadowRoots } from "@bb/shared-ui/git-diff/patch-text";
+import type {
+  CodeLineSelection,
+  LineSelectionAction,
+} from "@/components/code/line-selection-actions.js";
 
 const LINE_SELECTION_MENU_INLINE_OFFSET_PX = 72;
 
 let documentPointerStartPoint: SelectionAnchorPoint | null = null;
 let documentPointerReleaseAnchor: SelectionAnchor | null = null;
 
-interface UsePierreLineSelectionActionsArgs {
-  buildFallbackSelectionText?: (args: {
+interface UsePierreLineSelectionActionsArgs<
+  TSelection extends CodeLineSelection,
+> {
+  actions: readonly LineSelectionAction<TSelection>[];
+  buildFallbackSelection?: (args: {
     containerElement: HTMLElement | null;
     range: SelectedLineRange;
-  }) => string | null;
-  buildSelectionText: (range: SelectedLineRange) => string | null;
+  }) => TSelection | null;
+  buildSelection: (range: SelectedLineRange) => TSelection | null;
   containerRef: RefObject<HTMLElement | null>;
-  enabled: boolean;
-  onSelectionAddToChat?: (text: string) => void;
+}
+
+interface ActiveLineSelection<TSelection extends CodeLineSelection> {
+  menuSelection: MessageProseSelection;
+  selection: TSelection;
 }
 
 export interface PierreLineSelectionActions {
@@ -261,13 +274,15 @@ function anchorSideFromSelectionStart({
   return null;
 }
 
-export function usePierreLineSelectionActions({
-  buildFallbackSelectionText,
-  buildSelectionText,
+export function usePierreLineSelectionActions<
+  TSelection extends CodeLineSelection,
+>({
+  actions,
+  buildFallbackSelection,
+  buildSelection,
   containerRef,
-  enabled,
-  onSelectionAddToChat,
-}: UsePierreLineSelectionActionsArgs): PierreLineSelectionActions {
+}: UsePierreLineSelectionActionsArgs<TSelection>): PierreLineSelectionActions {
+  const enabled = actions.length > 0;
   const [activeRange, setActiveRange] = useState<SelectedLineRange | null>(
     null,
   );
@@ -275,7 +290,7 @@ export function usePierreLineSelectionActions({
     null,
   );
   const [activeSelection, setActiveSelection] =
-    useState<MessageProseSelection | null>(null);
+    useState<ActiveLineSelection<TSelection> | null>(null);
   const pointerStartPointRef = useRef<SelectionAnchorPoint | null>(null);
   const lastPointerReleaseAnchorRef = useRef<SelectionAnchor | null>(null);
   const lastLineSelectionAnchorRef = useRef<SelectionAnchor | null>(null);
@@ -435,13 +450,13 @@ export function usePierreLineSelectionActions({
         return;
       }
       const containerElement = containerRef.current;
-      const selectionText =
-        buildSelectionText(range) ??
-        buildFallbackSelectionText?.({
+      const lineSelection =
+        buildSelection(range) ??
+        buildFallbackSelection?.({
           containerElement,
           range,
         }) ??
-        "";
+        null;
       const pointerAnchor =
         lastLineSelectionAnchorRef.current ??
         lastPointerReleaseAnchorRef.current ??
@@ -472,12 +487,12 @@ export function usePierreLineSelectionActions({
         resolvedAnchorPoint === null
           ? interactionAnchor
           : { point: resolvedAnchorPoint, side: anchorSide };
-      const selection = buildMenuSelection({
+      const menuSelection = buildMenuSelection({
         anchor,
         containerElement,
-        text: selectionText,
+        text: lineSelection?.text ?? "",
       });
-      if (selection === null) {
+      if (lineSelection === null || menuSelection === null) {
         suppressedSelectionEndRangeRef.current = range;
         setActiveRange(null);
         setPreviewRange(null);
@@ -489,9 +504,9 @@ export function usePierreLineSelectionActions({
       currentLineRangeRef.current = range;
       setActiveRange(range);
       setPreviewRange(range);
-      setActiveSelection(selection);
+      setActiveSelection({ menuSelection, selection: lineSelection });
     },
-    [buildFallbackSelectionText, buildSelectionText, containerRef, enabled],
+    [buildFallbackSelection, buildSelection, containerRef, enabled],
   );
 
   const handleLineSelectionStart = useCallback(
@@ -549,34 +564,34 @@ export function usePierreLineSelectionActions({
     [enabled],
   );
 
-  const handleSelectionAddToChat = useCallback(
-    (text: string) => {
-      onSelectionAddToChat?.(text);
-      dismissSelection();
-    },
-    [dismissSelection, onSelectionAddToChat],
-  );
+  const menuActions = useMemo<TimelineSelectionMenuAction[]>(() => {
+    if (activeSelection === null) {
+      return [];
+    }
+    const { selection } = activeSelection;
+    return actions
+      .filter((action) => action.isAvailable?.(selection) ?? true)
+      .map((action) => ({
+        key: action.id,
+        label: action.label,
+        icon: action.icon.kind === "core" ? action.icon.name : "Zap",
+        ...(action.icon.kind === "plugin"
+          ? { plugin: { pluginId: null, icon: action.icon.icon } }
+          : {}),
+        onSelect: () => action.run(selection),
+      }));
+  }, [actions, activeSelection]);
 
   const menu = useMemo(
     () =>
       enabled ? (
         <TimelineSelectionMenu
-          selection={activeSelection}
-          onAddToChat={
-            onSelectionAddToChat === undefined
-              ? undefined
-              : handleSelectionAddToChat
-          }
+          selection={activeSelection?.menuSelection ?? null}
+          actions={menuActions}
           onDismiss={dismissSelection}
         />
       ) : null,
-    [
-      activeSelection,
-      dismissSelection,
-      enabled,
-      handleSelectionAddToChat,
-      onSelectionAddToChat,
-    ],
+    [activeSelection, dismissSelection, enabled, menuActions],
   );
 
   return {

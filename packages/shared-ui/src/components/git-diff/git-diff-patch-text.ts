@@ -337,6 +337,176 @@ export function buildDiffLineSelectionText({
   return buildUnifiedDiffPatchText({ fileDiff, lines: selectedLines });
 }
 
+export const DIFF_ANCHOR_MAX_LINES = 50;
+export const DIFF_ANCHOR_CONTEXT_LINES = 3;
+
+export interface DiffSelectionPoint {
+  side: "old" | "new";
+  line: number;
+}
+
+export interface DiffLineAnchor {
+  side: "old" | "new";
+  startLine: number;
+  endLine: number;
+  lines: string[];
+  contextBefore: string[];
+  contextAfter: string[];
+  truncated: boolean;
+  selectedFrom: DiffSelectionPoint;
+  selectedTo: DiffSelectionPoint;
+}
+
+function pairDeletionsWithAdditions(patchLines: DiffPatchLine[]) {
+  const pairs = new Map<DiffPatchLine, DiffPatchLine>();
+  let deletions: DiffPatchLine[] = [];
+  let additions: DiffPatchLine[] = [];
+  let blockHunkIndex = -1;
+  const flush = () => {
+    deletions.forEach((deletion, index) => {
+      const addition = additions[index];
+      if (addition !== undefined) {
+        pairs.set(deletion, addition);
+      }
+    });
+    deletions = [];
+    additions = [];
+  };
+  for (const line of patchLines) {
+    if (line.prefix === " " || line.hunkIndex !== blockHunkIndex) {
+      flush();
+      blockHunkIndex = line.hunkIndex;
+    }
+    if (line.prefix === "-") {
+      deletions.push(line);
+    } else if (line.prefix === "+") {
+      additions.push(line);
+    }
+  }
+  flush();
+  return pairs;
+}
+
+function collectTextByLineNumber(
+  patchLines: DiffPatchLine[],
+  side: "old" | "new",
+) {
+  const textByLine = new Map<number, string>();
+  for (const line of patchLines) {
+    const lineNumber = side === "new" ? line.newLineNumber : line.oldLineNumber;
+    if (lineNumber !== null) {
+      textByLine.set(lineNumber, line.text);
+    }
+  }
+  return textByLine;
+}
+
+function collectContiguousLines({
+  direction,
+  from,
+  limit,
+  textByLine,
+}: {
+  direction: 1 | -1;
+  from: number;
+  limit: number;
+  textByLine: Map<number, string>;
+}) {
+  const collected: string[] = [];
+  for (
+    let lineNumber = from;
+    collected.length < limit;
+    lineNumber += direction
+  ) {
+    const text = textByLine.get(lineNumber);
+    if (text === undefined) {
+      break;
+    }
+    collected.push(text);
+  }
+  return direction === 1 ? collected : collected.reverse();
+}
+
+export function diffSelectionToAnchor({
+  displayStyle,
+  fileDiff,
+  range,
+}: {
+  displayStyle: DiffPatchDisplayStyle;
+  fileDiff: ParsedGitDiffFile;
+  range: SelectedLineRange;
+}): DiffLineAnchor | null {
+  const patchLines = collectDiffPatchLines(fileDiff);
+  const selectedLines = getSelectedDiffPatchLines({
+    displayStyle,
+    patchLines,
+    range,
+  });
+  if (selectedLines.length === 0) {
+    return null;
+  }
+  const pairs = pairDeletionsWithAdditions(patchLines);
+  const newNumbers: number[] = [];
+  const oldNumbers: number[] = [];
+  for (const line of selectedLines) {
+    const newLineNumber =
+      line.prefix === "-"
+        ? (pairs.get(line)?.newLineNumber ?? null)
+        : line.newLineNumber;
+    if (newLineNumber !== null) {
+      newNumbers.push(newLineNumber);
+    } else if (line.oldLineNumber !== null) {
+      oldNumbers.push(line.oldLineNumber);
+    }
+  }
+  const side = newNumbers.length > 0 ? "new" : "old";
+  const numbers = side === "new" ? newNumbers : oldNumbers;
+  if (numbers.length === 0) {
+    return null;
+  }
+  const startLine = Math.min(...numbers);
+  const wantedLineCount = Math.max(...numbers) - startLine + 1;
+  const textByLine = collectTextByLineNumber(patchLines, side);
+  const lines = collectContiguousLines({
+    direction: 1,
+    from: startLine,
+    limit: Math.min(wantedLineCount, DIFF_ANCHOR_MAX_LINES),
+    textByLine,
+  });
+  if (lines.length === 0) {
+    return null;
+  }
+  const pointSide = (selectionSide: SelectionSide | undefined) =>
+    selectionSide === "deletions" ? ("old" as const) : ("new" as const);
+  return {
+    side,
+    startLine,
+    endLine: startLine + lines.length - 1,
+    lines,
+    truncated: lines.length < wantedLineCount,
+    selectedFrom: {
+      side: pointSide(range.side ?? range.endSide),
+      line: range.start,
+    },
+    selectedTo: {
+      side: pointSide(range.endSide ?? range.side),
+      line: range.end,
+    },
+    contextBefore: collectContiguousLines({
+      direction: -1,
+      from: startLine - 1,
+      limit: DIFF_ANCHOR_CONTEXT_LINES,
+      textByLine,
+    }),
+    contextAfter: collectContiguousLines({
+      direction: 1,
+      from: startLine + lines.length,
+      limit: DIFF_ANCHOR_CONTEXT_LINES,
+      textByLine,
+    }),
+  };
+}
+
 export function getDiffShadowRoots(containerElement: HTMLElement | null) {
   if (containerElement === null) {
     return [];

@@ -12,6 +12,9 @@ export function PluginDiff({
   overflow,
   showLineNumbers,
   experimental_fullFileContents: fullFileContents,
+  experimental_selectionActions: selectionActions,
+  experimental_lineAnnotations: lineAnnotations,
+  experimental_renderLineAnnotation: renderLineAnnotation,
   className,
 }: DiffProps) {
   const onSelectionAddToChat = useSelectionAddToChat();
@@ -41,6 +44,9 @@ export function PluginDiff({
       showLineNumbers={showLineNumbers}
       className={className}
       onSelectionAddToChat={onSelectionAddToChat}
+      selectionActions={selectionActions}
+      lineAnnotations={lineAnnotations}
+      renderLineAnnotation={renderLineAnnotation}
     />
   );
 }

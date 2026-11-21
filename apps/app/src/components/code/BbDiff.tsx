@@ -1,6 +1,10 @@
 import { DiffLoadingSkeleton } from "@bb/shared-ui/diff-loading-skeleton";
 import { useCallback, useMemo, useRef, type CSSProperties } from "react";
-import type { FileDiffOptions, SelectedLineRange } from "@pierre/diffs";
+import type {
+  DiffLineAnnotation,
+  FileDiffOptions,
+  SelectedLineRange,
+} from "@pierre/diffs";
 import { FileDiff as DiffView } from "@pierre/diffs/react";
 import { usePierreLineSelectionActions } from "@/components/git-diff/PierreLineSelectionActions.js";
 import { PierreWorkerPoolBoundary } from "@/lib/pierre-worker-pool-boundary";
@@ -10,12 +14,15 @@ import {
   buildFileDiffPatchText,
   buildDiffDomSelectionText,
   buildDiffLineSelectionText,
+  diffSelectionToAnchor,
 } from "@bb/shared-ui/git-diff/patch-text";
 import { enrichGitDiffFileForContext } from "@bb/shared-ui/git-diff/parsing";
 import { useResolvedCodeThemePair } from "@/lib/code-theme";
 import { usePreferredTheme } from "@/hooks/useTheme";
 import { cn } from "@bb/shared-ui/lib/utils";
 import type { BbDiffProps } from "./code-rendering";
+import type { ExperimentalDiffLineAnnotation } from "@get-bb/plugin-sdk";
+import type { DiffLineSelection } from "./line-selection-actions";
 
 const DIFF_VIEW_STYLE = {
   "--diffs-font-size": "12px",
@@ -35,7 +42,9 @@ function BbDiff({
   overflow,
   showLineNumbers,
   className,
-  onSelectionAddToChat,
+  selectionActions,
+  lineAnnotations,
+  renderLineAnnotation,
 }: BbDiffProps) {
   const oldPath = fullFileContents?.old.path;
   const oldContent = fullFileContents?.old.content;
@@ -64,33 +73,50 @@ function BbDiff({
   const containerRef = useRef<HTMLDivElement>(null);
   const codeTheme = useResolvedCodeThemePair();
   const themeType = usePreferredTheme();
-  const buildSelectionText = useCallback(
-    (range: SelectedLineRange) =>
-      buildDiffLineSelectionText({
+  const buildSelection = useCallback(
+    (range: SelectedLineRange): DiffLineSelection | null => {
+      const text = buildDiffLineSelectionText({
         displayStyle: view,
         fileDiff: resolvedFile,
         range,
-      }),
+      });
+      if (text === null) {
+        return null;
+      }
+      return {
+        text,
+        anchor: diffSelectionToAnchor({
+          displayStyle: view,
+          fileDiff: resolvedFile,
+          range,
+        }),
+      };
+    },
     [resolvedFile, view],
   );
-  const buildFallbackSelectionText = useCallback(
+  const buildFallbackSelection = useCallback(
     ({
       containerElement,
     }: {
       containerElement: HTMLElement | null;
       range: SelectedLineRange;
-    }) =>
-      buildDiffDomSelectionText({ containerElement, fileDiff: resolvedFile }),
+    }): DiffLineSelection | null => {
+      const text = buildDiffDomSelectionText({
+        containerElement,
+        fileDiff: resolvedFile,
+      });
+      return text === null ? null : { text, anchor: null };
+    },
     [resolvedFile],
   );
   const lineSelectionActions = usePierreLineSelectionActions({
-    buildFallbackSelectionText,
-    buildSelectionText,
+    actions: selectionActions,
+    buildFallbackSelection,
+    buildSelection,
     containerRef,
-    enabled: onSelectionAddToChat !== undefined,
-    onSelectionAddToChat,
   });
-  const baseOptions = useMemo<FileDiffOptions<undefined>>(
+  const hasSelectionActions = selectionActions.length > 0;
+  const baseOptions = useMemo<FileDiffOptions<ExperimentalDiffLineAnnotation>>(
     () => ({
       diffStyle: view,
       overflow,
@@ -99,14 +125,12 @@ function BbDiff({
       ...(expansionLineCount === undefined ? {} : { expansionLineCount }),
       themeType,
       theme: codeTheme,
-      enableGutterUtility: onSelectionAddToChat !== undefined,
-      enableLineSelection: onSelectionAddToChat !== undefined,
-      lineHoverHighlight:
-        onSelectionAddToChat === undefined ? "disabled" : "number",
-      onGutterUtilityClick:
-        onSelectionAddToChat === undefined
-          ? undefined
-          : lineSelectionActions.onGutterUtilityClick,
+      enableGutterUtility: hasSelectionActions,
+      enableLineSelection: hasSelectionActions,
+      lineHoverHighlight: hasSelectionActions ? "number" : "disabled",
+      onGutterUtilityClick: hasSelectionActions
+        ? lineSelectionActions.onGutterUtilityClick
+        : undefined,
       onLineSelectionChange: lineSelectionActions.onLineSelectionChange,
       onLineSelectionEnd: lineSelectionActions.onLineSelectionEnd,
       onLineSelectionStart: lineSelectionActions.onLineSelectionStart,
@@ -115,11 +139,11 @@ function BbDiff({
     [
       codeTheme,
       expansionLineCount,
+      hasSelectionActions,
       lineSelectionActions.onGutterUtilityClick,
       lineSelectionActions.onLineSelectionChange,
       lineSelectionActions.onLineSelectionEnd,
       lineSelectionActions.onLineSelectionStart,
-      onSelectionAddToChat,
       overflow,
       showLineNumbers,
       themeType,
@@ -127,6 +151,23 @@ function BbDiff({
     ],
   );
   const options = usePierreStrictModeRecoveryOptions(baseOptions);
+  const pierreAnnotations = useMemo(
+    () =>
+      lineAnnotations?.map((annotation) => ({
+        side:
+          annotation.side === "new"
+            ? ("additions" as const)
+            : ("deletions" as const),
+        lineNumber: annotation.line,
+        metadata: annotation,
+      })),
+    [lineAnnotations],
+  );
+  const renderPierreAnnotation = useCallback(
+    ({ metadata }: DiffLineAnnotation<ExperimentalDiffLineAnnotation>) =>
+      renderLineAnnotation?.(metadata) ?? null,
+    [renderLineAnnotation],
+  );
   const isWorkerPoolReady = useRequirePierreWorkerPool();
   if (!isWorkerPoolReady) {
     return <DiffLoadingSkeleton />;
@@ -141,10 +182,16 @@ function BbDiff({
     >
       <div className="w-full max-w-full" style={DIFF_VIEW_STYLE}>
         <PierreWorkerPoolBoundary>
-          <DiffView
+          <DiffView<ExperimentalDiffLineAnnotation>
             fileDiff={resolvedFile}
             options={options}
             selectedLines={lineSelectionActions.selectedRange}
+            lineAnnotations={pierreAnnotations}
+            renderAnnotation={
+              renderLineAnnotation === undefined
+                ? undefined
+                : renderPierreAnnotation
+            }
           />
         </PierreWorkerPoolBoundary>
       </div>

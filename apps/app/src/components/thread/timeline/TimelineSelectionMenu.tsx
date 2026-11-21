@@ -14,10 +14,10 @@ import { usePortalScopeProps } from "@/lib/portal-scope";
 import { PluginItemIcon, pluginIconName } from "@/components/plugin/PluginIcon";
 import {
   firstClientRect,
-  readSelectedMessageMarkdown,
   type MessageProseSelection,
 } from "./SelectableMessageProse.js";
 import type { ThreadTimelinePluginMessageAction } from "./types.js";
+import { createAddToChatAction } from "@/components/code/line-selection-actions.js";
 
 const SELECTION_ACTION_BUTTON_CLASS =
   "inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-xs text-foreground transition-colors hover:bg-surface-recessed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring select-none max-md:pointer-coarse:min-h-7 max-md:pointer-coarse:px-2 max-md:pointer-coarse:py-1";
@@ -25,7 +25,7 @@ const SELECTION_MENU_COLLISION_PADDING = 8;
 const SELECTION_MENU_CONTENT_CLASS =
   "pointer-events-auto z-50 flex w-auto items-center gap-0.5 rounded-md border bg-popover p-0.5 text-popover-foreground shadow-md outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95";
 
-interface SelectionAction {
+export interface TimelineSelectionMenuAction {
   icon: IconName;
   plugin?: { pluginId: string | null; icon: string | null };
   key?: string;
@@ -37,6 +37,7 @@ export interface TimelineSelectionMenuProps {
   selection: MessageProseSelection | null;
   onAddToChat?: (text: string) => void;
   pluginActions?: readonly ThreadTimelinePluginMessageAction[];
+  actions?: readonly TimelineSelectionMenuAction[];
   onDismiss: () => void;
   container?: HTMLElement | null;
 }
@@ -136,7 +137,7 @@ function ActionButton({
   onDismiss,
   selection,
 }: {
-  action: SelectionAction;
+  action: TimelineSelectionMenuAction;
   onDismiss: () => void;
   selection: MessageProseSelection;
 }) {
@@ -205,6 +206,7 @@ export function TimelineSelectionMenu({
   selection,
   onAddToChat,
   pluginActions = [],
+  actions: extraActions = [],
   onDismiss,
   container,
 }: TimelineSelectionMenuProps) {
@@ -246,16 +248,18 @@ export function TimelineSelectionMenu({
 
   if (!selection) return null;
 
-  const actions: SelectionAction[] = [
-    ...(onAddToChat
+  const addToChat = onAddToChat ? createAddToChatAction(onAddToChat) : null;
+  const actions: TimelineSelectionMenuAction[] = [
+    ...(addToChat
       ? [
           {
-            icon: "MessageSquarePlus" as const,
-            label: "Add to chat",
+            icon:
+              addToChat.icon.kind === "core"
+                ? addToChat.icon.name
+                : ("Zap" as const),
+            label: addToChat.label,
             onSelect: (currentSelection: MessageProseSelection) =>
-              onAddToChat(
-                readSelectedMessageMarkdown() ?? currentSelection.text,
-              ),
+              addToChat.run({ text: currentSelection.text }),
           },
         ]
       : []),
@@ -266,6 +270,7 @@ export function TimelineSelectionMenu({
       label: action.label,
       onSelect: () => action.onSelect(),
     })),
+    ...extraActions,
   ];
   if (actions.length === 0) return null;
 

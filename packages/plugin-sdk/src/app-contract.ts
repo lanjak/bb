@@ -689,6 +689,76 @@ export interface ExperimentalDiffFullFileContents {
 }
 
 /**
+ * The lines a person selected in `experimental_Diff`, mapped to one side of
+ * the file. A modified row selected in unified view resolves to its paired new
+ * line, so unified and split views give the same value for the same lines.
+ * `side: "old"` only appears for lines that were removed and have no
+ * replacement.
+ */
+export interface ExperimentalDiffLineSelection {
+  /** The file side the line numbers refer to. */
+  side: "old" | "new";
+  /** First selected line, 1-based, on `side`. */
+  startLine: number;
+  /** Last selected line, 1-based and inclusive, on `side`. At most 50 lines. */
+  endLine: number;
+  /** The code on `startLine` to `endLine`, without line endings. */
+  lines: readonly string[];
+  /** Up to 3 lines above `startLine` that the patch shows, nearest last. */
+  contextBefore: readonly string[];
+  /** Up to 3 lines below `endLine` that the patch shows, nearest first. */
+  contextAfter: readonly string[];
+  /** The selection as the unified patch text that Add to chat quotes. */
+  text: string;
+  /**
+   * True when the selection covered more than `startLine` to `endLine`: it was
+   * longer than 50 lines or crossed a gap between hunks. The code in `lines`
+   * stops at the cut.
+   */
+  truncated: boolean;
+  /**
+   * The row the selection started on, as the person made it: `"old"` for a
+   * removed row (left column), `"new"` for an added or context row. A modified
+   * row selected on its removed half reports `"old"` here while `side` is
+   * `"new"`. Line numbers are on that row's own side.
+   */
+  selectedFrom: { side: "old" | "new"; line: number };
+  /** The row the selection ended on; same meaning as `selectedFrom`. */
+  selectedTo: { side: "old" | "new"; line: number };
+}
+
+/**
+ * An action in the menu that opens next to selected diff lines, beside the
+ * host's Add to chat.
+ */
+export interface ExperimentalDiffSelectionAction {
+  /** Stable id, unique among the actions passed to one `Diff`. */
+  id: string;
+  /** Menu label. */
+  label: string;
+  /** Icon name from bb's icon set. Defaults to a generic plugin icon. */
+  icon?: string;
+  /** Called with the selection when the person chooses the action. */
+  run: (selection: ExperimentalDiffLineSelection) => void;
+}
+
+/**
+ * A point in `experimental_Diff` where the caller draws its own block between
+ * two rows, for example a review comment under a line.
+ */
+export interface ExperimentalDiffLineAnnotation {
+  /** Stable id, unique among the annotations passed to one `Diff`. */
+  id: string;
+  /**
+   * `"new"` places the block under that line of the new file. `"old"` places
+   * it under that line of the removed side.
+   */
+  side: "old" | "new";
+  /** 1-based line number on `side`. Lines the patch does not show are skipped. */
+  line: number;
+}
+
+/**
  * Props of the host-owned `experimental_SourceCode` component — BB's source
  * viewer. The host owns syntax highlighting, gutters, wrapping, line-selection
  * presentation, and the live BB code theme; the caller owns loading the text
@@ -767,6 +837,21 @@ export interface DiffProps {
    * loading these contents; omit the field to render from the patch alone.
    */
   experimental_fullFileContents?: ExperimentalDiffFullFileContents;
+  /**
+   * Actions shown next to Add to chat when lines are selected. Passing at
+   * least one turns line selection on outside a thread view too. The host's
+   * Add to chat is the first entry of the same list.
+   */
+  experimental_selectionActions?: readonly ExperimentalDiffSelectionAction[];
+  /** Points where `experimental_renderLineAnnotation` draws a block. */
+  experimental_lineAnnotations?: readonly ExperimentalDiffLineAnnotation[];
+  /**
+   * Draws the block for one annotation. The host reserves the row height. An
+   * annotation whose line the patch does not show is not rendered.
+   */
+  experimental_renderLineAnnotation?: (
+    annotation: ExperimentalDiffLineAnnotation,
+  ) => ReactNode;
   /** Applied to the renderer's root element. */
   className?: string;
 }

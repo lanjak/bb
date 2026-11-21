@@ -13,6 +13,8 @@ import type {
   CodeOverflowMode,
   DiffViewMode,
   ExperimentalDiffFullFileContents,
+  ExperimentalDiffLineAnnotation,
+  ExperimentalDiffSelectionAction,
   ExperimentalImageLightboxProps,
 } from "@get-bb/plugin-sdk";
 import { CopyIconButton } from "../ui/copy-button";
@@ -31,6 +33,11 @@ export interface GitDiffRendererProps extends DiffPresentation {
   patchText?: string;
   fullFileContents: ExperimentalDiffFullFileContents | null;
   onSelectionAddToChat?: (text: string) => void;
+  selectionActions?: readonly ExperimentalDiffSelectionAction[];
+  lineAnnotations?: readonly ExperimentalDiffLineAnnotation[];
+  renderLineAnnotation?: (
+    annotation: ExperimentalDiffLineAnnotation,
+  ) => ReactNode;
 }
 
 export interface GitDiffCopyButtonProps {
@@ -52,6 +59,9 @@ function SdkDiff({
   view,
   overflow,
   showLineNumbers,
+  selectionActions,
+  lineAnnotations,
+  renderLineAnnotation,
 }: GitDiffRendererProps) {
   const patch = useMemo(
     () => patchText ?? buildFileDiffPatchText(file),
@@ -66,6 +76,9 @@ function SdkDiff({
       overflow={overflow}
       showLineNumbers={showLineNumbers}
       experimental_fullFileContents={fullFileContents ?? undefined}
+      experimental_selectionActions={selectionActions}
+      experimental_lineAnnotations={lineAnnotations}
+      experimental_renderLineAnnotation={renderLineAnnotation}
     />
   );
 }

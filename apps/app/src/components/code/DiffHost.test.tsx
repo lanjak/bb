@@ -16,6 +16,11 @@ import {
 import { resetAllCrashedPluginSlotsForTest } from "@/components/plugin/PluginSlotMount";
 import { parseGitDiffFiles } from "@bb/shared-ui/git-diff/parsing";
 import { PluginDiff } from "@/components/plugin/PluginDiff";
+import {
+  ADD_TO_CHAT_ACTION_ID,
+  type DiffLineSelection,
+  type LineSelectionAction,
+} from "./line-selection-actions";
 import { SelectionAddToChatContext } from "@/components/thread/SelectionAddToChatContext";
 import {
   AUTOMATIC_REPLACEMENT_PROVIDER,
@@ -119,6 +124,11 @@ afterEach(() => {
   resetPluginSlotStoreForTest();
   vi.restoreAllMocks();
 });
+
+function diffActionsOf(): readonly LineSelectionAction<DiffLineSelection>[] {
+  const actions = bbDiff.lastProps?.selectionActions;
+  return Array.isArray(actions) ? actions : [];
+}
 
 describe("DiffHost", () => {
   it("hands the replacement resolved semantic props, not BB's host-only inputs", async () => {
@@ -348,7 +358,7 @@ describe("experimental_Diff", () => {
     const addToChat = vi.fn();
     const { unmount } = render(<PluginDiff patch={PATCH} path="src/app.ts" />);
     await screen.findByTestId("bb-diff");
-    expect(bbDiff.lastProps?.onSelectionAddToChat).toBeUndefined();
+    expect(diffActionsOf()).toEqual([]);
     unmount();
 
     render(
@@ -357,7 +367,68 @@ describe("experimental_Diff", () => {
       </SelectionAddToChatContext.Provider>,
     );
     await screen.findByTestId("bb-diff");
-    expect(bbDiff.lastProps?.onSelectionAddToChat).toBe(addToChat);
+    const actions = diffActionsOf();
+    expect(actions.map((action) => action.id)).toEqual([ADD_TO_CHAT_ACTION_ID]);
+    actions[0]?.run({ text: "  quoted  ", anchor: null });
+    expect(addToChat).toHaveBeenCalledWith("quoted");
+  });
+
+  it("puts a plugin's selection actions after Add to chat in the same list", async () => {
+    const addToChat = vi.fn();
+    const run = vi.fn();
+    render(
+      <SelectionAddToChatContext.Provider value={addToChat}>
+        <PluginDiff
+          patch={PATCH}
+          path="src/app.ts"
+          experimental_selectionActions={[
+            {
+              id: "review.comment",
+              label: "Comment",
+              icon: "MessageSquare",
+              run,
+            },
+          ]}
+        />
+      </SelectionAddToChatContext.Provider>,
+    );
+    await screen.findByTestId("bb-diff");
+    const actions = diffActionsOf();
+    expect(actions.map((action) => action.id)).toEqual([
+      ADD_TO_CHAT_ACTION_ID,
+      "review.comment",
+    ]);
+    const anchor = {
+      side: "new" as const,
+      startLine: 2,
+      endLine: 2,
+      lines: ["const b = 3;"],
+      contextBefore: ["const a = 1;"],
+      contextAfter: ["const c = 4;"],
+      truncated: false,
+      selectedFrom: { side: "new" as const, line: 2 },
+      selectedTo: { side: "new" as const, line: 2 },
+    };
+    expect(actions[1]?.isAvailable?.({ text: "t", anchor: null })).toBe(false);
+    expect(actions[1]?.isAvailable?.({ text: "t", anchor })).toBe(true);
+    actions[1]?.run({ text: "t", anchor });
+    expect(run).toHaveBeenCalledWith({ ...anchor, text: "t" });
+  });
+
+  it("enables line selection for a plugin's actions outside a thread", async () => {
+    render(
+      <PluginDiff
+        patch={PATCH}
+        path="src/app.ts"
+        experimental_selectionActions={[
+          { id: "review.comment", label: "Comment", run: () => {} },
+        ]}
+      />,
+    );
+    await screen.findByTestId("bb-diff");
+    expect(diffActionsOf().map((action) => action.id)).toEqual([
+      "review.comment",
+    ]);
   });
 
   it("renders a mode-only git diff as a diff instead of raw text", async () => {

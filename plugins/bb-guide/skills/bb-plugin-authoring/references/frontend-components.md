@@ -134,7 +134,8 @@ routing?, allowProviderChange?, align?, disabled?, className? }`, where `routing
   visualizations `page` file opener (`plugins/inline-vis/app.tsx`).
 - `experimental_Diff` — bb's diff viewer. Props:
   `{ patch, path, view?, overflow?, showLineNumbers?, experimental_fullFileContents?,
-className? }` —
+experimental_selectionActions?, experimental_lineAnnotations?,
+experimental_renderLineAnnotation?, className? }` —
   `patch` is a unified patch for exactly ONE file and `view` is `"unified"`
   (default) or `"split"`. bb normalizes the patch, so a GitHub REST patch or
   a bare `@@` hunk works without synthesizing a `diff --git` header
@@ -144,6 +145,18 @@ className? }` —
   consistent with the patch, bb enables expand-context controls between
   hunks. The caller owns loading those complete UTF-8 sides and omits the prop
   while it has only the patch. Reference: `plugins/github/app.tsx`.
+  `experimental_selectionActions` is a list of
+  `{ id, label, icon?, run(selection) }`. They appear in the menu on selected
+  lines after bb's own Add to chat, and passing one turns line selection on
+  outside a thread view. `selection` is an `ExperimentalDiffLineSelection`
+  with `side` (`"old"` or `"new"`), `startLine`, `endLine`, `lines`,
+  `contextBefore`, `contextAfter`, `text`, `truncated` (cut at 50 lines or a
+  hunk edge), `selectedFrom` and `selectedTo` (the rows clicked, each with its
+  own side). A modified row selected in unified view resolves to its paired new
+  line; `side: "old"` is only for removed lines with no
+  replacement. `experimental_lineAnnotations` (`{ id, side, line }`) and
+  `experimental_renderLineAnnotation(annotation)` draw a block under a line.
+  Reference: `plugins/git/ui/diff/`.
 
   Alias both on import — JSX reads a lowercase-initial name as an intrinsic
   element:

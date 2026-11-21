@@ -19,6 +19,7 @@ import {
   GitDiffImageLightbox,
   GitDiffRenderer,
   type DiffPresentation,
+  type GitDiffRendererProps,
 } from "./renderers";
 import {
   formatGitDiffFileLabel,
@@ -688,6 +689,11 @@ function GitDiffCardImageBody({
   );
 }
 
+export type GitDiffCardLineSelection = Pick<
+  GitDiffRendererProps,
+  "selectionActions" | "lineAnnotations" | "renderLineAnnotation"
+>;
+
 interface GitDiffCardSvgBodyProps {
   displayMode: GitDiffCardSvgDisplayMode;
   enrichment: DiffFileEnrichmentState;
@@ -697,6 +703,7 @@ interface GitDiffCardSvgBodyProps {
   fullFileContents: ExperimentalDiffFullFileContents | null;
   presentation: DiffPresentation;
   onSelectionAddToChat?: (text: string) => void;
+  lineSelection?: GitDiffCardLineSelection;
 }
 
 function GitDiffCardSvgBody({
@@ -708,6 +715,7 @@ function GitDiffCardSvgBody({
   fullFileContents,
   presentation,
   onSelectionAddToChat,
+  lineSelection,
 }: GitDiffCardSvgBodyProps) {
   return displayMode === "preview" ? (
     <GitDiffCardImageBody
@@ -722,6 +730,7 @@ function GitDiffCardSvgBody({
       fullFileContents={fullFileContents}
       {...presentation}
       onSelectionAddToChat={onSelectionAddToChat}
+      {...lineSelection}
     />
   );
 }
@@ -733,6 +742,7 @@ interface GitDiffCardBodyProps {
   reservesCollapseGutter: boolean;
   defersOffscreenRendering: boolean;
   onSelectionAddToChat?: (text: string) => void;
+  lineSelection?: GitDiffCardLineSelection;
 }
 
 export function GitDiffCardBody({
@@ -742,6 +752,7 @@ export function GitDiffCardBody({
   reservesCollapseGutter,
   defersOffscreenRendering,
   onSelectionAddToChat,
+  lineSelection,
 }: GitDiffCardBodyProps) {
   const {
     enrichment,
@@ -798,6 +809,7 @@ export function GitDiffCardBody({
           fullFileContents={fullFileContents}
           presentation={presentation}
           onSelectionAddToChat={onSelectionAddToChat}
+          lineSelection={lineSelection}
         />
       ) : (
         <>
@@ -807,6 +819,7 @@ export function GitDiffCardBody({
             fullFileContents={fullFileContents}
             {...presentation}
             onSelectionAddToChat={onSelectionAddToChat}
+            {...lineSelection}
           />
           <GitDiffCardContextExpansionFooter
             contextExpansion={contextExpansion}

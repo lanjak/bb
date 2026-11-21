@@ -3316,6 +3316,70 @@ loader callback.
 6. **Size and virtualization.** Neither component caps input size or
    virtualizes. Audit against a plugin that renders a very large file or patch.
 
+## `experimental_Diff` selection actions and line annotations (`@get-bb/plugin-sdk/app`)
+
+**Added experimental (2026-11-21).** `DiffProps.experimental_selectionActions`,
+`experimental_lineAnnotations` and `experimental_renderLineAnnotation`, with the
+types `ExperimentalDiffSelectionAction`, `ExperimentalDiffLineSelection` and
+`ExperimentalDiffLineAnnotation`. First caller: the Git plugin's saved diff
+comments (issue #1920). The GitHub plugin's PR view and Docs comments (#7270)
+need the same hook, so the props are public and not `internal_DO_NOT_USE_`.
+
+Behavior. Selecting lines in a diff opens one menu. Its entries are one list:
+the host's Add to chat first, then the plugin's `experimental_selectionActions`
+in order. Core builds Add to chat as an entry of the same list (see
+`apps/app/src/components/code/line-selection-actions.ts`), so there is no
+plugin-only path. An action's `run` gets an `ExperimentalDiffLineSelection`:
+the side, 1-based line range, the code, up to three lines of context above and
+below, the selection as patch text, `truncated` (the selection was longer than
+the range, because of the 50-line limit or a gap between hunks), and the rows the
+person started and ended on (`selectedFrom`, `selectedTo`, on their own side). A modified row selected in unified view
+resolves to its paired new line (the Nth removed line of a change block pairs
+with the Nth added line), so unified and split views give the same value. Only
+removed lines with no replacement report `side: "old"`. Ranges are limited to
+50 lines. Passing at least one action turns line selection on outside a thread
+view, where Add to chat is unavailable.
+`experimental_lineAnnotations` places a block under a line on the new or old
+side and `experimental_renderLineAnnotation` draws it. Pierre reserves the
+row height. Annotations on lines the patch does not show are not rendered.
+
+Core callers on the same path. Add to chat in plugin diffs (`PluginDiff`,
+which reads the thread's selection context), file previews and source code
+(`SourceCodeHost`), and the Git plugin's Diff tab (`GitDiffCardBody` through
+`SdkDiff` to `experimental_Diff`). `diffSelectionToAnchor` in
+`packages/shared-ui/src/components/git-diff/git-diff-patch-text.ts` is the one
+mapping from a Pierre selection to a line anchor. One contract test table
+(`apps/app/src/components/code/line-selection-actions.contract.test.tsx`) runs
+the list (Add to chat first, the plugin action after it, each handler) against
+the line selection menu that `BbDiff`, `BbSourceCode` and `PluginDiff` share and
+against the timeline selection menu. `DiffHost.test.tsx` and `BbDiff.test.tsx`
+check the lists that `PluginDiff`, `DiffHost` and `BbDiff` build.
+
+Known gap. An active `experimental_diffRenderer` replacement does not receive
+actions or annotations in v1, so with a replaced renderer comments show only in
+the Comments list.
+
+**Audit before stabilizing.**
+
+1. **Selection shape.** Confirm `side` plus `startLine`/`endLine`, the code and
+   three lines of context is the right currency, and that `text` (patch text)
+   belongs next to it. A GitHub review comment distinguishes LEFT (removed row)
+   from RIGHT; `selectedFrom`/`selectedTo` carry that, and the GitHub plugin must
+   prove it can use them before stabilization. Decide whether a plugin needs the file path and the
+   blob id here instead of getting them from its own props.
+2. **Paired-row rule.** Positional pairing of removed and added lines is a
+   heuristic. Confirm it for rewrites where the counts differ, and decide
+   whether the host should expose the unpaired deletion case as `side: "old"`
+   or refuse to select it.
+3. **Annotation side.** `"old"` annotations are placed on removed rows only.
+   Confirm callers do not need to annotate a context row on its old number.
+4. **Icons.** `icon` is a core icon name. Decide whether plugin-supplied icon
+   assets should work here as they do for message actions.
+5. **Renderer replacement.** Decide whether a replaced renderer should receive
+   the same props before stabilization.
+6. **Keyboard.** Selection actions have no shortcut hook. Decide whether an
+   action can declare one.
+
 ## `experimental_FilePreview` (`@get-bb/plugin-sdk/app`)
 
 Host-owned side-panel preview of one live file target. bb loads the file and

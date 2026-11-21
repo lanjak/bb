@@ -1,11 +1,18 @@
+import type { ReactNode } from "react";
 import type {
   CodeOverflowMode,
   DiffViewMode,
   ExperimentalDiffFullFileContents,
+  ExperimentalDiffLineAnnotation,
   SourceCodeLineRange,
 } from "@get-bb/plugin-sdk";
 import type { ParsedGitDiffFile } from "@bb/shared-ui/git-diff/parsing";
 import type { DiffPresentation } from "@bb/shared-ui/git-diff/renderers";
+import type {
+  CodeLineSelection,
+  DiffLineSelection,
+  LineSelectionAction,
+} from "./line-selection-actions";
 
 export const DEFAULT_CODE_OVERFLOW: CodeOverflowMode = "scroll";
 export const DEFAULT_DIFF_VIEW: DiffViewMode = "unified";
@@ -21,7 +28,7 @@ export interface BbSourceCodeProps extends SourceCodePresentation {
   cacheKey?: string;
   className?: string;
   scrollToHighlightedLines?: boolean;
-  onSelectionAddToChat?: (text: string) => void;
+  selectionActions: readonly LineSelectionAction<CodeLineSelection>[];
 }
 
 export interface BbDiffProps extends DiffPresentation {
@@ -29,5 +36,9 @@ export interface BbDiffProps extends DiffPresentation {
   patchText?: string;
   fullFileContents: ExperimentalDiffFullFileContents | null;
   className?: string;
-  onSelectionAddToChat?: (text: string) => void;
+  selectionActions: readonly LineSelectionAction<DiffLineSelection>[];
+  lineAnnotations?: readonly ExperimentalDiffLineAnnotation[];
+  renderLineAnnotation?: (
+    annotation: ExperimentalDiffLineAnnotation,
+  ) => ReactNode;
 }
