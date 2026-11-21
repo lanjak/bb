@@ -16,6 +16,7 @@ import {
   resetNotificationStore,
 } from "@/lib/notifications/notification-store";
 import { UpdatePluginDialog } from "./UpdatePluginDialog";
+import { formatAbsoluteDate } from "./plugin-ui";
 import { makePluginListItem } from "@/test/fixtures/plugins";
 
 function plugin(updateState: Partial<PluginUpdateState>): PluginListItem {
@@ -159,7 +160,9 @@ describe("UpdatePluginDialog", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Update failed" })).toBeTruthy();
-    expect(screen.getByText("Failed on Jul 22, 2026.")).toBeTruthy();
+    expect(
+      screen.getByText(`Failed on ${formatAbsoluteDate(failedAt)}.`),
+    ).toBeTruthy();
     expect(
       screen.getByText(
         "bb couldn’t activate 1.7.0. It restored 1.6.2 and its data.",
