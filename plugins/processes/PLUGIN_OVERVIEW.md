@@ -14,8 +14,8 @@ bb sets `BB_THREAD_ID` in the shells of each agent. The plugin runs on the machi
 
 ## CLI
 
-- `bb dev-servers list [thread-id] [--json]`: list the servers of a thread, or of every thread outside one.
-- `bb dev-servers stop <pid> [--thread <thread-id>] [--json]`: stop a server.
+- `bb processes servers [thread-id] [--json]`: list the servers of a thread, or of every thread outside one.
+- `bb processes stop <pid> [--thread <thread-id>] [--json]`: stop a server.
 
 ## Requirements
 

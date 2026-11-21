@@ -80,8 +80,8 @@
     "icon": "Coffee"
   },
   {
-    "id": "bb--dev-servers",
-    "name": "Dev servers",
+    "id": "bb--processes",
+    "name": "Processes",
     "icon": "Globe"
   },
   {

@@ -224,13 +224,13 @@ export default async function plugin(bb: BbPluginApi) {
 
   bb.cli.register(
     defineCli({
-      name: "dev-servers",
+      name: "processes",
       summary: "List and stop the servers that threads started",
       description:
         "A server is a process that listens on a TCP port and that a thread's agent started from its shell. Stop ends the command that started it and every process under that command.",
       usageErrorExitCode: 2,
       commands: {
-        list: cliCommand({
+        servers: cliCommand({
           summary: "List the servers a thread started",
           positionals: [
             {
@@ -267,7 +267,7 @@ export default async function plugin(bb: BbPluginApi) {
             {
               name: "pid",
               description:
-                "Process id of the server's command, from `bb dev-servers list`",
+                "Process id of the server's command, from `bb processes servers`",
               required: true,
             },
           ],
@@ -283,7 +283,7 @@ export default async function plugin(bb: BbPluginApi) {
             const threadId = input.options.thread ?? context.threadId;
             if (threadId === undefined)
               throw new PluginCliError(
-                "A thread id is required: bb dev-servers stop <pid> --thread <thread-id>",
+                "A thread id is required: bb processes stop <pid> --thread <thread-id>",
                 { code: "missing_thread_id", exitCode: 2 },
               );
             const rootPid = Number(input.positionals.pid);
@@ -305,7 +305,7 @@ export default async function plugin(bb: BbPluginApi) {
                 `${threadId} has no server with process id ${rootPid}.`,
                 {
                   code: "no_server",
-                  hint: "Run `bb dev-servers list` for the servers of the thread.",
+                  hint: "Run `bb processes servers` for the servers of the thread.",
                 },
               );
             return {

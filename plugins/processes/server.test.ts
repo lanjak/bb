@@ -33,7 +33,7 @@ afterEach(async () => {
 
 async function start(scenario: Scenario = {}) {
   const host = createFakePluginHost({
-    pluginId: "bb--dev-servers",
+    pluginId: "bb--processes",
     sdk: {
       threads: {
         get: async ({ threadId }: { threadId: string }) => {
@@ -195,11 +195,11 @@ describe("dev servers server entry", () => {
 
   it("lists and stops from the CLI", async () => {
     const host = await start();
-    const listed = await host.harness.runCli(["list", THREAD_ID]);
+    const listed = await host.harness.runCli(["servers", THREAD_ID]);
     expect(listed.stdout).toBe(
       `${THREAD_ID}\t140\t127.0.0.1:5173\tnpm run dev\n`,
     );
-    const all = await host.harness.runCli(["list", "--json"]);
+    const all = await host.harness.runCli(["servers", "--json"]);
     expect(JSON.parse(all.stdout ?? "")).toMatchObject({
       servers: [{ rootPid: 140, hostName: "laptop" }],
     });

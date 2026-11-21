@@ -1,5 +1,5 @@
 {
-  "name": "bb-plugin-bb--dev-servers",
+  "name": "bb-plugin-bb--processes",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "bbPluginSdk": ">=0.6.86"
   },
   "bb": {
-    "name": "Dev servers",
+    "name": "Processes",
     "description": "List the servers a thread started, with their ports, and open or stop them.",
     "branding": {
       "icon": "Globe"

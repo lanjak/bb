@@ -165,13 +165,12 @@ Each bundled plugin documents its commands and behavior in its own skill.
   hosts while bb runs; closing the lid still sleeps.
   `bb keep-awake status|enable|disable [--json]`, `bb keep-awake hosts all`,
   or `bb keep-awake hosts <host-id>...`.
-- Dev servers (builtin): lists the servers a thread's agent started from its
-  shell, with their ports, above the composer with Open and Stop.
-  `bb dev-servers list [thread-id] [--json]` and
-  `bb dev-servers stop <pid> [--thread <thread-id>]`. Archiving or deleting a
+- Processes (builtin): lists the servers a thread's agent started from its
+  shell, with their ports, in the thread's context row with Open and Stop.
+  `bb processes servers [thread-id] [--json]` and
+  `bb processes stop <pid> [--thread <thread-id>]`. Archiving or deleting a
   thread stops its servers while its machine is online, unless
-  `stopOnArchive` is off; see the
-  `dev-servers` skill.
+  `stopOnArchive` is off; see the `processes` skill.
 - GitHub Star (builtin): asks once for a GitHub star after more than five
   prompts. `bb plugin disable bb--github-star` stops it from asking.
 - Server switcher (builtin, off by default): a Servers item in the sidebar

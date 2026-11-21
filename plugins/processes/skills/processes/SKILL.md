@@ -1,9 +1,9 @@
 ---
-name: dev-servers
+name: processes
 description: "List or stop the servers a bb thread started, with their ports, from the bb CLI."
 ---
 
-# Dev servers
+# Processes
 
 The plugin is enabled on fresh installations. It lists the servers that a
 thread started: processes that listen on a TCP port and that the thread's
@@ -23,11 +23,11 @@ thread of its nearest ancestor that shows one. On Linux, a process with an
 empty environment does the same.
 
 ```sh
-bb dev-servers list [thread-id] [--json]
-bb dev-servers stop <pid> [--thread <thread-id>] [--json]
+bb processes servers [thread-id] [--json]
+bb processes stop <pid> [--thread <thread-id>] [--json]
 ```
 
-`list` defaults to the current thread. Outside a thread it lists the servers
+`servers` defaults to the current thread. Outside a thread it lists the servers
 of every thread on every connected machine. Each line gives the thread, the
 process id of the server's command, its addresses and ports, and the command
 line of the process that listens. When the list is empty, the text says why:
@@ -38,7 +38,7 @@ supported.
 `rootPid`, `startedAt`, `command`, `cwd`, `ports`, `hostId`, `hostName`, and
 `primaryHost`.
 
-`stop` takes the `rootPid` from `list`. It stops the command that the
+`stop` takes the `rootPid` from `servers`. It stops the command that the
 agent's shell started (for example `npm` for `npm run dev`) and every process
 under it: SIGTERM first, and SIGKILL after 3 seconds for what is still
 running. It refuses a pid that is not a listed server of the thread, or a pid

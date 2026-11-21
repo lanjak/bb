@@ -1553,14 +1553,14 @@
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-bb--dev-servers#typecheck": {
+    "bb-plugin-bb--processes#typecheck": {
       "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
       ]
     },
-    "bb-plugin-bb--dev-servers#test": {
+    "bb-plugin-bb--processes#test": {
       "env": ["VITEST_MAX_WORKERS"],
       "dependsOn": [
         "//#ensure-native-modules",

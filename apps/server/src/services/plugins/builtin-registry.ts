@@ -146,8 +146,8 @@ export const BUILTIN_PLUGINS = [
     defaultEnabled: true,
   },
   {
-    name: "dev-servers",
-    pluginId: "bb--dev-servers",
+    name: "processes",
+    pluginId: "bb--processes",
     defaultEnabled: true,
   },
   {
