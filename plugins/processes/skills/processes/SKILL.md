@@ -10,17 +10,22 @@ thread started: processes that listen on a TCP port and that the thread's
 agent started from its shell. It finds them on the machine of the thread's
 environment, from the `BB_THREAD_ID` variable that bb sets in agent shells.
 A server that outlived its shell, such as one started with `nohup`, still
-counts. The agent process does not count, and neither do the processes the
+counts. When the agent's shell is gone, the server's root is the highest
+process of the thread above it, so `stop` also ends a wrapper loop such as
+`nohup sh -c 'while :; do ...; done'`. The agent process does not count, and neither do the processes the
 agent starts without its own shell, such as MCP servers. A shell that a
 package runner (npm, npx, pnpm, yarn, bun, uvx, pipx) starts does not count as
 the agent's shell, so an agent or MCP server launched with `npx` is not
 listed. Codex starts some commands without a shell; it marks each one with
 `CODEX_TOOL_CALL_ID`, and that command is the server's root. Codex ends these
 commands when its turn ends, so a Codex server shows only during the turn.
-Linux and macOS machines are supported. On macOS, a process that rewrites its
-command line (such as `npm`) hides its environment from `ps`; it takes the
-thread of its nearest ancestor that shows one. On Linux, a process with an
-empty environment does the same.
+Linux and macOS machines are supported. On macOS, `ps` shows no environment
+for a process that rewrites its command line (such as `npm`) or for Apple's own
+programs (such as `/bin/sh` and `/bin/zsh`). Such a process takes the thread of
+its nearest ancestor that shows one. A shell without a visible environment
+whose parent is launchd takes the thread of the processes under it, if they all
+have the same thread. On Linux, a process with an empty environment takes the
+thread of its nearest ancestor that shows one.
 
 ```sh
 bb processes servers [thread-id] [--json]

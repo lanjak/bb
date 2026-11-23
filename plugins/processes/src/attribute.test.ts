@@ -317,6 +317,81 @@ describe("launchers", () => {
   });
 });
 
+describe("orphaned wrappers", () => {
+  it("roots an orphaned server at the wrapper that restarts it", () => {
+    const linux = table([
+      [1, 0, "systemd", null],
+      [60, 1, "systemd", null],
+      [DAEMON, 60, "node", null],
+      [110, DAEMON, "node", null],
+      [120, 110, "claude", THREAD],
+      [400, 60, "sh", THREAD],
+      [401, 400, "python3", THREAD],
+    ]);
+    const [server] = attributeServers({
+      table: linux,
+      sockets: sockets([401, 8000]),
+      daemonPid: DAEMON,
+      threadId: THREAD,
+    });
+    expect(server?.rootPid).toBe(400);
+  });
+
+  it("roots a server under an orphaned wrapper that hides its environment at the wrapper", () => {
+    const darwin = table([
+      [DAEMON, 1, "node", null],
+      [110, DAEMON, "node", null],
+      [120, 110, "claude", THREAD],
+      [400, 1, "sh", null],
+      [401, 400, "zsh", null],
+      [402, 401, "python3", THREAD],
+    ]);
+    inheritHiddenEnvironment(darwin, new Set([400, 401]));
+    const [server] = attributeServers({
+      table: darwin,
+      sockets: sockets([402, 8000]),
+      daemonPid: DAEMON,
+      threadId: THREAD,
+    });
+    expect(server?.rootPid).toBe(400);
+  });
+
+  it("gives an orphaned hidden wrapper no thread when a process under it has another thread or none", () => {
+    const mixed = table([
+      [400, 1, "sh", null],
+      [401, 400, "python3", THREAD],
+      [402, 400, "node", null],
+      [410, 1, "sh", null],
+      [411, 410, "python3", THREAD],
+      [412, 410, "node", "thr_two"],
+      [420, 1, "sleep", null],
+    ]);
+    inheritHiddenEnvironment(mixed, new Set([400, 410, 420]));
+    expect(mixed.get(400)?.threadId).toBeNull();
+    expect(mixed.get(410)?.threadId).toBeNull();
+    expect(mixed.get(420)?.threadId).toBeNull();
+  });
+
+  it("never gives a thread to an app under launchd that is not a shell", () => {
+    const terminal = table([
+      [500, 1, "Terminal", null],
+      [501, 500, "login", null],
+      [502, 501, "zsh", null],
+      [503, 502, "python3", THREAD],
+    ]);
+    inheritHiddenEnvironment(terminal, new Set([500, 501, 502]));
+    expect(terminal.get(502)?.threadId).toBeNull();
+    expect(
+      attributeServers({
+        table: terminal,
+        sockets: sockets([503, 8000]),
+        daemonPid: DAEMON,
+        threadId: THREAD,
+      }).map((server) => server.rootPid),
+    ).toEqual([503]);
+  });
+});
+
 describe("inheritHiddenEnvironment", () => {
   it("fills hidden environments from the nearest visible ancestor", () => {
     const hiddenTable = table([

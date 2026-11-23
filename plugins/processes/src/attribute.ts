@@ -58,6 +58,19 @@ export function isLauncher(name: string, argv: readonly string[]): boolean {
     );
 }
 
+function orphanThread(
+  table: ReadonlyMap<number, ProcessEntry>,
+  hidden: ReadonlySet<number>,
+  rootPid: number,
+): string | null {
+  const threads = new Set<string | null>();
+  for (const pid of descendants(table, rootPid)) {
+    if (!hidden.has(pid)) threads.add(table.get(pid)?.threadId ?? null);
+  }
+  const [threadId] = threads;
+  return threads.size === 1 && threadId !== undefined ? threadId : null;
+}
+
 export function inheritHiddenEnvironment(
   table: Map<number, ProcessEntry>,
   hidden: ReadonlySet<number>,
@@ -78,9 +91,16 @@ export function inheritHiddenEnvironment(
       path.push(current.pid);
       current = table.get(current.ppid);
     }
+    const top = table.get(path.at(-1) ?? pid);
     const inherited =
-      current === undefined
-        ? { threadId: null, toolCallId: null }
+      current === undefined || current.pid === 1
+        ? {
+            threadId:
+              top?.ppid === 1 && isShell(top.name)
+                ? orphanThread(table, hidden, top.pid)
+                : null,
+            toolCallId: null,
+          }
         : (resolved.get(current.pid) ??
           (hidden.has(current.pid)
             ? { threadId: null, toolCallId: null }
@@ -160,8 +180,10 @@ export function commandRoot(
   );
   const top = chain.at(-1)!;
   const toolCallId = listener.toolCallId;
-  const root =
-    shellIndex > 0
+  const orphaned = !isDescendantOf(table, top.ppid, daemonPid);
+  const root = orphaned
+    ? top
+    : shellIndex > 0
       ? chain[shellIndex - 1]!
       : toolCallId !== null
         ? [...chain].reverse().find((entry) => entry.toolCallId === toolCallId)!

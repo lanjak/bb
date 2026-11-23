@@ -10,7 +10,7 @@ See the servers that an agent started for a thread, and open or stop them withou
 
 ## How it works
 
-bb sets `BB_THREAD_ID` in the shells of each agent. The plugin runs on the machine of the thread's environment. It finds the processes that listen on a TCP port, carry the thread's id, and came from the agent's shell. A server that outlived its shell still counts. Open goes to `http://localhost:<port>`, so it shows only for servers on the machine that runs the bb server, when the app was opened on that machine.
+bb sets `BB_THREAD_ID` in the shells of each agent. The plugin runs on the machine of the thread's environment. It finds the processes that listen on a TCP port, carry the thread's id, and came from the agent's shell. A server that outlived its shell still counts. When the agent's shell is gone, Stop ends the highest process of the thread above the server, so a wrapper such as `nohup sh -c 'while :; do ...; done'` cannot start the server again. Open goes to `http://localhost:<port>`, so it shows only for servers on the machine that runs the bb server, when the app was opened on that machine.
 
 ## CLI
 
