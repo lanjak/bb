@@ -5551,6 +5551,33 @@ export interface BbContext {
   experimental_pluginPanel: ExperimentalPluginPanelPage | null;
 }
 
+/** Options for {@link BbNavigate.experimental_openHostPort}. */
+export interface ExperimentalOpenHostPortOptions {
+  /** The machine whose loopback port to open. */
+  hostId: string;
+  /** An integer from 1 to 65535. */
+  port: number;
+  /** Path, query and hash to open, such as `/docs?x=1`; defaults to `/`. */
+  path?: string;
+  /**
+   * `external` opens the URL in the system browser. `bb-browser` (the default)
+   * follows this client's BB browser preference.
+   */
+  target?: "bb-browser" | "external";
+}
+
+/**
+ * How {@link BbNavigate.experimental_openHostPort} reached the port. `local`:
+ * this device runs that machine, so the URL is `http://localhost:<port>`.
+ * `forward`: the desktop app forwarded the port to `localPort` on this
+ * computer. `unreachable`: nothing was opened; `reason` says why and how to
+ * forward the port by hand.
+ */
+export type ExperimentalOpenHostPortResult =
+  | { via: "local"; url: string }
+  | { via: "forward"; url: string; localPort: number }
+  | { via: "unreachable"; reason: string };
+
 export interface BbNavigate {
   /**
    * Open a thread. `split: true` applies bb's split placement rules (a right
@@ -5601,6 +5628,18 @@ export interface BbNavigate {
    * docs/api_to_audit.md.
    */
   openUrl(url: string): boolean;
+  /**
+   * Open a loopback port of a machine in this client's browser. On the
+   * machine's own device it opens `http://localhost:<port>`. In the desktop
+   * app on another computer it forwards the port to this computer through the
+   * bb server (to the same local port, or a free one), then opens that. On web
+   * and mobile it opens nothing and resolves `unreachable`. This is the same
+   * path core uses for a `localhost` link in a thread on another machine.
+   * Experimental: see docs/api_to_audit.md.
+   */
+  experimental_openHostPort(
+    options: ExperimentalOpenHostPortOptions,
+  ): Promise<ExperimentalOpenHostPortResult>;
   /** Open a live file in this surface's shared BB preview panel. */
   experimental_openFilePreview(
     options: ExperimentalFilePreviewOptions,

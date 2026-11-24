@@ -268,6 +268,10 @@ export type NavigateCall =
   | {
       method: "experimental_openTerminal";
       options: Parameters<BbNavigate["experimental_openTerminal"]>[0];
+    }
+  | {
+      method: "experimental_openHostPort";
+      options: Parameters<BbNavigate["experimental_openHostPort"]>[0];
     };
 
 interface RetiredActionTabOpenOptions {
@@ -2591,6 +2595,10 @@ export interface RenderSlotOptions<
    * act as bb Desktop or the mobile app.
    */
   servers?: ExperimentalServers | null;
+  /** Result of `useBbNavigate().experimental_openHostPort`; unreachable by default. */
+  openHostPort?: (
+    options: Parameters<BbNavigate["experimental_openHostPort"]>[0],
+  ) => ReturnType<BbNavigate["experimental_openHostPort"]>;
   /** Host acceptance for `useBbNavigate().experimental_openTerminal`. */
   openTerminal?: (
     options: Parameters<BbNavigate["experimental_openTerminal"]>[0],
@@ -3205,6 +3213,18 @@ export function renderSlot<
         options: fileOptions,
       });
       return options.openFileExternally?.(fileOptions) ?? false;
+    },
+    async experimental_openHostPort(hostPortOptions) {
+      navigateCalls.push({
+        method: "experimental_openHostPort",
+        options: hostPortOptions,
+      });
+      return (
+        options.openHostPort?.(hostPortOptions) ?? {
+          via: "unreachable",
+          reason: "No port opener is configured for this test.",
+        }
+      );
     },
     async experimental_openTerminal(terminalOptions) {
       navigateCalls.push({

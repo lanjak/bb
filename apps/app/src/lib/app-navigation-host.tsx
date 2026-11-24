@@ -15,6 +15,10 @@ import type {
 } from "@get-bb/plugin-sdk";
 import type { TerminalSession } from "@bb/server-contract";
 import type { FileOpenerOverride } from "@/lib/plugin-slot-resolvers";
+import type {
+  HostPortOpenResult,
+  LoopbackProtocol,
+} from "@/lib/host-port-open";
 import {
   UNAVAILABLE_APP_PANEL_CONTROLLER,
   type AppPanelController,
@@ -22,6 +26,14 @@ import {
 
 interface AppUrlOpenIntent {
   url: string;
+}
+
+export interface AppHostPortOpenIntent {
+  hostId: string;
+  port: number;
+  path?: string;
+  protocol: LoopbackProtocol;
+  target?: "bb-browser" | "external";
 }
 
 export interface AppFilePreviewIntent extends ExperimentalFileOpenOptions {
@@ -47,6 +59,7 @@ interface AppNavigationHostCapabilities {
   openFilePreview?: (intent: AppFilePreviewIntent) => boolean;
   openTerminal?: (session: TerminalSession) => boolean;
   openUrl?: (intent: AppUrlOpenIntent) => boolean;
+  openHostPort?: (intent: AppHostPortOpenIntent) => Promise<HostPortOpenResult>;
 }
 
 export interface ResolvedAppNavigationHostCapabilities {
@@ -55,6 +68,7 @@ export interface ResolvedAppNavigationHostCapabilities {
   openFilePreview: (intent: AppFilePreviewIntent) => boolean;
   openTerminal: (session: TerminalSession) => boolean;
   openUrl: (intent: AppUrlOpenIntent) => boolean;
+  openHostPort: (intent: AppHostPortOpenIntent) => Promise<HostPortOpenResult>;
 }
 
 const rejectNavigationIntent = () => false;
@@ -64,6 +78,10 @@ const DEFAULT_APP_NAVIGATION_HOST: ResolvedAppNavigationHostCapabilities = {
   openFilePreview: rejectNavigationIntent,
   openTerminal: rejectNavigationIntent,
   openUrl: rejectNavigationIntent,
+  openHostPort: async () => ({
+    via: "unreachable",
+    reason: "This surface cannot open a machine's ports.",
+  }),
 };
 
 const AppNavigationHostContext =
@@ -87,6 +105,7 @@ export function AppNavigationHostProvider({
       openFilePreview: capabilities.openFilePreview ?? parent.openFilePreview,
       openTerminal: capabilities.openTerminal ?? parent.openTerminal,
       openUrl: capabilities.openUrl ?? parent.openUrl,
+      openHostPort: capabilities.openHostPort ?? parent.openHostPort,
     }),
     [
       capabilities.panel,
@@ -95,10 +114,12 @@ export function AppNavigationHostProvider({
       capabilities.openFilePreview,
       capabilities.openTerminal,
       capabilities.openUrl,
+      capabilities.openHostPort,
       parent.openFileExternally,
       parent.openFilePreview,
       parent.openTerminal,
       parent.openUrl,
+      parent.openHostPort,
     ],
   );
   return (
@@ -241,6 +262,8 @@ export function FocusedAppNavigationSurfaceProvider({
         host().openFilePreview(intent),
       openTerminal: (session: TerminalSession) => host().openTerminal(session),
       openUrl: (intent: AppUrlOpenIntent) => host().openUrl(intent),
+      openHostPort: (intent: AppHostPortOpenIntent) =>
+        host().openHostPort(intent),
     };
   });
   return (

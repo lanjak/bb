@@ -158,6 +158,8 @@ function createBbNavigate(
       createPluginPanelController(pluginId, () => host().panel),
     ),
     openUrl: (url) => host().openUrl({ url }),
+    experimental_openHostPort: (options) =>
+      host().openHostPort({ ...options, protocol: "http" }),
     experimental_openFilePreview(options) {
       const normalized = normalizeExperimentalFilePreviewOptions(options);
       if (normalized === null) return false;

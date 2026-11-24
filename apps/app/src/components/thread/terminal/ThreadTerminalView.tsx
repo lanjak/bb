@@ -37,6 +37,7 @@ import { useAppThemeEpoch } from "@/hooks/useAppTheme";
 import { useSystemConfig } from "@/hooks/queries/system-queries";
 import { usePreferredTheme } from "@/hooks/useTheme";
 import type { MarkdownPreviewLinkHandler } from "@/components/ui/markdown-link";
+import { openLoopbackLink, useIsThisDevice } from "@/lib/loopback-link";
 import { openUrlInExternalBrowser } from "@/lib/url-open-routing";
 import { decodeBase64Bytes } from "@/lib/base64-bytes";
 import { useAppNavigationHost } from "@/lib/app-navigation-host";
@@ -1151,7 +1152,15 @@ export function ThreadTerminalView({
     ({ href }) => appNavigation.openUrl({ url: href }),
     [appNavigation],
   );
-  const effectiveOnOpenLink = onOpenLink ?? handleOpenLinkByPreference;
+  const openHere = onOpenLink ?? handleOpenLinkByPreference;
+  const isThisDevice = useIsThisDevice(session.hostId);
+  const effectiveOnOpenLink = useCallback<MarkdownPreviewLinkHandler>(
+    (link) =>
+      (!isThisDevice() &&
+        openLoopbackLink(appNavigation, session.hostId, link.href)) ||
+      openHere(link),
+    [appNavigation, isThisDevice, openHere, session.hostId],
+  );
   const onOpenLinkRef = useRef<MarkdownPreviewLinkHandler>(effectiveOnOpenLink);
 
   useLayoutEffect(() => {

@@ -25,6 +25,7 @@ import {
 } from "@/components/machines/machine-status";
 import { canMoveServerHere } from "@/components/machines/server-move";
 import { MachineRenameDialog } from "@/components/settings/MachineRenameDialog";
+import { PortForwardsSettings } from "@/components/settings/PortForwardsSettings";
 import { MachineLabel } from "@/components/machines/MachineLabel";
 import {
   SettingsBadge,
@@ -457,6 +458,8 @@ export function MachinesSettingsSection() {
           ) : null}
         </div>
       </SettingsSection>
+
+      <PortForwardsSettings />
 
       <AddMachineDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} />
 

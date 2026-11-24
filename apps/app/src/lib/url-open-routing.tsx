@@ -14,7 +14,14 @@ import {
   openUrlByPreference,
   useOpenLinksInAppBrowserPreference,
 } from "@/lib/in-app-browser-link-preference";
-import { AppNavigationHostProvider } from "@/lib/app-navigation-host";
+import {
+  AppNavigationHostProvider,
+  type AppHostPortOpenIntent,
+} from "@/lib/app-navigation-host";
+import { useStore } from "jotai";
+import { sdk } from "@/lib/sdk";
+import { resolveHostPort, type HostPortOpenResult } from "@/lib/host-port-open";
+import { readLocalHostId } from "@/lib/local-host-id";
 
 type OpenInAppBrowserUrl = (url: string) => void;
 
@@ -60,14 +67,43 @@ export function UrlOpenRoutingProvider({
 
 export function AppNavigationUrlHost({ children }: { children: ReactNode }) {
   const openUrl = useOpenUrlByPreference();
+  const openHostPort = useOpenHostPort(openUrl);
   const capabilities = useMemo(
-    () => ({ openUrl: ({ url }: { url: string }) => openUrl(url) }),
-    [openUrl],
+    () => ({
+      openUrl: ({ url }: { url: string }) => openUrl(url),
+      openHostPort,
+    }),
+    [openUrl, openHostPort],
   );
   return (
     <AppNavigationHostProvider capabilities={capabilities}>
       {children}
     </AppNavigationHostProvider>
+  );
+}
+
+function useOpenHostPort(
+  openUrl: (url: string) => boolean,
+): (intent: AppHostPortOpenIntent) => Promise<HostPortOpenResult> {
+  const store = useStore();
+  return useCallback(
+    async (intent) => {
+      const localHostId = await readLocalHostId(store);
+      const result = await resolveHostPort(
+        {
+          localHostId,
+          desktopHostPorts: getBbDesktopInfo()?.hostPorts ?? null,
+          relayUrl: ({ hostId, port }) =>
+            sdk.hosts.experimental_portRelayUrl({ hostId, port }),
+        },
+        intent,
+      );
+      if (result.via === "unreachable") return result;
+      if (intent.target === "external") openUrlInExternalBrowser(result.url);
+      else openUrl(result.url);
+      return result;
+    },
+    [store, openUrl],
   );
 }
 

@@ -3,6 +3,8 @@ import type { PromptMentionLinkResolver } from "@bb/client-core";
 import type { ThreadTimelineLocalFileLinkHandler } from "./types.js";
 import type { MarkdownLinkRouting } from "@/components/ui/markdown-link-routing";
 import { buildThreadHostFileContentUrl } from "@/lib/file-content-urls";
+import { useAppNavigationHost } from "@/lib/app-navigation-host";
+import { openLoopbackLink } from "@/lib/loopback-link";
 
 interface ThreadTimelineNavigation {
   environmentId: string | null;
@@ -62,6 +64,7 @@ export function useMessageLinkRouting(
   const hostId = navigation?.hostId ?? null;
   const onOpenLocalFileLink = navigation?.onOpenLocalFileLink;
   const workspaceRootPath = navigation?.workspaceRootPath;
+  const appNavigation = useAppNavigationHost();
   return useMemo(() => {
     if (onOpenLocalFileLink === undefined && threadId === undefined) {
       return undefined;
@@ -88,6 +91,11 @@ export function useMessageLinkRouting(
           : { relativeLinks: relativePaths }),
       };
     }
+    if (hostId !== null) {
+      routing.onOpenLink = ({ href }) =>
+        openLoopbackLink(appNavigation, hostId, href) ||
+        appNavigation.openUrl({ url: href });
+    }
     return routing;
-  }, [hostId, onOpenLocalFileLink, threadId, workspaceRootPath]);
+  }, [appNavigation, hostId, onOpenLocalFileLink, threadId, workspaceRootPath]);
 }
