@@ -291,7 +291,7 @@ export function DevServersDetails({
       collapseRef={collapseRef}
       onCollapse={onToggle}
     >
-      <ul className="max-h-32 overflow-y-auto px-3 pb-2 pt-1">
+      <ul className="max-h-48 overflow-y-auto px-3 pb-2 pt-1">
         {servers.map((server) => (
           <ServerRow
             key={`${server.hostId}:${server.rootPid}`}
