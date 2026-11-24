@@ -34,7 +34,7 @@ export function ThreadProcessesSection({
             No process of this thread is running.
           </p>
         ) : (
-          <ProcessGroups rows={usage.processes} threadId={threadId} />
+          <ProcessGroups rows={usage.processes} threadId={threadId} compact />
         )}
       </div>
     </InfoSection>

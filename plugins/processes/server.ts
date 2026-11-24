@@ -77,7 +77,7 @@ function textMachine(machine: MachineView): string {
   const disks = machine.disks
     .map(
       (disk) =>
-        `${plain(disk.path)} ${formatBytes(disk.freeBytes)} free (${Math.round(disk.freePercent)}%)`,
+        `${plain(disk.label)} ${formatBytes(disk.freeBytes)} free (${Math.round(disk.freePercent)}%)`,
     )
     .join("; ");
   return [

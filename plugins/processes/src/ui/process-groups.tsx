@@ -47,11 +47,13 @@ function ProcessLine({
   threadId,
   now,
   nested,
+  compact,
 }: {
   row: ProcessRow;
   threadId: string;
   now: number;
   nested: boolean;
+  compact: boolean;
 }) {
   const ports = row.ports.map((port) => `:${port.port}`).join(" ");
   const age =
@@ -74,10 +76,12 @@ function ProcessLine({
           </span>
         )}
       </span>
-      <span className="shrink-0 text-subtle-foreground max-sm:hidden">
-        {ROLE_LABELS[row.role]}
-        {age === null ? "" : ` · ${age}`}
-      </span>
+      {compact ? null : (
+        <span className="shrink-0 text-subtle-foreground max-sm:hidden">
+          {ROLE_LABELS[row.role]}
+          {age === null ? "" : ` · ${age}`}
+        </span>
+      )}
       <span className="w-12 shrink-0 text-right tabular-nums text-muted-foreground">
         {row.cpuPercent === null ? "-" : formatPercent(row.cpuPercent)}
       </span>
@@ -103,9 +107,11 @@ function useNow(): number {
 export function ProcessGroups({
   rows,
   threadId,
+  compact = false,
 }: {
   rows: readonly ProcessRow[];
   threadId: string;
+  compact?: boolean;
 }) {
   const now = useNow();
   return (
@@ -120,6 +126,7 @@ export function ProcessGroups({
                 threadId={threadId}
                 now={now}
                 nested={row.pid !== group.rootPid && group.rootPid !== null}
+                compact={compact}
               />
             ))}
           </ul>
