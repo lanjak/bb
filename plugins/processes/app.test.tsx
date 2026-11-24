@@ -4,7 +4,7 @@ import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import { afterEach, describe, expect, it } from "vitest";
 import { DevServersDetails, serverUrl, summaryLabel } from "./app.js";
-import { devServersContract, type HostDevServer } from "./contract.js";
+import { processesContract, type HostDevServer } from "./contract.js";
 
 const THREAD_ID = "thr_dev";
 
@@ -12,6 +12,7 @@ function server(overrides: Partial<HostDevServer> = {}): HostDevServer {
   return {
     threadId: THREAD_ID,
     rootPid: 140,
+    startToken: "tok-140",
     startedAt: 1,
     command: "npm run dev",
     cwd: "/work/app",
@@ -39,10 +40,14 @@ function renderDetails(servers: HostDevServer[]) {
       onToggle: () => {},
     },
     {
-      experimental_rpcContract: devServersContract,
+      experimental_rpcContract: processesContract,
       rpc: {
-        "servers.list": () => ({ status: "ok" as const, servers }),
-        "servers.stop": () => ({ stopped: true }),
+        "servers.list": () => ({
+          status: "ok" as const,
+          reason: null,
+          servers,
+        }),
+        "processes.stop": () => ({ outcome: "stopped" as const }),
       },
     },
   );
@@ -84,10 +89,12 @@ describe("servers segment", () => {
     );
     await expect
       .poll(() =>
-        slot.inspection.rpcCalls.find((call) => call.method === "servers.stop"),
+        slot.inspection.rpcCalls.find(
+          (call) => call.method === "processes.stop",
+        ),
       )
       .toMatchObject({
-        input: { threadId: THREAD_ID, rootPid: 140, startedAt: 1 },
+        input: { threadId: THREAD_ID, rootPid: 140, startToken: "tok-140" },
       });
   });
 

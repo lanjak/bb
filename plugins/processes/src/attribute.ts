@@ -25,6 +25,9 @@ export interface AttributedServer {
   ports: ServerPort[];
 }
 
+export const BB_RUNTIME_COMMAND =
+  /(?:^|[\\/\s])(?:bb-server|bb-app|bb-host-daemon|daemon-bundle\.mjs|bb-plugin-host-worker\.mjs|bb-provider-bridge-worker\.mjs)(?:\s|$)|apps[\\/](?:server|host-daemon)[\\/](?:dist|src)[\\/]/;
+
 const SHELL_NAMES = new Set([
   "sh",
   "bash",
@@ -40,6 +43,8 @@ const SHELL_NAMES = new Set([
   "elvish",
   "xonsh",
   "pwsh",
+  "powershell",
+  "cmd",
 ]);
 
 const LAUNCHER_NAME =
@@ -255,4 +260,73 @@ export function attributeServers(args: {
       ),
     }))
     .sort((left, right) => left.ports[0]!.port - right.ports[0]!.port);
+}
+
+export type ProcessRole = "agent" | "command" | "server";
+
+export interface ProcessAttribution {
+  threadId: string;
+  rootPid: number | null;
+  role: ProcessRole;
+}
+
+export interface AttributedProcesses {
+  processes: Map<number, ProcessAttribution>;
+  roots: Map<number, string>;
+}
+
+function nearestThreadedProcess(
+  table: ReadonlyMap<number, ProcessEntry>,
+  pid: number,
+  daemonPid: number,
+): ProcessEntry | null {
+  const seen = new Set<number>();
+  let current = table.get(pid);
+  while (current !== undefined && !seen.has(current.pid)) {
+    if (current.threadId !== null) return current;
+    if (current.pid === daemonPid || current.ppid <= 1) return null;
+    seen.add(current.pid);
+    current = table.get(current.ppid);
+  }
+  return null;
+}
+
+export function attributeProcesses(args: {
+  table: ReadonlyMap<number, ProcessEntry>;
+  sockets: readonly ListeningSocket[];
+  daemonPid: number;
+  protectedPids?: ReadonlySet<number>;
+}): AttributedProcesses {
+  const protectedPids = args.protectedPids ?? new Set<number>();
+  const serverRoots = new Set(
+    attributeServers({ ...args, threadId: null }).map(
+      (server) => server.rootPid,
+    ),
+  );
+  const processes = new Map<number, ProcessAttribution>();
+  const roots = new Map<number, string>();
+  const rootOf = new Map<number, ProcessEntry | null>();
+  for (const pid of args.table.keys()) {
+    const anchor = nearestThreadedProcess(args.table, pid, args.daemonPid);
+    if (anchor === null || anchor.threadId === null) continue;
+    let root = rootOf.get(anchor.pid);
+    if (root === undefined) {
+      const found = commandRoot(args.table, anchor.pid, args.daemonPid);
+      root = found !== null && protectedPids.has(found.pid) ? null : found;
+      rootOf.set(anchor.pid, root);
+    }
+    if (protectedPids.has(pid)) root = null;
+    if (root !== null) roots.set(root.pid, anchor.threadId);
+    processes.set(pid, {
+      threadId: anchor.threadId,
+      rootPid: root?.pid ?? null,
+      role:
+        root === null
+          ? "agent"
+          : serverRoots.has(root.pid)
+            ? "server"
+            : "command",
+    });
+  }
+  return { processes, roots };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  attributeProcesses,
   attributeServers,
   descendants,
   inheritHiddenEnvironment,
@@ -414,5 +415,68 @@ describe("descendants", () => {
     expect(descendants(processes, 130).sort((a, b) => a - b)).toEqual([
       130, 140, 141, 170, 171,
     ]);
+  });
+});
+
+describe("attributeProcesses", () => {
+  const attributed = (
+    list = processes,
+    listening: ListeningSocket[] = sockets([141, 5173]),
+  ) =>
+    attributeProcesses({ table: list, sockets: listening, daemonPid: DAEMON });
+
+  it("gives the agent and its shell the agent role and no command root", () => {
+    const { processes: result } = attributed();
+    expect(result.get(120)).toEqual({
+      threadId: THREAD,
+      rootPid: null,
+      role: "agent",
+    });
+    expect(result.get(130)).toMatchObject({ role: "agent", rootPid: null });
+    expect(result.get(121)).toMatchObject({ role: "agent" });
+  });
+
+  it("groups a command's processes under its root and marks a listening command a server", () => {
+    const { processes: result, roots } = attributed();
+    expect(result.get(140)).toMatchObject({ role: "server", rootPid: 140 });
+    expect(result.get(141)).toMatchObject({ role: "server", rootPid: 140 });
+    expect(roots.get(140)).toBe(THREAD);
+    expect(result.get(171)).toMatchObject({ role: "command", rootPid: 171 });
+  });
+
+  it("offers an orphan nohup command as a root of its thread", () => {
+    const { processes: result, roots } = attributed();
+    expect(result.get(150)).toMatchObject({ role: "command", rootPid: 150 });
+    expect(roots.get(150)).toBe(THREAD);
+  });
+
+  it("counts a child that cleared its environment toward its thread but never offers it for Stop", () => {
+    const withBlank = table([
+      [1, 0, "systemd", null],
+      [DAEMON, 1, "node", null],
+      [110, DAEMON, "node", null],
+      [120, 110, "claude", THREAD],
+      [130, 120, "zsh", THREAD],
+      [140, 130, "cargo", THREAD],
+      [141, 140, "rustc", null],
+    ]);
+    const { processes: result, roots } = attributed(withBlank, []);
+    expect(result.get(141)).toEqual({
+      threadId: THREAD,
+      rootPid: 140,
+      role: "command",
+    });
+    expect(roots.has(141)).toBe(false);
+  });
+
+  it("leaves bb, the user's shells and other users' processes without a thread", () => {
+    const { processes: result } = attributed();
+    for (const pid of [1, 50, DAEMON, 110]) expect(result.has(pid)).toBe(false);
+  });
+
+  it("keeps threads apart", () => {
+    const { processes: result, roots } = attributed();
+    expect(result.get(160)?.threadId).toBe("thr_two");
+    expect(roots.get(160)).toBe("thr_two");
   });
 });

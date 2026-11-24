@@ -13,7 +13,7 @@ import {
   type ExperimentalThreadContextSegmentInput,
   type ExperimentalThreadContextSegmentProps,
 } from "@get-bb/plugin-sdk/app";
-import { devServersContract, type HostDevServer } from "./contract.js";
+import { processesContract, type HostDevServer } from "./contract.js";
 
 const REFRESH_MS = 15_000;
 const TOGGLE_ID = "thread-prompt-banner-processes-toggle";
@@ -22,7 +22,7 @@ const SEGMENT_GROUP = "4_devServers";
 
 export function useDevServers(threadId: string): HostDevServer[] {
   const query = experimental_useRpcQuery({
-    contract: devServersContract,
+    contract: processesContract,
     method: "servers.list",
     input: { threadId },
   });
@@ -31,7 +31,7 @@ export function useDevServers(threadId: string): HostDevServer[] {
 
 function useRefreshingDevServers(threadId: string): HostDevServer[] {
   const query = experimental_useRpcQuery({
-    contract: devServersContract,
+    contract: processesContract,
     method: "servers.list",
     input: { threadId },
   });
@@ -80,8 +80,8 @@ function ServerRow({
 }) {
   const navigate = useBbNavigate();
   const stop = experimental_useRpcMutation({
-    contract: devServersContract,
-    method: "servers.stop",
+    contract: processesContract,
+    method: "processes.stop",
   });
   const url = serverUrl(server, window.location.hostname);
   const ports = server.ports.map((port) => `:${port.port}`).join(" ");
@@ -120,11 +120,13 @@ function ServerRow({
             .mutate({
               threadId,
               rootPid: server.rootPid,
-              startedAt: server.startedAt,
+              startToken: server.startToken,
             })
-            .then((result) => {
-              if (!result.stopped)
-                toast.error(`The server on ${ports} was not found.`);
+            .then(({ outcome }) => {
+              if (outcome !== "stopped")
+                toast.error(
+                  `The server on ${ports} was not stopped: ${outcome}.`,
+                );
             })
             .catch((error: unknown) => {
               toast.error(

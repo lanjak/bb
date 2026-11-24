@@ -6,7 +6,9 @@ import {
   decodeProcAddress,
   environHidden,
   parseProcNetTcp,
+  parseBootTime,
   parseProcStat,
+  readLinuxClock,
   readLinuxSnapshot,
   threadIdFromEnviron,
 } from "./linux.js";
@@ -24,6 +26,24 @@ function tcpLine(
   return `   0: ${local} 00000000:0000 ${state} 00000000:00000000 00:00000000 00000000  ${uid}        0 ${inode} 1 0000000000000000 100 0 0 10 0\n`;
 }
 
+function statLine(entry: {
+  pid: number;
+  ppid: number;
+  comm: string;
+  cpuTicks?: number;
+  startTicks?: number;
+  rssPages?: number;
+}): string {
+  const fields = Array.from({ length: 49 }, () => 0);
+  fields[0] = entry.pid;
+  fields[3] = entry.ppid;
+  fields[13] = Math.floor((entry.cpuTicks ?? 0) / 2);
+  fields[14] = Math.ceil((entry.cpuTicks ?? 0) / 2);
+  fields[21] = entry.startTicks ?? 100;
+  fields[23] = entry.rssPages ?? 0;
+  return `${entry.pid} (${entry.comm} (x)) S ${fields.slice(3).join(" ")}\n`;
+}
+
 const roots: string[] = [];
 
 afterEach(async () => {
@@ -39,6 +59,9 @@ async function fakeProc(
     environ: string[];
     cmdline?: string[];
     sockets?: number[];
+    cpuTicks?: number;
+    startTicks?: number;
+    rssPages?: number;
   }>,
   tcp: string,
 ): Promise<string> {
@@ -49,10 +72,7 @@ async function fakeProc(
   for (const entry of processes) {
     const directory = path.join(root, String(entry.pid));
     await mkdir(path.join(directory, "fd"), { recursive: true });
-    await writeFile(
-      path.join(directory, "stat"),
-      `${entry.pid} (${entry.comm} (x)) S ${entry.ppid} 1 1 0 -1\n`,
-    );
+    await writeFile(path.join(directory, "stat"), statLine(entry));
     await writeFile(path.join(directory, "comm"), `${entry.comm}\n`);
     await writeFile(
       path.join(directory, "cmdline"),
@@ -95,11 +115,44 @@ describe("Linux /proc parsing", () => {
     ]);
   });
 
-  it("reads the parent from a stat line whose name holds a parenthesis", () => {
-    expect(parseProcStat("42 (node (vite)) S 7 42 42 0 -1")).toEqual({
+  it("reads the parent, CPU ticks, start and pages from a stat line whose name holds a parenthesis", () => {
+    expect(
+      parseProcStat(
+        statLine({
+          pid: 42,
+          ppid: 7,
+          comm: "node (vite)",
+          cpuTicks: 250,
+          startTicks: 9000,
+          rssPages: 300,
+        }),
+      ),
+    ).toEqual({
       ppid: 7,
+      cpuTicks: 250,
+      startTicks: 9000,
+      rssPages: 300,
     });
     expect(parseProcStat("garbage")).toBeNull();
+  });
+
+  it("reads the boot time and the clock of the machine", async () => {
+    expect(parseBootTime("cpu 1 2 3\nbtime 1700000000\nprocesses 5\n")).toBe(
+      1_700_000_000_000,
+    );
+    expect(parseBootTime("cpu 1 2 3\n")).toBeNull();
+    const root = await fakeProc([], "");
+    await writeFile(path.join(root, "stat"), "btime 1700000000\n");
+    await expect(
+      readLinuxClock(
+        async (_command, args) => (args[0] === "PAGESIZE" ? "16384\n" : null),
+        root,
+      ),
+    ).resolves.toEqual({
+      pageSize: 16384,
+      clockTicks: 100,
+      bootTimeMs: 1_700_000_000_000,
+    });
   });
 
   it("treats an environment without variables as hidden", () => {
@@ -126,6 +179,8 @@ describe("Linux /proc parsing", () => {
             comm: "node",
             environ: ["BB_THREAD_ID=thr_a"],
             sockets: [501, 502],
+            cpuTicks: 250,
+            rssPages: 300,
           },
           { pid: 12, ppid: 1, comm: "postgres", environ: [], sockets: [503] },
           {
@@ -140,7 +195,11 @@ describe("Linux /proc parsing", () => {
           tcpLine("0100007F:1436", "01", UID, 502) +
           tcpLine("00000000:1538", "0A", UID, 503),
       );
-      const snapshot = await readLinuxSnapshot(UID, root);
+      const snapshot = await readLinuxSnapshot(UID, root, {
+        pageSize: 4096,
+        clockTicks: 100,
+        bootTimeMs: 1_700_000_000_000,
+      });
       expect(snapshot.table.get(11)).toEqual({
         pid: 11,
         ppid: 10,
@@ -150,9 +209,33 @@ describe("Linux /proc parsing", () => {
         launcher: false,
       });
       expect(snapshot.table.get(13)?.launcher).toBe(true);
+      expect(snapshot.usage.get(11)).toEqual({
+        startToken: "100",
+        startedAt: 1_700_000_001_000,
+        cpuTimeMs: 2500,
+        rssBytes: 300 * 4096,
+        command: "node",
+      });
       expect(snapshot.sockets).toEqual([
         { pid: 11, port: 5173, address: "127.0.0.1" },
       ]);
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "reads CPU time, memory and start of real processes, and lists other users' processes apart",
+    async () => {
+      const clock = await readLinuxClock(async () => null);
+      const snapshot = await readLinuxSnapshot(UID, "/proc", clock);
+      const self = snapshot.usage.get(process.pid);
+      expect(self?.rssBytes).toBeGreaterThan(1_000_000);
+      expect(self?.cpuTimeMs).toBeGreaterThan(0);
+      expect(self?.startToken).toMatch(/^\d+$/);
+      expect(snapshot.table.has(process.pid)).toBe(true);
+      expect(snapshot.others.some((other) => other.pid === process.pid)).toBe(
+        false,
+      );
+      if (UID !== 0) expect(snapshot.others.length).toBeGreaterThan(0);
     },
   );
 });

@@ -1285,6 +1285,9 @@ importers:
       ajv:
         specifier: 8.20.0
         version: 8.20.0
+      bb-plugin-bb--processes:
+        specifier: workspace:*
+        version: link:../../plugins/processes
       tsrs:
         specifier: 0.18.0-ts7.1.0-dev.20260929
         version: 0.18.0-ts7.1.0-dev.20260929
