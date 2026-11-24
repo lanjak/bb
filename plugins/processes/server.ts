@@ -4,7 +4,7 @@ import {
   defineCli,
   type BbPluginApi,
 } from "@get-bb/plugin-sdk";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   MACHINES_USAGE_TAG,
   machineUsageTag,
@@ -24,6 +24,14 @@ import {
   readAllEnvironments,
   selectMachinePaths,
 } from "./src/paths.js";
+import {
+  CONNECT_PLUGIN_ID,
+  CONNECT_SHARES_KEY,
+  SHARE_SWEEP_INTERVAL_MS,
+  connectShareSchema,
+  connectStatusSchema,
+  createConnectShares,
+} from "./src/connect-shares.js";
 import { DEFAULT_THRESHOLDS, type Thresholds } from "./src/status.js";
 import {
   createUsageService,
@@ -109,6 +117,18 @@ function withoutCommands(usage: ThreadUsage): ThreadUsage {
     ...usage,
     processes: usage.processes.map((row) => ({ ...row, command: null })),
   };
+}
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
 }
 
 export default async function plugin(bb: BbPluginApi) {
@@ -263,8 +283,6 @@ export default async function plugin(bb: BbPluginApi) {
     );
     if (!result.supported)
       return { status: "unsupported", reason: result.reason, servers: [] };
-    const primaryHost =
-      (await bb.sdk.system.config()).primaryHostId === target.id;
     return {
       status: "ok",
       reason: null,
@@ -272,7 +290,6 @@ export default async function plugin(bb: BbPluginApi) {
         ...server,
         hostId: target.id,
         hostName: target.name,
-        primaryHost,
       })),
     };
   }
@@ -281,7 +298,6 @@ export default async function plugin(bb: BbPluginApi) {
     const hosts = (await usageDependencies.hosts()).filter(
       (candidate) => candidate.connected,
     );
-    const { primaryHostId } = await bb.sdk.system.config();
     const perHost = await Promise.all(
       hosts.map(async (candidate) => {
         try {
@@ -294,7 +310,6 @@ export default async function plugin(bb: BbPluginApi) {
             ...server,
             hostId: candidate.id,
             hostName: candidate.name,
-            primaryHost: candidate.id === primaryHostId,
           }));
         } catch (error) {
           bb.log.warn(
@@ -358,10 +373,82 @@ export default async function plugin(bb: BbPluginApi) {
     return result;
   }
 
+  const connectShares = createConnectShares({
+    loadCreated: () => bb.storage.kv.get<unknown>(CONNECT_SHARES_KEY),
+    saveCreated: (shares) => bb.storage.kv.set(CONNECT_SHARES_KEY, shares),
+    status: () =>
+      bb.sdk.plugins.callRpc({
+        pluginId: CONNECT_PLUGIN_ID,
+        method: "status",
+        input: null,
+        outputSchema: connectStatusSchema,
+      }),
+    listShares: () =>
+      bb.sdk.plugins.callRpc({
+        pluginId: CONNECT_PLUGIN_ID,
+        method: "listShares",
+        input: null,
+        outputSchema: z.array(connectShareSchema),
+      }),
+    expose: (args) =>
+      bb.sdk.plugins.callRpc({
+        pluginId: CONNECT_PLUGIN_ID,
+        method: "expose",
+        input: args,
+        outputSchema: connectShareSchema,
+      }),
+    unexpose: async (args) => {
+      await bb.sdk.plugins.callRpc({
+        pluginId: CONNECT_PLUGIN_ID,
+        method: "unexpose",
+        input: args,
+        outputSchema: z.object({ removed: z.boolean() }).passthrough(),
+      });
+    },
+    now: () => Date.now(),
+    warn: (message) => bb.log.warn(message),
+  });
+
+  async function listeningPorts(
+    threadId: string,
+  ): Promise<Array<{ hostId: string; port: number }> | null> {
+    try {
+      const listed = await listForThread(threadId);
+      if (listed.status === "offline" || listed.status === "unsupported")
+        return null;
+      return listed.servers.flatMap((server) =>
+        server.ports.map((port) => ({
+          hostId: server.hostId,
+          port: port.port,
+        })),
+      );
+    } catch (error) {
+      bb.log.warn(
+        `Could not list the servers of ${threadId}: ${String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  bb.background.service("connect-share-sweep", {
+    start: async (signal) => {
+      while (!signal.aborted) {
+        await pause(SHARE_SWEEP_INTERVAL_MS, signal);
+        if (signal.aborted) return;
+        await connectShares
+          .sweepAll(listeningPorts)
+          .catch((error: unknown) =>
+            bb.log.warn(`Could not check bb Connect shares: ${String(error)}`),
+          );
+      }
+    },
+  });
+
   bb.rpc.register(
     processesContract,
     {
       "servers.list": ({ threadId }) => listForThread(threadId),
+      "servers.open": (input) => connectShares.open(input),
       "processes.stop": (input) => stop(input),
       "resources.machines": async () => ({
         machines: await usage.machines(),
@@ -508,8 +595,21 @@ export default async function plugin(bb: BbPluginApi) {
       );
     }
   }
-  bb.events.on("thread.archived", ({ thread }) => stopAll(thread));
-  bb.events.on("thread.deleted", ({ thread }) => stopAll(thread));
+  const endShares = async (threadId: string): Promise<void> => {
+    try {
+      await connectShares.sweep({ threadId, listening: [], archived: true });
+    } catch (error) {
+      bb.log.warn(`Could not remove bb Connect shares: ${String(error)}`);
+    }
+  };
+  bb.events.on("thread.archived", ({ thread }) => {
+    void endShares(thread.id);
+    return stopAll(thread);
+  });
+  bb.events.on("thread.deleted", ({ thread }) => {
+    void endShares(thread.id);
+    return stopAll(thread);
+  });
 
   async function resolveMachine(query: string): Promise<UsageHost> {
     const hosts = await usageDependencies.hosts();

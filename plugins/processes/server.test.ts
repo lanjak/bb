@@ -53,8 +53,12 @@ function sampled(
   };
 }
 
+const connectCalls: Array<{ method: string; input: unknown }> = [];
+
 interface Scenario {
   environments?: number;
+  connect?: { enabled: boolean; paired: boolean; state: string };
+  listening?: () => boolean;
   environmentId?: string | null;
   hostStatus?: "connected" | "disconnected";
   supported?: boolean;
@@ -178,8 +182,25 @@ async function start(scenario: Scenario = {}) {
           }),
         ],
       },
-      system: {
-        config: async () => ({ primaryHostId: "host_1" }) as never,
+      plugins: {
+        callRpc: async (args: { method: string; input?: unknown }) => {
+          const { method, input } = args;
+          connectCalls.push({ method, input });
+          if (method === "status")
+            return (
+              scenario.connect ?? {
+                enabled: false,
+                paired: false,
+                state: "disconnected",
+              }
+            );
+          if (method === "listShares") return [];
+          if (method === "expose") {
+            const { hostId, port } = input as { hostId: string; port: number };
+            return { hostId, port, url: `https://${hostId}--${port}.example/` };
+          }
+          return { removed: true };
+        },
       },
     },
     experimental_callHostRpc: ({ method, input }) => {
@@ -191,10 +212,10 @@ async function start(scenario: Scenario = {}) {
       }
       if (method === "processes.sample") return processesSample(scenario);
       const threadId = (input as { threadId: string | null }).threadId;
-      const servers = [
-        SERVER,
-        { ...SERVER, threadId: "thr_elsewhere", rootPid: 7 },
-      ];
+      const servers =
+        scenario.listening?.() === false
+          ? []
+          : [SERVER, { ...SERVER, threadId: "thr_elsewhere", rootPid: 7 }];
       return {
         supported: scenario.supported ?? true,
         reason: scenario.supported === false ? "No scan here." : null,
@@ -217,9 +238,7 @@ describe("processes server entry: servers", () => {
     ).resolves.toEqual({
       status: "ok",
       reason: null,
-      servers: [
-        { ...SERVER, hostId: "host_1", hostName: "laptop", primaryHost: true },
-      ],
+      servers: [{ ...SERVER, hostId: "host_1", hostName: "laptop" }],
     });
     expect(host.harness.experimental_hostRpcCalls).toMatchObject([
       { method: "list", input: { threadId: THREAD_ID }, hostId: "host_1" },
@@ -300,6 +319,98 @@ describe("processes server entry: servers", () => {
       thread: makeThreadResponse({ id: THREAD_ID, environmentId: "env_1" }),
     });
     expect(host.harness.experimental_hostRpcCalls).toEqual([]);
+  });
+});
+
+describe("processes server entry: opening a port", () => {
+  it("creates a bb Connect share only when bb Connect is already on", async () => {
+    connectCalls.length = 0;
+    const off = await start();
+    await expect(
+      off.harness.callRpc("servers.open", {
+        threadId: THREAD_ID,
+        hostId: "host_1",
+        port: 5173,
+      }),
+    ).resolves.toMatchObject({ status: "connect-off" });
+    expect(connectCalls.map((call) => call.method)).toEqual(["status"]);
+
+    connectCalls.length = 0;
+    const on = await start({
+      connect: { enabled: true, paired: true, state: "connected" },
+    });
+    await expect(
+      on.harness.callRpc("servers.open", {
+        threadId: THREAD_ID,
+        hostId: "host_1",
+        port: 5173,
+      }),
+    ).resolves.toEqual({
+      status: "ok",
+      url: "https://host_1--5173.example/",
+    });
+    expect(connectCalls.map((call) => call.method)).toEqual([
+      "status",
+      "listShares",
+      "expose",
+    ]);
+  });
+
+  it("removes a share once its port is gone, with no view open", async () => {
+    vi.useFakeTimers();
+    connectCalls.length = 0;
+    let listening = true;
+    const host = await start({
+      connect: { enabled: true, paired: true, state: "connected" },
+      listening: () => listening,
+    });
+    await host.harness.callRpc("servers.open", {
+      threadId: THREAD_ID,
+      hostId: "host_1",
+      port: SERVER.ports[0]!.port,
+    });
+    const service = host.harness.runService("connect-share-sweep");
+    const unexposed = () =>
+      connectCalls.filter((call) => call.method === "unexpose");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(unexposed()).toEqual([]);
+    listening = false;
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(unexposed()).toEqual([]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(unexposed().map((call) => call.input)).toEqual([
+      { hostId: "host_1", port: SERVER.ports[0]!.port },
+    ]);
+    const calls = host.harness.experimental_hostRpcCalls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(host.harness.experimental_hostRpcCalls).toHaveLength(calls);
+    service.controller.abort();
+    await service.done;
+  });
+
+  it("removes the shares it made when the thread is archived", async () => {
+    connectCalls.length = 0;
+    const host = await start({
+      connect: { enabled: true, paired: true, state: "connected" },
+    });
+    await host.harness.callRpc("servers.open", {
+      threadId: THREAD_ID,
+      hostId: "host_1",
+      port: 5173,
+    });
+    connectCalls.length = 0;
+    await host.harness.behavior.emitThreadEvent("thread.archived", {
+      thread: makeThreadResponse({ id: THREAD_ID, environmentId: "env_1" }),
+    });
+    await expect
+      .poll(() => connectCalls.map((call) => call.method))
+      .toContain("unexpose");
+    expect(
+      connectCalls.find((call) => call.method === "unexpose")?.input,
+    ).toEqual({
+      hostId: "host_1",
+      port: 5173,
+    });
   });
 });
 

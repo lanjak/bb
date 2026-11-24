@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Icon } from "@bb/shared-ui/icon";
 import {
@@ -47,15 +47,14 @@ function useRefreshingDevServers(threadId: string): HostDevServer[] {
   return query.data?.servers ?? [];
 }
 
-const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+export function portLabel(port: number, mappedTo: number | undefined): string {
+  return mappedTo === undefined || mappedTo === port
+    ? `:${port}`
+    : `${port} -> localhost:${mappedTo}`;
+}
 
-export function serverUrl(
-  server: HostDevServer,
-  clientHostname: string,
-): string | null {
-  if (!server.primaryHost || !LOOPBACK_HOSTNAMES.has(clientHostname))
-    return null;
-  return `http://localhost:${server.ports[0]!.port}`;
+export function forwardCommand(server: HostDevServer, port: number): string {
+  return `bb machine forward ${port} --machine ${server.hostId}`;
 }
 
 export function describeCommand(command: string | null): string {
@@ -87,62 +86,158 @@ function ServerRow({
     contract: processesContract,
     method: "processes.stop",
   });
-  const url = serverUrl(server, window.location.hostname);
+  const open = experimental_useRpcMutation({
+    contract: processesContract,
+    method: "servers.open",
+  });
+  const [mappings, setMappings] = useState<Record<number, number>>({});
+  const [notice, setNotice] = useState<{ port: number; reason: string } | null>(
+    null,
+  );
+  const [shared, setShared] = useState<{ port: number; url: string } | null>(
+    null,
+  );
   const ports = server.ports.map((port) => `:${port.port}`).join(" ");
+
+  async function openPort(port: number, target: "bb-browser" | "external") {
+    setNotice(null);
+    setShared(null);
+    const result = await navigate.experimental_openHostPort({
+      hostId: server.hostId,
+      port,
+      target,
+    });
+    if (result.via === "forward") {
+      setMappings((current) => ({ ...current, [port]: result.localPort }));
+      return;
+    }
+    if (result.via === "local") return;
+    const share = await open.mutate({
+      threadId,
+      hostId: server.hostId,
+      port,
+    });
+    if (share.status === "ok") {
+      setShared({ port, url: share.url });
+      navigate.openUrl(share.url);
+      return;
+    }
+    setNotice({ port, reason: share.reason });
+  }
+
+  function report(error: unknown, port: number) {
+    toast.error(
+      error instanceof Error
+        ? error.message
+        : `Could not open :${port} on ${server.hostName}.`,
+    );
+  }
+
   return (
-    <li className="flex min-h-7 list-none items-center gap-2 text-xs">
-      <span className="shrink-0 font-medium tabular-nums text-foreground">
-        {ports}
-      </span>
-      <span
-        className="min-w-0 flex-1 truncate text-muted-foreground"
-        title={server.command ?? undefined}
-      >
-        {describeCommand(server.command)}
-      </span>
-      {url === null ? (
+    <li className="flex list-none flex-col gap-0.5 text-xs">
+      <div className="flex min-h-7 items-center gap-2">
+        <span className="flex shrink-0 items-center gap-1">
+          {server.ports.map((port) => (
+            <button
+              key={`${port.address}:${port.port}`}
+              type="button"
+              className="shrink-0 cursor-pointer rounded bg-muted px-1.5 py-0.5 font-medium tabular-nums text-foreground hover:bg-state-hover"
+              aria-label={`Open ${portLabel(port.port, mappings[port.port])} on ${server.hostName}`}
+              title={`Open ${port.address}:${port.port} on ${server.hostName}`}
+              onClick={() => {
+                openPort(port.port, "bb-browser").catch((error: unknown) =>
+                  report(error, port.port),
+                );
+              }}
+            >
+              {portLabel(port.port, mappings[port.port])}
+            </button>
+          ))}
+        </span>
+        <span
+          className="min-w-0 flex-1 truncate text-muted-foreground"
+          title={server.command ?? undefined}
+        >
+          {describeCommand(server.command)}
+        </span>
         <span className="shrink-0 text-subtle-foreground">
           {server.hostName}
         </span>
-      ) : (
         <button
           type="button"
           className="shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-state-hover hover:text-foreground"
-          aria-label={`Open ${url}`}
-          onClick={() => navigate.openUrl(url)}
+          aria-label={`Open the first port of ${server.hostName} in the system browser`}
+          onClick={() => {
+            const first = server.ports[0]!.port;
+            openPort(first, "external").catch((error: unknown) =>
+              report(error, first),
+            );
+          }}
         >
-          Open
+          External
         </button>
-      )}
-      <button
-        type="button"
-        className="shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-state-hover hover:text-foreground disabled:cursor-default disabled:opacity-50"
-        aria-label={`Stop the server on ${ports}`}
-        disabled={stop.isPending}
-        onClick={() => {
-          stop
-            .mutate({
-              threadId,
-              rootPid: server.rootPid,
-              startToken: server.startToken,
-            })
-            .then(({ outcome }) => {
-              if (outcome !== "stopped")
+        <button
+          type="button"
+          className="shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-muted-foreground hover:bg-state-hover hover:text-foreground disabled:cursor-default disabled:opacity-50"
+          aria-label={`Stop the server on ${ports}`}
+          disabled={stop.isPending}
+          onClick={() => {
+            stop
+              .mutate({
+                threadId,
+                rootPid: server.rootPid,
+                startToken: server.startToken,
+              })
+              .then(({ outcome }) => {
+                if (outcome !== "stopped")
+                  toast.error(
+                    `The server on ${ports} was not stopped: ${outcome}.`,
+                  );
+              })
+              .catch((error: unknown) => {
                 toast.error(
-                  `The server on ${ports} was not stopped: ${outcome}.`,
+                  error instanceof Error
+                    ? error.message
+                    : `Failed to stop the server on ${ports}.`,
                 );
-            })
-            .catch((error: unknown) => {
-              toast.error(
-                error instanceof Error
-                  ? error.message
-                  : `Failed to stop the server on ${ports}.`,
+              });
+          }}
+        >
+          Stop
+        </button>
+      </div>
+      {shared === null ? null : (
+        <p role="status" className="m-0 pb-1 pl-1 text-muted-foreground">
+          <a
+            className="rounded text-foreground underline hover:bg-state-hover"
+            href={shared.url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Open the bb Connect share of :{shared.port}
+          </a>{" "}
+          if no new tab opened.
+        </p>
+      )}
+      {notice === null ? null : (
+        <p
+          role="status"
+          className="m-0 flex flex-wrap items-center gap-x-2 pb-1 pl-1 text-muted-foreground"
+        >
+          <span>{notice.reason}</span>
+          <button
+            type="button"
+            className="cursor-pointer rounded px-1.5 py-0.5 text-foreground hover:bg-state-hover"
+            onClick={() => {
+              void navigator.clipboard?.writeText(
+                forwardCommand(server, notice.port),
               );
-            });
-        }}
-      >
-        Stop
-      </button>
+            }}
+          >
+            Copy command
+          </button>
+        </p>
+      )}
     </li>
   );
 }

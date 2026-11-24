@@ -162,7 +162,6 @@ export const MACHINES_USAGE_TAG = "usage:machines";
 const hostServerSchema = devServerSchema.extend({
   hostId: z.string(),
   hostName: z.string(),
-  primaryHost: z.boolean(),
 });
 export type HostDevServer = z.infer<typeof hostServerSchema>;
 
@@ -280,6 +279,24 @@ export const processesContract = defineRpcContract({
         servers: z.array(hostServerSchema),
       })
       .strict(),
+  },
+  "servers.open": {
+    input: z
+      .object({
+        threadId: z.string().min(1),
+        hostId: z.string().min(1),
+        port: z.number().int().min(1).max(65535),
+      })
+      .strict(),
+    output: z.discriminatedUnion("status", [
+      z.object({ status: z.literal("ok"), url: z.string() }).strict(),
+      z
+        .object({
+          status: z.enum(["connect-off", "failed"]),
+          reason: z.string(),
+        })
+        .strict(),
+    ]),
   },
   "processes.stop": {
     input: stopInputSchema,

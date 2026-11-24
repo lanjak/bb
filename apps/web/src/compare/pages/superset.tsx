@@ -186,7 +186,7 @@ export const comparison: Comparison = {
         },
         {
           feature: "Port management",
-          bb: cell("no"),
+          bb: cell("partial", "List, open, forward, stop"),
           competitor: cell("yes", "View, kill, group"),
         },
         {

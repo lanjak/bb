@@ -76,7 +76,7 @@ supported.
 `--json` returns `{ status, reason, servers }`, where `status` is `ok`,
 `no-environment`, `offline`, or `unsupported` (with the reason), and each server
 has `threadId`, `rootPid`, `startToken`, `startedAt`, `command`, `cwd`, `ports`,
-`hostId`, `hostName`, and `primaryHost`.
+`hostId` and `hostName`.
 
 `stop` takes the root pid from `servers` or `thread`. It stops the command that the
 agent's shell started (for example `npm` for `npm run dev`) and every process
@@ -89,12 +89,32 @@ so it does not kill a process that took a stopped process's pid. `stop` defaults
 to the current thread; outside a thread, pass `--thread`.
 
 The Resources page and the thread Info tab (a "Processes" section) show the same
-numbers. Neither samples anything while no view is open, and nothing is stored.
+numbers. Neither samples anything while no view is open, and no sample is stored.
 The thread's context row above the composer shows the servers as
-"Servers", with Open and Stop for each server. Open goes to
-`http://localhost:<port>`. It shows only when the server runs on the machine
-of the bb server and the app was opened on that machine through a localhost
-address; otherwise the row names the machine.
+"Servers": a chip for each port, an External button and Stop. A chip opens the
+port from the device you are on:
+
+- On the machine that runs the thread, it opens `http://localhost:<port>`.
+- In the desktop app on another computer, it forwards the port through the bb
+  server to the same local port (or a free one, shown as
+  `5173 -> localhost:54321`) and opens that. Settings → Machines lists the
+  forwards of the server the window shows, with Stop.
+- On web and mobile it cannot forward. If bb Connect is already on, the plugin
+  creates a share for the port, opens it in a tab and shows its link in case the
+  browser blocked the tab. It removes only the shares it created, when the port
+  has been gone for 60 seconds or the thread is archived; while such a share
+  exists, the server checks that thread's ports every 15 seconds, also with no
+  view open. Otherwise the row says how to forward: from the desktop app, or
+  `bb machine forward <port> --machine <machine>`. Nothing requires bb Connect.
+
+A `localhost`, `127.x.x.x` or `0.0.0.0` link (http or https) in a thread whose
+machine is not your device takes the same path, in messages and in terminals.
+`bb machine forward` can reach any loopback port of the machine, such as a
+database; the chips list only the ports a thread started. It does not work from a
+machine that reaches the server through bb Connect, because a machine credential
+cannot open relays; use the desktop app or a direct server URL. Any client that
+can reach and sign in to the bb server can relay to every enrolled machine's
+loopback ports.
 
 When a thread is archived or deleted, the plugin stops its servers if the
 thread's machine is online; it does not retry later. Deleting a whole project

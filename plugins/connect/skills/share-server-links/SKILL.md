@@ -25,6 +25,11 @@ host, and the command resolves the thread's host automatically.
    thread (or with the same `--host`) so the share is cleaned up. Use
    `bb connect shares [--host <name-or-id>]` to inspect that host's shares.
 
+To open a thread's server on your own device, use the Servers item of the Processes
+plugin or `bb machine forward <port> --thread <id>`; they need no bb account. Use
+`bb connect expose` to share a port with someone else. The Processes plugin
+removes only the shares it created itself, and never one you made with `bb connect expose`.
+
 Use `bb connect unexpose-all [--host <id>] [--json]` to revoke all shared ports
 on one machine, including an unavailable machine. It defaults to the thread's
 machine, or the server machine outside a thread, and keeps machine pairing intact.
