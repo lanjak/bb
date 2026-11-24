@@ -1,5 +1,6 @@
 export * from "./browser.js";
 export * from "./find.js";
+export * from "./host-ports.js";
 export * from "./info.js";
 export * from "./version-feed.js";
 

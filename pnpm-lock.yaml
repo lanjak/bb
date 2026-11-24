@@ -727,6 +727,9 @@ importers:
       '@bb/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@bb/host-port-forward':
+        specifier: workspace:*
+        version: link:../../packages/host-port-forward
       '@bb/server-archive':
         specifier: workspace:*
         version: link:../../packages/server-archive

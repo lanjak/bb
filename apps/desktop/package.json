@@ -45,6 +45,7 @@
   "devDependencies": {
     "@bb/config": "workspace:*",
     "@bb/desktop-contract": "workspace:*",
+    "@bb/host-port-forward": "workspace:*",
     "@bb/domain": "workspace:*",
     "@bb/server-archive": "workspace:*",
     "@bb/server-contract": "workspace:*",

@@ -29,8 +29,12 @@ import {
   type BbDesktopBrowserRevealRequest,
   bbDesktopInfoSchema,
   bbDesktopWindowStateSchema,
+  bbDesktopHostPortForwardListSchema,
+  bbDesktopHostPortForwardSchema,
   type BbDesktopApi,
   type BbDesktopAppCommandHandler,
+  type BbDesktopHostPortForward,
+  type BbDesktopHostPortsApi,
   type BbDesktopBrowserApi,
   type BbDesktopBrowserFindResultHandler,
   type BbDesktopWindowFindRequest,
@@ -53,6 +57,12 @@ import {
   type BbDesktopWindowStateChangeHandler,
   type BbDesktopZoomChangeHandler,
 } from "@bb/desktop-contract";
+import {
+  HOST_PORT_FORWARDS_CHANGED_CHANNEL,
+  HOST_PORT_FORWARDS_ENSURE_CHANNEL,
+  HOST_PORT_FORWARDS_LIST_CHANNEL,
+  HOST_PORT_FORWARDS_STOP_CHANNEL,
+} from "./host-port-forward-channels.js";
 import {
   BB_DESKTOP_CHECK_FOR_UPDATES_CHANNEL,
   BB_DESKTOP_GET_INFO_CHANNEL,
@@ -442,8 +452,44 @@ const bbBrowserApi: BbDesktopBrowserApi = {
   },
 };
 
+const hostPortForwardListeners = new Set<
+  (forwards: BbDesktopHostPortForward[]) => void
+>();
+
+const bbHostPortsApi: BbDesktopHostPortsApi = {
+  async ensure(request) {
+    return bbDesktopHostPortForwardSchema.parse(
+      await ipcRenderer.invoke(HOST_PORT_FORWARDS_ENSURE_CHANNEL, request),
+    );
+  },
+  async stop(request) {
+    await ipcRenderer.invoke(HOST_PORT_FORWARDS_STOP_CHANNEL, request);
+  },
+  async list() {
+    return bbDesktopHostPortForwardListSchema.parse(
+      await ipcRenderer.invoke(HOST_PORT_FORWARDS_LIST_CHANNEL),
+    );
+  },
+  onChange(listener) {
+    hostPortForwardListeners.add(listener);
+    return () => {
+      hostPortForwardListeners.delete(listener);
+    };
+  },
+};
+
+ipcRenderer.on(
+  HOST_PORT_FORWARDS_CHANGED_CHANNEL,
+  (_event, payload: unknown) => {
+    const forwards = bbDesktopHostPortForwardListSchema.safeParse(payload);
+    if (!forwards.success) return;
+    for (const listener of hostPortForwardListeners) listener(forwards.data);
+  },
+);
+
 const bbDesktopApi: BbDesktopApi = {
   browser: bbBrowserApi,
+  hostPorts: bbHostPortsApi,
   getServerChoices: listServerChoices,
   listServerChoices,
   onServerChoicesChange(listener) {

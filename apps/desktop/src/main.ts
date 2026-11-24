@@ -5,6 +5,8 @@ import { openApplicationUrl } from "./application-url.js";
 import { createDesktopLogger } from "./desktop-logger.js";
 import { attachServerUpdateControl } from "./server-update-control.js";
 import { registerServerChoiceIpc } from "./server-choice-ipc.js";
+import { registerHostPortForwardIpc } from "./host-port-forwards-ipc.js";
+import type { HostPortForwardManager } from "./host-port-forwards.js";
 import { randomUUID } from "node:crypto";
 import { accessSync, constants as fsConstants } from "node:fs";
 import { arch, homedir, release, type as osType } from "node:os";
@@ -446,6 +448,7 @@ let stoppingForQuit = false;
 let appImageRelaunchPath: string | null = null;
 let quitting = false;
 let serverTargetStore: ServerTargetStore | null = null;
+let hostPortForwards: HostPortForwardManager | null = null;
 let connectServerSync: ConnectServerSync | null = null;
 let connectCredentialCache: ConnectCredentialCache | null = null;
 let cachedConnectCredential: ConnectCredential | null = null;
@@ -2376,6 +2379,7 @@ async function finishQuit(): Promise<void> {
   desktopAutoUpdateService?.stop();
   desktopBrowserViewManager?.destroyAll();
   desktopFindViewManager?.destroyAll();
+  await hostPortForwards?.stopAll();
   await desktopWindowFactory
     ?.persistOpenWindows()
     .catch((error) =>
@@ -2427,6 +2431,23 @@ function registerDesktopUpdateIpc(): void {
     },
     onError: (error) =>
       desktopLogger.error(`Could not switch server: ${String(error)}`),
+  });
+  hostPortForwards = registerHostPortForwardIpc({
+    ipcMain,
+    isApplicationSender: (webContents) =>
+      applicationWindowWebContentsIds.has(webContents.id),
+    applicationWebContents: () =>
+      BrowserWindow.getAllWindows()
+        .filter((browserWindow) =>
+          applicationWindowWebContentsIds.has(browserWindow.webContents.id),
+        )
+        .map((browserWindow) => browserWindow.webContents),
+    readCookieHeader: async (origin) => {
+      const cookies = await session.defaultSession.cookies.get({ url: origin });
+      return cookies.length === 0
+        ? null
+        : cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+    },
   });
   registerDesktopWindowFocusIpc(applicationWindowWebContentsIds);
   registerDesktopAttentionIpc(applicationWindowWebContentsIds);

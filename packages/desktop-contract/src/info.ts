@@ -2,6 +2,7 @@ import type { BbDesktopServerChoice, BbDesktopServerList } from "./servers.js";
 import { z } from "zod";
 import type { BbDesktopBrowserApi } from "./browser.js";
 import type { BbDesktopWindowFindRequest } from "./find.js";
+import type { BbDesktopHostPortsApi } from "./host-ports.js";
 import { bbDesktopVersionFeedPlatformSchema } from "./version-feed.js";
 import type { AppCommandId } from "@bb/domain";
 
@@ -69,6 +70,7 @@ export interface BbDesktopAttentionThreads {
 
 export interface BbDesktopApi extends BbDesktopInfo {
   browser: BbDesktopBrowserApi;
+  hostPorts?: BbDesktopHostPortsApi;
   getServerChoices?(): Promise<BbDesktopServerChoice[]>;
   listServerChoices?(): Promise<BbDesktopServerChoice[]>;
   onServerChoicesChange?(
