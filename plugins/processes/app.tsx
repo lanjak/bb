@@ -7,6 +7,7 @@ import {
 } from "@bb/shared-ui/prompt-stack-disclosure";
 import {
   definePluginApp,
+  experimental_THREAD_INFO_SECTION_GROUPS,
   experimental_useRpcMutation,
   experimental_useRpcQuery,
   useBbNavigate,
@@ -14,6 +15,9 @@ import {
   type ExperimentalThreadContextSegmentProps,
 } from "@get-bb/plugin-sdk/app";
 import { processesContract, type HostDevServer } from "./contract.js";
+import { useResourcesBadge } from "./src/ui/badge.js";
+import { ResourcesPanel } from "./src/ui/resources-page.js";
+import { ThreadProcessesSection } from "./src/ui/thread-processes.js";
 
 const REFRESH_MS = 15_000;
 const TOGGLE_ID = "thread-prompt-banner-processes-toggle";
@@ -212,6 +216,20 @@ function useDevServersVisible({
 }
 
 export default definePluginApp((app) => {
+  app.slots.navPanel({
+    id: "resources",
+    title: "Resources",
+    icon: "ChartColumn",
+    path: "resources",
+    component: ResourcesPanel,
+    experimental_useBadge: useResourcesBadge,
+  });
+  app.slots.experimental_threadInfoSection({
+    id: "processes",
+    group: experimental_THREAD_INFO_SECTION_GROUPS.related,
+    order: 10,
+    component: ThreadProcessesSection,
+  });
   app.slots.experimental_threadContextSegment({
     id: "servers",
     title: "Servers",

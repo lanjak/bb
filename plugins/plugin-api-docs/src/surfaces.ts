@@ -113,7 +113,14 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "BbNavigate.toPluginPanel",
           "BbNavigate.experimental_openTerminal",
         ],
-        firstParty: ["Automations", "Docs", "GitHub", "Tasks", "Theme Preview"],
+        firstParty: [
+          "Automations",
+          "Docs",
+          "GitHub",
+          "Processes",
+          "Tasks",
+          "Theme Preview",
+        ],
       },
       {
         id: "thread-row-status",
@@ -489,7 +496,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "experimental_InfoListRow",
           "ExperimentalInfoListRowProps",
         ],
-        firstParty: ["Automations", "GitHub PR Status"],
+        firstParty: ["Automations", "GitHub PR Status", "Processes"],
         experimental: true,
       },
       {
@@ -1498,6 +1505,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Keep Awake",
           "Personal workspace",
           "Pi provider",
+          "Processes",
           "Project checkout",
           "Worktree",
         ],

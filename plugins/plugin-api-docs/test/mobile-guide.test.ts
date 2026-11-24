@@ -188,6 +188,7 @@ it("pages mobile panes without using annotation selection as navigation", () => 
       "Automations",
       "Docs",
       "GitHub",
+      "Processes",
       "Tasks",
       "Theme Preview",
     ]) {
