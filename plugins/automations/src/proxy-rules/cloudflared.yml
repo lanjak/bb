@@ -1,0 +1,7 @@
+ingress:
+  - hostname: hooks.example.com
+    path: ^/api/v1/plugins/automations/http/webhook$
+    service: http://127.0.0.1:38886
+    originRequest:
+      httpHostHeader: 127.0.0.1:38886
+  - service: http_status:404

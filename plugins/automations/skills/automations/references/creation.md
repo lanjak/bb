@@ -7,6 +7,16 @@ Schedule flags:
 --in <duration>                One-shot delay, e.g. 30s, 5m, 2h, 1d
 ```
 
+Event trigger flags (use `--on` instead of a schedule flag; see [events.md](events.md)):
+
+```text
+--on webhook|github            --hook <id>             --event <kind>
+--where "<path> <op> [values]" --pick <path>           --max-runs-per-hour <n>
+--verification hmac|token      --allow-full-access-for-events
+--revoke-full-access-for-events
+--repo --branch --label --actor --ignore-actor --include-forks   (GitHub only)
+```
+
 Agent mode flags:
 
 ```text
@@ -25,7 +35,7 @@ Agent mode flags:
 
 When `--permission-mode` is omitted, the plugin chooses Approve for me
 (`auto`) when the provider supports it and otherwise uses Full Access
-(`full`).
+(`full`). For an event trigger (`--on`) the default is `accept-edits`.
 
 Script mode flags:
 

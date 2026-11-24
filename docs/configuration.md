@@ -1549,6 +1549,24 @@ The builtin Workflows plugin is disabled on fresh installations
 The settings other than `maxActiveRuns` are snapshotted into each new run. See
 the `workflows` skill.
 
+### Automations plugin
+
+Event automations start on a signed webhook. The plugin setting `webhookBaseUrl`
+(an `http(s)` URL with no query, such as `https://hooks.example.com`) is the
+address bb shows for each hook URL. Set it from the plugin's page, or with
+`bb plugin config automations set webhookBaseUrl https://hooks.example.com`.
+When it is unset, bb uses `BB_APP_URL`, then the server's loopback address with
+a warning that only this machine can reach it.
+
+Do not expose the whole server for this: the public API has no login. Forward
+only `/api/v1/plugins/automations/http/webhook` to the server, answer 404 for
+every other path, and set the proxy's upstream `Host` header to the server's own
+address (for example `127.0.0.1:38886`), because the server refuses other host
+names. The `automations` skill, `references/events.md`, has tested Caddy, nginx
+and cloudflared rules. A Tailscale or LAN address works as it is for senders on
+that network. Nothing requires bb Connect. Hook secrets live in
+`<dataDir>/plugins/automations/hook-secrets/` with mode `0600`.
+
 ### Thread list plugin
 
 The bundled Thread list plugin owns the sidebar thread list layout, synced to

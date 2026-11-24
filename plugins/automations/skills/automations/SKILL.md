@@ -5,7 +5,8 @@ description: "Schedule or manage recurring and one-shot BB agent or script autom
 
 # Automations
 
-An automation is a scheduled task. When due it runs in one of two modes:
+An automation is a scheduled task, or a task that starts when a signed webhook
+arrives (see Event triggers). When due it runs in one of two modes:
 
 agent Spawn a thread or re-prompt a target thread with a configured prompt.
 script Run a stored server-side script and capture stdout/stderr/exit.
@@ -36,6 +37,28 @@ For creation flags and mode-specific defaults, read
 Read `references/script-runtime.md` before you use a script file, depend on
 injected variables, or diagnose retries, timeouts, restarts, and silent runs.
 
+Event triggers:
+
+```bash
+bb automation create --project <id> --name "..." --on webhook|github [event flags] [mode flags]
+bb automation hook list|show|create|rotate|test|delete ...
+bb automation events <automationId|hookId> --project <id>
+bb automation event show <deliveryId> --project <id>
+```
+
+Event runs default to `accept-edits`, are capped at 20 runs per hour, are never re-run by
+Automations, and receive the payload as fenced data before the owner's prompt. Read
+[references/events.md](references/events.md) before you create one, choose filters, set up a
+sender, or allow full access. It never needs bb Connect. The webhook URL is built from the
+`webhookBaseUrl` plugin setting, then `BB_APP_URL`, then loopback.
+
+Never expose the whole bb server to receive events: its API has no login. A proxy or tunnel must
+forward only `/api/v1/plugins/automations/http/webhook`, answer 404 for every other path, and set
+the upstream `Host` header to the server's own address. events.md has tested Caddy, nginx and
+cloudflared rules. Inside a thread the CLI withholds a new hook's secret (a thread's transcript goes
+to a model provider); ask the user to run `bb automation hook rotate <hookId> --project <id> --yes`
+in their terminal, or to use Rotate secret on the Trigger card.
+
 Managing:
 
 ```bash
@@ -45,7 +68,7 @@ bb automation show <automationId> --project <id>
 bb automation update <automationId> --project <id> [--name <name>] [schedule flags] [partial agent or script flags | complete execution flags]
 bb automation pause <automationId> --project <id>
 bb automation resume <automationId> --project <id>
-bb automation run <automationId> --project <id> [--idempotency-key <key>]
+bb automation run <automationId> --project <id> [--idempotency-key <key>]   # not for event automations; use hook test
 bb automation runs <automationId> --project <id> [--limit <count>] [--output <runId>]
 bb automation delete <automationId> --project <id> --yes
 ```
