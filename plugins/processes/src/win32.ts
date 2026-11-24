@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   inheritHiddenEnvironment,
   isLauncher,
+  type ListeningSocket,
   type ProcessEntry,
 } from "./attribute.js";
 import type { RunTool } from "./darwin.js";
@@ -132,7 +133,16 @@ $rows = foreach ($process in (Get-CimInstance Win32_Process)) {
     startedAt = if ($process.CreationDate) { [double]([DateTimeOffset]$process.CreationDate).ToUnixTimeMilliseconds() } else { $null }
   }
 }
-[pscustomobject]@{ processes = @($rows) } | ConvertTo-Json -Compress -Depth 4
+$listeners = $null
+$listenersError = $null
+try {
+  $listeners = @(Get-NetTCPConnection -State Listen | ForEach-Object {
+    [pscustomobject]@{ pid = [int]$_.OwningProcess; port = [int]$_.LocalPort; address = [string]$_.LocalAddress }
+  })
+} catch {
+  $listenersError = $_.Exception.Message
+}
+[pscustomobject]@{ processes = @($rows); listeners = $listeners; listenersError = $listenersError } | ConvertTo-Json -Compress -Depth 4
 `;
 
 export function readerHash(): string {
@@ -192,7 +202,19 @@ const tableRowSchema = z.object({
 });
 export type WindowsRow = z.infer<typeof tableRowSchema>;
 
-const tableSchema = z.object({ processes: z.array(tableRowSchema) });
+const listenerSchema = z.object({
+  pid: z.number().int(),
+  port: z.number().int(),
+  address: z.string(),
+});
+export type WindowsListener = z.infer<typeof listenerSchema>;
+
+const tableSchema = z.object({
+  processes: z.array(tableRowSchema),
+  listeners: z.array(listenerSchema).nullable(),
+  listenersError: z.string().nullable(),
+});
+export type WindowsTable = z.infer<typeof tableSchema>;
 
 const environmentSchema = z.object({
   blocked: z.string().nullable(),
@@ -216,8 +238,8 @@ function parseJson<T>(output: string, schema: z.ZodType<T>): T | null {
   }
 }
 
-export function parseWindowsTable(output: string): WindowsRow[] | null {
-  return parseJson(output, tableSchema)?.processes ?? null;
+export function parseWindowsTable(output: string): WindowsTable | null {
+  return parseJson(output, tableSchema);
 }
 
 export function parseWindowsEnvironments(
@@ -252,6 +274,10 @@ export type WindowsEnvironmentResult =
 export function buildWindowsSnapshot(
   rows: readonly WindowsRow[],
   environment: WindowsEnvironmentResult,
+  listening: {
+    listeners: readonly WindowsListener[] | null;
+    error: string | null;
+  } = { listeners: [], error: null },
 ): ProcessSnapshot {
   const table = new Map<number, ProcessEntry>();
   const usage = new Map<number, ProcessUsage>();
@@ -301,17 +327,17 @@ export function buildWindowsSnapshot(
           reason: `bb could not read process environments on this Windows machine: ${environment.environments.blocked}`,
         }
     : { ok: false, reason: environment.reason };
-  return {
-    table,
-    sockets: [],
-    usage,
-    others,
-    threads,
-    listeners: {
-      ok: false,
-      reason: "Listening ports are not read on Windows yet.",
-    },
-  };
+  const sockets: ListeningSocket[] = (listening.listeners ?? []).filter(
+    (listener) => (table.get(listener.pid)?.threadId ?? null) !== null,
+  );
+  const listeners: Capability =
+    listening.listeners === null
+      ? {
+          ok: false,
+          reason: `bb could not list listening ports on this Windows machine: ${listening.error ?? "unknown error"}`,
+        }
+      : SUPPORTED;
+  return { table, sockets, usage, others, threads, listeners };
 }
 
 export interface WindowsReaderOptions {
@@ -341,8 +367,9 @@ export async function readWindowsSnapshot(
     WINDOWS_POWERSHELL,
     encodedArgs(WINDOWS_TABLE_SCRIPT),
   );
-  const rows = tableOutput === null ? null : parseWindowsTable(tableOutput);
-  if (rows === null) return null;
+  const parsed = tableOutput === null ? null : parseWindowsTable(tableOutput);
+  if (parsed === null) return null;
+  const rows = parsed.processes;
   const output = await run(
     WINDOWS_POWERSHELL,
     encodedArgs(
@@ -352,13 +379,17 @@ export async function readWindowsSnapshot(
       }),
     ),
   );
-  const parsed = output === null ? null : parseWindowsEnvironments(output);
+  const environments =
+    output === null ? null : parseWindowsEnvironments(output);
   const result: WindowsEnvironmentResult =
-    parsed === null
+    environments === null
       ? { ok: false, reason: BLOCKED_REASON }
-      : { ok: true, environments: parsed };
+      : { ok: true, environments };
   if (!result.ok) options.onBlocked?.(result.reason);
   else if (result.environments.blocked !== null)
     options.onBlocked?.(result.environments.blocked);
-  return buildWindowsSnapshot(rows, result);
+  return buildWindowsSnapshot(rows, result, {
+    listeners: parsed.listeners,
+    error: parsed.listenersError,
+  });
 }

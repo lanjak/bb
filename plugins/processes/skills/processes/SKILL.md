@@ -25,8 +25,8 @@ uses `ReadProcessMemory` on your own processes. It runs as a second, separate
 PowerShell call after the process list, and its compiled assembly is cached, so
 if security software blocks it you still get machine totals and the top
 processes, with the reason. A parent link that points at a PID that started
-after its child (a reused PID) is ignored. Listing servers
-supports Linux and macOS only. On macOS, `ps` shows no environment
+after its child (a reused PID) is ignored. Listening ports on Windows come
+from `Get-NetTCPConnection`; if it cannot run, `servers` says why. On macOS, `ps` shows no environment
 for a process that rewrites its command line (such as `npm`) or for Apple's own
 programs (such as `/bin/sh` and `/bin/zsh`). Such a process takes the thread of
 its nearest ancestor that shows one. A shell without a visible environment

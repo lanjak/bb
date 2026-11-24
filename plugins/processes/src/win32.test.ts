@@ -174,6 +174,72 @@ describe("Windows process snapshot", () => {
   });
 });
 
+describe("Windows listening ports", () => {
+  it("attributes a listening port to the thread that started it, and ignores other listeners", () => {
+    const rows = [...AGENT_TREE, row(300, 1, "postgres.exe")];
+    const snapshot = buildWindowsSnapshot(
+      rows,
+      environments([
+        { pid: 100 },
+        { pid: 110 },
+        { pid: 200, threadId: "thr_w" },
+        { pid: 210, threadId: "thr_w" },
+        { pid: 220, threadId: "thr_w" },
+        { pid: 300 },
+      ]),
+      {
+        listeners: [
+          { pid: 220, port: 8000, address: "127.0.0.1" },
+          { pid: 300, port: 5432, address: "127.0.0.1" },
+          { pid: 4, port: 445, address: "0.0.0.0" },
+        ],
+        error: null,
+      },
+    );
+    expect(snapshot.listeners).toEqual({ ok: true });
+    expect(snapshot.sockets).toEqual([
+      { pid: 220, port: 8000, address: "127.0.0.1" },
+    ]);
+    expect(
+      attributeServers({
+        table: snapshot.table,
+        sockets: snapshot.sockets,
+        daemonPid: 100,
+        threadId: null,
+      }),
+    ).toMatchObject([
+      { threadId: "thr_w", rootPid: 220, ports: [{ port: 8000 }] },
+    ]);
+  });
+
+  it("explains why it cannot list listening ports, and keeps the threads", () => {
+    const snapshot = buildWindowsSnapshot(AGENT_TREE, AGENT_ENVIRONMENTS, {
+      listeners: null,
+      error: "The term Get-NetTCPConnection is not recognized",
+    });
+    expect(snapshot.listeners).toEqual({
+      ok: false,
+      reason: expect.stringContaining("Get-NetTCPConnection"),
+    });
+    expect(snapshot.threads).toEqual({ ok: true });
+  });
+
+  it("lists listeners in the table script and parses them", () => {
+    expect(WINDOWS_TABLE_SCRIPT).toContain(
+      "Get-NetTCPConnection -State Listen",
+    );
+    expect(
+      parseWindowsTable(
+        JSON.stringify({
+          processes: [],
+          listeners: [{ pid: 1, port: 80, address: "::" }],
+          listenersError: null,
+        }),
+      )?.listeners,
+    ).toEqual([{ pid: 1, port: 80, address: "::" }]);
+  });
+});
+
 describe("a parent link that points at a reused PID", () => {
   const EXPLORER_TREE: WindowsRow[] = [
     row(4, 0, "System"),
@@ -267,6 +333,8 @@ describe("Windows reader scripts", () => {
     expect(
       parseWindowsTable(
         JSON.stringify({
+          listeners: [],
+          listenersError: null,
           processes: [
             {
               pid: 1,
@@ -280,7 +348,7 @@ describe("Windows reader scripts", () => {
             },
           ],
         }),
-      ),
+      )?.processes,
     ).toHaveLength(1);
     expect(parseWindowsTable("not json")).toBeNull();
     expect(parseWindowsTable('{"processes":[{"pid":"x"}]}')).toBeNull();
@@ -299,6 +367,8 @@ describe("readWindowsSnapshot", () => {
       ...entry,
       command: entry.command,
     })),
+    listeners: [],
+    listenersError: null,
   });
 
   it("runs two PowerShell calls, the table first, with encoded scripts", async () => {

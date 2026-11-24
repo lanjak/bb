@@ -34,4 +34,4 @@ The same data is available through plugin RPC (`resources.machines`, `resources.
 
 ## Requirements
 
-Linux, macOS and Windows machines. On Windows, the plugin reads each process's environment with a PowerShell helper that uses `ReadProcessMemory` on processes of your own user. If that helper is blocked (for example by Constrained Language Mode or an application control policy), the machine shows its totals and its top processes, and the thread view says why it has no per-thread data. Listing servers is not available on Windows yet.
+Linux, macOS and Windows machines. On Windows, the plugin reads each process's environment with a PowerShell helper that uses `ReadProcessMemory` on processes of your own user. If that helper is blocked (for example by Constrained Language Mode or an application control policy), the machine shows its totals and its top processes, and the thread view says why it has no per-thread data. Listening ports come from `Get-NetTCPConnection`; if that cannot run, the Servers list says why.
