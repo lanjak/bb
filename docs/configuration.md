@@ -1390,13 +1390,22 @@ all-or-selected host list, set on its autosaving plugin page or with
 
 ### Processes
 
-The builtin Processes plugin (`bb--processes`) lists the servers a thread's
-agent started and stops them on request. `stopOnArchive` (default
-`true`) also stops a thread's servers when the thread is archived or deleted,
-if the thread's machine is online:
+The builtin Processes plugin (`bb--processes`) shows CPU, memory and disk for
+each machine and thread, lists the servers and commands a thread's agent
+started, and stops them on request. `stopOnArchive` (default `true`) also stops
+a thread's servers when the thread is archived or deleted, if the thread's
+machine is online. The warning limits are settings too: `memoryWarnPercent`
+(`90`), `memoryCriticalPercent` (`95`), `diskWarnFreePercent` (`10`),
+`diskWarnFreeGiB` (`10`), `diskCriticalFreePercent` (`5`),
+`diskCriticalFreeGiB` (`2`) and `cpuSaturatedPercent` (`95`, held for 60
+seconds). A warning clears only after the value passes its limit by a margin,
+and a disk of 500 GiB or more warns by free GiB alone. `toasts` (default `true`)
+turns the Resources badge and notice off.
+Nothing is sampled while no view is open and nothing is stored:
 
 ```bash
 bb plugin config bb--processes set stopOnArchive false
+bb plugin config bb--processes set memoryWarnPercent 80
 ```
 
 See the `processes` skill.

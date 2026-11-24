@@ -165,8 +165,11 @@ Each bundled plugin documents its commands and behavior in its own skill.
   hosts while bb runs; closing the lid still sleeps.
   `bb keep-awake status|enable|disable [--json]`, `bb keep-awake hosts all`,
   or `bb keep-awake hosts <host-id>...`.
-- Processes (builtin): lists the servers a thread's agent started from its
-  shell, with their ports, in the thread's context row with Open and Stop.
+- Processes (builtin): shows CPU, memory and disk for each machine and thread
+  on a Resources page and in a thread's Info tab, lists the servers and
+  commands a thread's agent started from its shell, and stops them. Nothing is
+  sampled while no view is open. `bb processes usage [--machine <id>]`,
+  `bb processes thread [thread-id] [--commands]`,
   `bb processes servers [thread-id] [--json]` and
   `bb processes stop <pid> [--thread <thread-id>]`. Archiving or deleting a
   thread stops its servers while its machine is online, unless
