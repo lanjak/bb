@@ -2014,6 +2014,58 @@ with this field (`plugins/git/ui/changed-files.tsx`).
    and confirm error states for unknown SHAs and paths missing at the
    revision.
 
+## Machine port navigation (`BbNavigate.experimental_openHostPort`, `bb.sdk.hosts.experimental_portRelayUrl`, `experimental_portRelayAccess`, `experimental_forwardHostPort`)
+
+Opens a loopback port of a machine in this client's browser. On the machine's
+own device (`localHostIdAtom`) it opens `http://localhost:<port>`. In the
+desktop app on another computer it asks `bbDesktop.hostPorts.ensure` to forward
+the port through the bb server (same local port, or a free one) and opens the
+local URL. On web and mobile it opens nothing and resolves `unreachable` with a
+reason that says how to forward by hand (`bb machine forward`, or the desktop
+app). The relay is `GET /ws/host-ports/:hostId/:port`: the server checks the
+browser origin like it does for terminals, the machine's daemon dials only
+`127.0.0.1` and `::1`, and a forward can reach any loopback port of the
+machine, not only the ports a thread started.
+
+`bb.sdk.hosts.experimental_portRelayUrl({ hostId, port })` returns that WebSocket
+URL in every runtime. The server lets any client that can reach and sign in to it
+relay to every enrolled machine's loopback ports, except a machine credential
+(an enrolled machine behind bb Connect), which it refuses.
+`experimental_portRelayAccess()` returns `{ allowed, reason }` for the caller's
+connection. In Node, `experimental_forwardHostPort({ sdk, hostId, port,
+localPort? })` checks that access, listens on loopback on `localPort` (default
+`port`, `0` for a free one), fails when that port is busy on either loopback
+address, and returns `{ localPort, localHost, close() }`; it is what
+`bb machine forward` calls. Relay limits are 256 for a machine and 64 for each
+signed-in principal; bb Connect passes no per-session id, so all Connect
+sessions count as one principal, and connections without sign-in count only
+against the machine.
+
+**Core callers.** `AppNavigationUrlHost` implements `openHostPort` once
+(`apps/app/src/lib/host-port-open.ts`). The plugin API, a loopback link in a
+thread whose machine is not this device (`useMessageLinkRouting`) and a loopback
+link in a terminal of such a machine (`ThreadTerminalView`) all call it.
+`host-port-open.test.tsx` runs one scenario table (this device, desktop forward
+to the same port, forward to another port, an https link, desktop failure, web,
+bad port) against the shared resolver and the plugin, message link and terminal
+link callers. The Processes plugin's Open uses it. `bb machine forward` and the
+desktop manager use the same `@bb/host-port-forward` package.
+
+Docs: Plugin Guide (Full-page panels and Link opening surfaces), the machines
+chapter of the bb guide.
+
+**Audit before stabilizing.**
+
+1. Decide whether a plugin needs to list or stop forwards. v1 lists them only
+   in Settings (Machines) in the desktop app.
+2. Decide whether `target: "bb-browser"` should force the in-app browser when
+   the user prefers an external one.
+3. Watch real use for the per-connection relay cost (one WebSocket for each TCP
+   connection) before adding a multiplexed relay behind the same API.
+4. Windows and macOS desktop forwards were not run in this prototype.
+5. Decide whether the per-principal relay limit needs a per-session id from bb
+   Connect.
+
 ## Terminal navigation (`BbNavigate.experimental_openTerminal`)
 
 Shows a terminal the plugin created with `useSdk().terminals.create` in the
@@ -4771,8 +4823,8 @@ later project-checkout/worktree reuse.
 
 `bb.sdk.hosts.experimental_create`, `experimental_getEnrollmentCommand`,
 `experimental_listProviders`, `experimental_reconnect`, `experimental_suspend`,
-`experimental_resume` and `experimental_retryCleanup` have no unprefixed
-aliases. `hosts.delete({ hostId, force: true })` is the path core's machine
+`experimental_resume`, `experimental_retryCleanup` and
+`experimental_portRelayUrl` have no unprefixed aliases. `hosts.delete({ hostId, force: true })` is the path core's machine
 removal dialog and `bb machine remove --force` use to finish a persistent
 machine's removal whose environment cleanup failed while the machine is
 disconnected; it skips on-machine environment cleanup, emits
