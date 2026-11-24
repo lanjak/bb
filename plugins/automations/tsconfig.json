@@ -24,6 +24,8 @@
     "app.tsx",
     "automations.stories.tsx",
     "detail-view.tsx",
+    "event-deliveries.tsx",
+    "event-trigger-card.tsx",
     "metadata.tsx",
     "overview-view.tsx",
     "lib",

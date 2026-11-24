@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   type AutomationStatusFilter,
+  EVENT_RUN_NOW_REASON,
   formatAutomationTrigger,
   formatOverviewScheduleMetadata,
   formatScheduleStatusLabel,
@@ -231,7 +232,16 @@ function AutomationRowMetadata({
           {projectLabel}
         </AutomationMetadataItem>,
         automation !== null ? (
-          <AutomationMetadataItem icon="DateTime" iconLabel="Schedule">
+          <AutomationMetadataItem
+            icon={
+              automation.trigger.triggerType === "event" ? "Zap" : "DateTime"
+            }
+            iconLabel={
+              automation.trigger.triggerType === "event"
+                ? "Trigger"
+                : "Schedule"
+            }
+          >
             {formatAutomationTrigger(automation.trigger)}
           </AutomationMetadataItem>
         ) : null,
@@ -300,6 +310,11 @@ export function OverviewRow({
         <AutomationActionsMenu
           name={automation.name}
           pending={runPending}
+          runDisabledReason={
+            automation.trigger.triggerType === "event"
+              ? EVENT_RUN_NOW_REASON
+              : undefined
+          }
           onRunNow={() => {
             setRunPending(true);
             void onRunNow(route).finally(() => setRunPending(false));

@@ -84,12 +84,24 @@ function formatCronCadence(cron: string): string {
     .trim();
 }
 
+export const EVENT_RUN_NOW_REASON =
+  "Runs when an event arrives. Use Send test event on the trigger.";
+
+const EVENT_LABEL_KINDS_SHOWN = 2;
+
+function formatEventTriggerLabel(events: readonly string[]): string {
+  if (events.length === 0) return "On any event";
+  const shown = events.slice(0, EVENT_LABEL_KINDS_SHOWN).join(", ");
+  const more = events.length - EVENT_LABEL_KINDS_SHOWN;
+  return more > 0 ? `On ${shown} +${more}` : `On ${shown}`;
+}
+
 export function formatAutomationTrigger(trigger: AutomationTrigger): string {
   if (trigger.triggerType === "once") {
     return "One time";
   }
   if (trigger.triggerType === "event") {
-    return "On event";
+    return formatEventTriggerLabel(trigger.events);
   }
   return formatCronCadence(trigger.cron);
 }
@@ -148,6 +160,9 @@ export function formatScheduleStatusLabel({
   }
   if (!enabled) {
     return "Paused";
+  }
+  if (trigger?.triggerType === "event") {
+    return "Waiting for events";
   }
   if (nextRunAt === null) {
     return "Not scheduled";

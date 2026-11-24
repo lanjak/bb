@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn, formatHomePathForDisplay } from "@/lib/utils";
 import {
+  EVENT_RUN_NOW_REASON,
   formatAutomationTrigger,
   formatDetailScheduleStatusLabel,
   formatScheduleRunTime,
@@ -78,6 +79,8 @@ interface AutomationDetailViewProps {
   onRunNow: () => void;
   onDelete: () => void;
   onOpenThread: (threadId: string) => void;
+  eventTrigger?: ReactNode;
+  eventDeliveries?: ReactNode;
   footer?: ReactNode;
 }
 
@@ -156,6 +159,7 @@ export function AutomationLifecycleControl({
 }
 
 export function automationIconName(automation: AutomationResponse): IconName {
+  if (automation.trigger.triggerType === "event") return "Zap";
   return automation.execution.mode === "script"
     ? "ComputerTerminal01"
     : "Calendar";
@@ -745,6 +749,8 @@ export function AutomationDetailView({
   onRunNow,
   onDelete,
   onOpenThread,
+  eventTrigger,
+  eventDeliveries,
   footer,
 }: AutomationDetailViewProps) {
   const oneShotLifecycle = getOneShotLifecycle({
@@ -769,6 +775,7 @@ export function AutomationDetailView({
   const projectContextLabel = projectLabel;
   const personalProject = automation.projectId === PERSONAL_PROJECT_ID;
   const errorMessage = automationErrorMessage(automation);
+  const eventDriven = automation.trigger.triggerType === "event";
 
   return (
     <ResourceDetailPage
@@ -795,7 +802,10 @@ export function AutomationDetailView({
               >
                 {projectContextLabel}
               </AutomationMetadataItem>,
-              <AutomationMetadataItem icon="DateTime" iconLabel="Schedule">
+              <AutomationMetadataItem
+                icon={eventDriven ? "Zap" : "DateTime"}
+                iconLabel={eventDriven ? "Trigger" : "Schedule"}
+              >
                 {formatAutomationTrigger(automation.trigger)}
               </AutomationMetadataItem>,
               automationDetailNextRun(automation),
@@ -847,7 +857,9 @@ export function AutomationDetailView({
           runDisabledReason={
             requiresPrompt
               ? "Add a prompt before running this automation."
-              : undefined
+              : eventDriven
+                ? EVENT_RUN_NOW_REASON
+                : undefined
           }
           onRunNow={onRunNow}
           onDelete={onDelete}
@@ -885,6 +897,18 @@ export function AutomationDetailView({
             <ScriptAutomationDefinition execution={execution} />
           )}
         </ResourceDefinitionSection>
+
+        {eventTrigger !== undefined ? (
+          <ResourceDefinitionSection label="Trigger">
+            {eventTrigger}
+          </ResourceDefinitionSection>
+        ) : null}
+
+        {eventDeliveries !== undefined ? (
+          <ResourceActivitySection label="Deliveries">
+            {eventDeliveries}
+          </ResourceActivitySection>
+        ) : null}
 
         <ResourceActivitySection label="Runs">
           {runsState.error !== null ? (
@@ -927,17 +951,23 @@ export function AutomationDetailView({
                 data-automation-runs-state="empty"
                 className="flex min-w-0 flex-col items-center gap-2 px-2 py-3 text-center text-sm"
               >
-                <span className="text-muted-foreground">No runs yet.</span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={actionPending || requiresPrompt}
-                  onClick={onRunNow}
-                >
-                  <Icon name="Play" className="size-3.5" aria-hidden />
-                  Run now
-                </Button>
+                <span className="text-muted-foreground">
+                  {eventDriven
+                    ? "No runs yet. A run starts when an event arrives."
+                    : "No runs yet."}
+                </span>
+                {eventDriven ? null : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={actionPending || requiresPrompt}
+                    onClick={onRunNow}
+                  >
+                    <Icon name="Play" className="size-3.5" aria-hidden />
+                    Run now
+                  </Button>
+                )}
               </div>
             </ResourceDetailCollection>
           ) : (

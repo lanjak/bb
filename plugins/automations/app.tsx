@@ -18,6 +18,11 @@ import type { automationRpcContract } from "./src/rpc.js";
 import { toast } from "sonner";
 import type {
   AutomationDetailReadResult,
+  AutomationEventDetail,
+  AutomationEventListResponse,
+  AutomationHookResponse,
+  AutomationHookSecretResponse,
+  HookTestResponse,
   AutomationDetailResponse,
   AutomationResponse,
   AgentExecutionUpdate,
@@ -27,6 +32,12 @@ import type {
   AutomationsOverviewResponse,
 } from "./src/rpc-types";
 import { AutomationDetailView, automationIconName } from "./detail-view";
+import {
+  EventDeliveriesList,
+  type AutomationEventsViewState,
+} from "./event-deliveries";
+import { EventTriggerCard } from "./event-trigger-card";
+import type { JsonValue } from "./lib/format-event";
 import {
   AutomationOverviewView,
   automationProblemLabel,
@@ -431,6 +442,132 @@ function useRuns(
   return { ...state, loadMore, retry: loadFirstPage };
 }
 
+function useEvents(
+  route: DetailRoute,
+  enabled: boolean,
+): AutomationEventsViewState {
+  const rpc = useRpc<typeof automationRpcContract>();
+  const { projectId, automationId } = route;
+  const queryKey = ["automation-events", projectId, automationId];
+  const query = useQuery(
+    {
+      queryKey,
+      queryFn: () =>
+        rpc.call("automations_events", {
+          projectId,
+          automationId,
+        }) as Promise<AutomationEventListResponse>,
+      enabled,
+      staleTime: 30_000,
+      retry: false,
+    },
+    automationQueryClient,
+  );
+  const [more, setMore] = useState<{
+    firstPageAt: number;
+    events: AutomationEventListResponse["events"];
+    nextCursor: string | null;
+  } | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  useRealtime("automations", (payload) => {
+    const signal = asSignal(payload);
+    if (
+      signal !== null &&
+      signal.kind === "automation-runs-changed" &&
+      signal.projectId === projectId
+    ) {
+      void automationQueryClient.invalidateQueries(
+        { queryKey },
+        { cancelRefetch: false },
+      );
+    }
+  });
+  const firstPage = query.data ?? null;
+  const extra =
+    more !== null && more.firstPageAt === query.dataUpdatedAt ? more : null;
+  const nextCursor = extra?.nextCursor ?? firstPage?.nextCursor ?? null;
+  return {
+    events: [...(firstPage?.events ?? []), ...(extra?.events ?? [])],
+    nextCursor,
+    loading: enabled && query.isPending,
+    loadingMore,
+    error: query.error ? errorText(query.error) : null,
+    loadMore: () => {
+      if (nextCursor === null || loadingMore) return;
+      const firstPageAt = query.dataUpdatedAt;
+      setLoadingMore(true);
+      rpc
+        .call("automations_events", {
+          projectId,
+          automationId,
+          cursor: nextCursor,
+        })
+        .then(
+          (result) => {
+            const page = result as AutomationEventListResponse;
+            setMore((current) => ({
+              firstPageAt,
+              events: [
+                ...(current?.firstPageAt === firstPageAt ? current.events : []),
+                ...page.events,
+              ],
+              nextCursor: page.nextCursor,
+            }));
+          },
+          (error: unknown) => toast.error(errorText(error)),
+        )
+        .finally(() => setLoadingMore(false));
+    },
+    retry: () => {
+      void query.refetch();
+    },
+  };
+}
+
+function useEventHook(
+  route: DetailRoute,
+  hookId: string | null,
+): {
+  hook: AutomationHookResponse | null;
+  error: string | null;
+  refetch: () => void;
+} {
+  const rpc = useRpc<typeof automationRpcContract>();
+  const { projectId } = route;
+  const queryKey = ["automation-hook", projectId, hookId];
+  const query = useQuery(
+    {
+      queryKey,
+      queryFn: () => {
+        if (hookId === null) throw new Error("Hook required");
+        return rpc.call("automations_hook_get", {
+          projectId,
+          hookId,
+        }) as Promise<AutomationHookResponse>;
+      },
+      enabled: hookId !== null,
+      staleTime: 30_000,
+      retry: false,
+    },
+    automationQueryClient,
+  );
+  useRealtime("automations", (payload) => {
+    if (asSignal(payload)?.projectId === projectId) {
+      void automationQueryClient.invalidateQueries(
+        { queryKey },
+        { cancelRefetch: false },
+      );
+    }
+  });
+  return {
+    hook: query.data ?? null,
+    error: query.error ? errorText(query.error) : null,
+    refetch: () => {
+      void query.refetch();
+    },
+  };
+}
+
 function useMutations() {
   const rpc = useRpc<typeof automationRpcContract>();
   type MutationMethod =
@@ -620,6 +757,15 @@ function DetailView({
   const [editingRequested, setEditingRequested] = useState(initialEditing);
   const overviewState = useOverview();
   const runsState = useRuns(route);
+  const eventTrigger =
+    automation !== null &&
+    !("problem" in automation) &&
+    automation.trigger.triggerType === "event"
+      ? automation.trigger
+      : null;
+  const eventsState = useEvents(route, eventTrigger !== null);
+  const eventHook = useEventHook(route, eventTrigger?.hookId ?? null);
+  const rpc = useRpc<typeof automationRpcContract>();
   const mutations = useMutations();
   const [actionPending, setActionPending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -687,6 +833,43 @@ function DetailView({
       }
     },
     [mutations, refetch, route],
+  );
+
+  const loadEventDetail = useCallback(
+    async (deliveryId: string) =>
+      (await rpc.call("automations_event_get", {
+        projectId: route.projectId,
+        deliveryId,
+      })) as AutomationEventDetail,
+    [rpc, route.projectId],
+  );
+  const rotateSecret = useCallback(async () => {
+    if (eventTrigger === null) throw new Error("This automation has no hook");
+    const result = (await rpc.call("automations_hook_rotate", {
+      projectId: route.projectId,
+      hookId: eventTrigger.hookId,
+    })) as AutomationHookSecretResponse;
+    eventHook.refetch();
+    return result;
+  }, [rpc, route.projectId, eventTrigger, eventHook]);
+  const sendTestEvent = useCallback(
+    async (input: {
+      payload: JsonValue;
+      kind: string | null;
+      send: boolean;
+    }) => {
+      if (eventTrigger === null) throw new Error("This automation has no hook");
+      const result = (await rpc.call("automations_hook_test", {
+        projectId: route.projectId,
+        hookId: eventTrigger.hookId,
+        payload: input.payload,
+        ...(input.kind === null ? {} : { kind: input.kind }),
+        dryRun: !input.send,
+      })) as HookTestResponse;
+      if (input.send) eventsState.retry();
+      return result;
+    },
+    [rpc, route.projectId, eventTrigger, eventsState],
   );
 
   const confirmDelete = useCallback(() => {
@@ -796,6 +979,34 @@ function DetailView({
       onRunNow={() => runAction("run")}
       onDelete={() => setDeleteOpen(true)}
       onOpenThread={openThread}
+      eventTrigger={
+        eventTrigger === null ? undefined : (
+          <EventTriggerCard
+            trigger={eventTrigger}
+            permissionMode={
+              readableAutomation.execution.mode === "agent"
+                ? readableAutomation.execution.permissionMode
+                : null
+            }
+            hook={eventHook.hook}
+            hookError={eventHook.error}
+            disabled={actionPending}
+            onRotate={rotateSecret}
+            onTest={sendTestEvent}
+          />
+        )
+      }
+      eventDeliveries={
+        eventTrigger === null ? undefined : (
+          <EventDeliveriesList
+            state={eventsState}
+            automationId={route.automationId}
+            runs={runsState.runs}
+            loadDetail={loadEventDetail}
+            onOpenThread={openThread}
+          />
+        )
+      }
       footer={deleteDialog}
     />
   );
