@@ -28,6 +28,7 @@ export async function resolvePermissionMode(
   providerId: string,
   requested: PermissionMode | undefined,
   routing: ProviderRouting = {},
+  defaultMode?: PermissionMode,
 ): Promise<PermissionMode> {
   const providers = await bb.sdk.providers.list(routing);
   const provider = providers.find((candidate) => candidate.id === providerId);
@@ -43,6 +44,14 @@ export async function resolvePermissionMode(
     );
   }
   if (requested !== undefined) return requested;
+  if (defaultMode !== undefined) {
+    if (!provider.capabilities.permissionModes.includes(defaultMode)) {
+      throw new Error(
+        `Provider ${providerId} does not support the default permission mode ${defaultMode}; pass --permission-mode.`,
+      );
+    }
+    return defaultMode;
+  }
   if (provider.capabilities.permissionModes.includes("auto")) {
     return "auto";
   }

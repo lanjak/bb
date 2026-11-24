@@ -9,6 +9,19 @@ import {
   type PluginCliContext,
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
+import {
+  printHook,
+  secretWithheldMessage,
+  buildEventTrigger,
+  createEventCommands,
+  EVENT_FLAG_CONSTRAINTS,
+  EVENT_OPTIONS,
+  EVENT_OPTION_NAMES,
+  hasEventFilterFlags,
+  type BuiltEventTrigger,
+  type EventOptionValues,
+} from "./cli-events.js";
+import type { HookService } from "./hook-service.js";
 import type { AutomationService } from "./service.js";
 import type {
   AgentEnvironment,
@@ -20,7 +33,6 @@ import type {
   AutomationRunResponse,
   AutomationScriptInterpreter,
   AutomationScriptWorkingDirectory,
-  CreateAutomationInput,
   PermissionMode,
   ReasoningLevel,
   ResolvedCreateAutomationInput,
@@ -43,7 +55,18 @@ import {
   permissionModeSchema,
   reasoningLevelSchema,
 } from "./rpc-types.js";
+import { formatWhere } from "./event-match.js";
 import { interpreterForPath } from "./script-files.js";
+import {
+  cliError,
+  formatTimestamp,
+  JSON_OPTION,
+  jsonOutput,
+  PROJECT_OPTION,
+  requireOptionValue,
+  requireProjectId,
+  table,
+} from "./cli-common.js";
 
 const DURATION_PATTERN =
   /^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)$/iu;
@@ -57,18 +80,6 @@ server-host source run in the plugin's shared script storage directory.
 Existing scripts without a saved policy also run there. Select
 automation-storage, project, or an absolute server-host path with
 --working-directory. An unavailable selected directory fails the run.`;
-
-const JSON_OPTION = {
-  type: "boolean",
-  description: "Emit machine-readable JSON",
-} as const;
-
-const PROJECT_OPTION = {
-  type: "string",
-  placeholder: "id",
-  description:
-    "Required. Project that owns the automation; `bb project list --include-personal --json` lists ids",
-} as const;
 
 const AUTOMATION_ID_POSITIONAL = {
   name: "automationId",
@@ -242,43 +253,11 @@ interface ScriptOptionValues {
 type ExecutionOptionValues = AgentOptionValues & ScriptOptionValues;
 
 type UpdateOptionValues = ExecutionOptionValues &
-  ScheduleOptionValues & {
+  ScheduleOptionValues &
+  EventOptionValues & {
     project: string | undefined;
     name: string | undefined;
   };
-
-function cliError(message: string, code: string): PluginCliError {
-  return new PluginCliError(message, { code });
-}
-
-function jsonOutput(value: unknown): string {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
-function requireProjectId(
-  value: string | undefined,
-  ctx: Pick<PluginCliContext, "projectId">,
-): string {
-  if (value !== undefined && value !== "") return value;
-  const known = ctx.projectId;
-  throw new PluginCliError("missing required option --project", {
-    code: "missing_required",
-    hint:
-      known === undefined
-        ? "Pass --project <id>; `bb project list --include-personal --json` lists project ids."
-        : `This thread's project is ${known}; re-run with --project ${known}`,
-  });
-}
-
-function requireOptionValue(name: string, value: string): string {
-  if (value === "") {
-    throw cliError(
-      `Missing required option --${name} <value>.`,
-      "missing_required",
-    );
-  }
-  return value;
-}
 
 function parseRunAt(value: string): number {
   if (DATE_ONLY_PATTERN.test(value.trim())) {
@@ -325,7 +304,7 @@ function parseRunIn(value: string): number {
 
 function buildTrigger(
   options: ScheduleOptionValues,
-): CreateAutomationInput["trigger"] {
+): ResolvedCreateAutomationInput["trigger"] {
   const { cron, at, in: runIn, timezone } = options;
   const triggerFlags = [cron, at, runIn].filter(
     (value) => value !== undefined,
@@ -606,6 +585,7 @@ async function buildExecution(
   bb: Pick<BbPluginApi, "sdk">,
   options: ExecutionOptionValues,
   ctx: Pick<PluginCliContext, "cwd" | "threadId">,
+  defaultPermissionMode?: PermissionMode,
 ): Promise<BuiltExecution> {
   const prompt = options.prompt;
   const script = options.script;
@@ -661,6 +641,7 @@ async function buildExecution(
           provider,
           options["permission-mode"],
           providerRoutingForEnvironment(environment),
+          defaultPermissionMode,
         ),
         environment,
         ...(options["target-thread"]
@@ -829,19 +810,54 @@ async function buildAgentExecutionUpdate(
   return update;
 }
 
+function hasEventOptions(options: EventOptionValues): boolean {
+  return (
+    options.on !== undefined ||
+    options.hook !== undefined ||
+    options.event.length > 0 ||
+    options.pick.length > 0 ||
+    options["max-runs-per-hour"] !== undefined ||
+    options.verification !== undefined ||
+    options["allow-full-access-for-events"] ||
+    options["revoke-full-access-for-events"] ||
+    hasEventFilterFlags(options)
+  );
+}
+
+async function buildCreateEventTrigger(
+  hooks: HookService,
+  options: ScheduleOptionValues & EventOptionValues & { name: string },
+  projectId: string,
+  ctx: Pick<PluginCliContext, "threadId">,
+): Promise<BuiltEventTrigger | undefined> {
+  if (options.on === undefined) return undefined;
+  return buildEventTrigger({
+    hooks,
+    options,
+    projectId,
+    automationName: options.name,
+    ctx,
+  });
+}
+
 async function buildUpdateRequest(
   bb: Pick<BbPluginApi, "sdk">,
   service: Pick<AutomationService, "get">,
+  hooks: HookService,
   options: UpdateOptionValues,
   automationId: string,
   ctx: Pick<PluginCliContext, "cwd" | "projectId" | "threadId">,
 ): Promise<{
   request: UpdateAutomationInput;
   scriptSource?: ScriptFileSource;
+  createdHook?: BuiltEventTrigger["createdHook"];
 }> {
   const projectId = requireProjectId(options.project, ctx);
   const request: UpdateAutomationInput = { projectId, automationId };
+  if (ctx.threadId !== undefined) request.callerThreadId = ctx.threadId;
   if (options.name !== undefined) request.name = options.name;
+  let createdHook: BuiltEventTrigger["createdHook"];
+  let willBeEvent: boolean | undefined;
   if (
     options.cron !== undefined ||
     options.timezone !== undefined ||
@@ -849,6 +865,29 @@ async function buildUpdateRequest(
     options.in !== undefined
   ) {
     request.trigger = buildTrigger(options);
+    willBeEvent = false;
+  } else if (hasEventOptions(options)) {
+    const found = await service.get({ projectId, automationId });
+    const currentTrigger = "trigger" in found ? found.trigger : undefined;
+    if (options.on === undefined && currentTrigger?.triggerType !== "event") {
+      throw cliError(
+        "Event flags need --on webhook|github, or an automation that already starts on events.",
+        "missing_required",
+      );
+    }
+    const built = await buildEventTrigger({
+      hooks,
+      options,
+      projectId,
+      automationName: options.name ?? found.name,
+      ctx,
+      ...(options.on === undefined && currentTrigger?.triggerType === "event"
+        ? { current: currentTrigger }
+        : {}),
+    });
+    request.trigger = built.trigger;
+    createdHook = built.createdHook;
+    willBeEvent = true;
   }
   let scriptSource: ScriptFileSource | undefined;
   const replacesAgentExecution =
@@ -859,7 +898,16 @@ async function buildUpdateRequest(
     (name) => options[name] !== undefined,
   );
   if (replacesAgentExecution) {
-    const built = await buildExecution(bb, options, ctx);
+    if (willBeEvent === undefined) {
+      const found = await service.get({ projectId, automationId });
+      willBeEvent = "trigger" in found && found.trigger.triggerType === "event";
+    }
+    const built = await buildExecution(
+      bb,
+      options,
+      ctx,
+      willBeEvent ? "accept-edits" : undefined,
+    );
     request.execution = built.execution;
   } else if (hasScriptOptions) {
     if (hasAgentOptions(options)) {
@@ -896,14 +944,18 @@ async function buildUpdateRequest(
       "missing_required",
     );
   }
-  return { request, ...(scriptSource ? { scriptSource } : {}) };
-}
-
-function formatTimestamp(value: number | null): string {
-  return value === null ? "-" : new Date(value).toLocaleString();
+  return {
+    request,
+    ...(scriptSource ? { scriptSource } : {}),
+    ...(createdHook ? { createdHook } : {}),
+  };
 }
 
 function formatAutomationTrigger(automation: AutomationResponse): string {
+  if (automation.trigger.triggerType === "event") {
+    const { events } = automation.trigger;
+    return events.length === 0 ? "on event" : `on event: ${events.join(", ")}`;
+  }
   if (automation.trigger.triggerType === "once") {
     return `once at ${formatTimestamp(automation.trigger.runAt)}`;
   }
@@ -950,6 +1002,18 @@ function printAutomation(
       `  Tier:      ${automation.execution.serviceTier ?? "-"}`,
       `  Permission: ${automation.execution.permissionMode}`,
     );
+  }
+  if (automation.trigger.triggerType === "event") {
+    const trigger = automation.trigger;
+    lines.push(
+      `  Hook:      ${trigger.hookId}`,
+      `  Filters:   ${trigger.where.length === 0 ? "-" : trigger.where.map(formatWhere).join("; ")}`,
+      `  Payload:   ${trigger.pick.length === 0 ? "whole payload" : trigger.pick.join(", ")} (up to ${trigger.maxPayloadBytes} bytes)`,
+      `  Cap:       ${trigger.maxRunsPerHour} runs per hour`,
+    );
+    if (trigger.acknowledgeUntrustedInput) {
+      lines.push("  Full access for events: acknowledged");
+    }
   }
   if (automation.lastError) lines.push(`  Error:     ${automation.lastError}`);
   lines.push("");
@@ -999,18 +1063,6 @@ function printScriptFileSnapshotNote(
     `  ${refreshScriptFileCommand(automation, source)}`,
     "",
   ].join("\n");
-}
-
-function table(head: string[], rows: string[][]): string {
-  const widths = head.map((label, index) =>
-    Math.max(label.length, ...rows.map((row) => row[index]?.length ?? 0)),
-  );
-  const format = (row: string[]) =>
-    row
-      .map((cell, index) => cell.padEnd(widths[index] ?? 0))
-      .join("  ")
-      .trimEnd();
-  return ["", format(head), ...rows.map(format), ""].join("\n") + "\n";
 }
 
 function printAutomationProblem(automation: AutomationReadProblem): string {
@@ -1084,8 +1136,9 @@ function printRunTable(runs: AutomationRunResponse[]): string {
 export function registerAutomationCli(args: {
   bb: Pick<BbPluginApi, "cli" | "sdk">;
   service: AutomationService;
+  hooks: HookService;
 }): void {
-  const { bb, service } = args;
+  const { bb, service, hooks } = args;
   bb.cli.register(
     defineCli({
       name: "automation",
@@ -1157,38 +1210,80 @@ export function registerAutomationCli(args: {
               description: "Create the automation paused",
             },
             ...SCHEDULE_OPTIONS,
+            ...EVENT_OPTIONS,
             ...AGENT_OPTIONS,
             ...SCRIPT_OPTIONS,
             json: JSON_OPTION,
           },
           constraints: [
-            { kind: "exactly-one", options: ["cron", "at", "in"] },
+            { kind: "exactly-one", options: ["cron", "at", "in", "on"] },
             { kind: "requires", option: "cron", needs: ["timezone"] },
             { kind: "requires", option: "timezone", needs: ["cron"] },
+            ...EVENT_FLAG_CONSTRAINTS,
           ],
           run: async (input, ctx) => {
             const projectId = requireProjectId(input.options.project, ctx);
-            const { execution, scriptSource } = await buildExecution(
-              bb,
+            const eventTrigger = await buildCreateEventTrigger(
+              hooks,
               input.options,
+              projectId,
               ctx,
             );
-            const request: ResolvedCreateAutomationInput = {
-              projectId,
-              name: input.options.name,
-              enabled: !input.options.disabled,
-              trigger: buildTrigger(input.options),
-              execution,
-              origin: ctx.threadId ? "agent" : "human",
-              ...(ctx.threadId ? { createdByThreadId: ctx.threadId } : {}),
-            };
-            const created = await service.create(request);
-            return {
-              exitCode: 0,
-              stdout: input.options.json
-                ? jsonOutput(created)
-                : `Automation created: ${created.id}\n${printAutomation(created)}${printScriptFileSnapshotNote(created, scriptSource)}`,
-            };
+            try {
+              const { execution, scriptSource } = await buildExecution(
+                bb,
+                input.options,
+                ctx,
+                eventTrigger === undefined ? undefined : "accept-edits",
+              );
+              const request: ResolvedCreateAutomationInput = {
+                projectId,
+                name: input.options.name,
+                enabled: !input.options.disabled,
+                trigger: eventTrigger?.trigger ?? buildTrigger(input.options),
+                execution,
+                origin: ctx.threadId ? "agent" : "human",
+                ...(ctx.threadId ? { createdByThreadId: ctx.threadId } : {}),
+              };
+              const created = await service.create(request);
+              const createdHook = eventTrigger?.createdHook;
+              const withheld =
+                createdHook !== undefined && ctx.threadId
+                  ? secretWithheldMessage({
+                      hookId: createdHook.hook.id,
+                      projectId,
+                    })
+                  : undefined;
+              const hook =
+                createdHook === undefined
+                  ? undefined
+                  : await hooks.get({
+                      projectId,
+                      hookId: createdHook.hook.id,
+                    });
+              return {
+                exitCode: 0,
+                stdout: input.options.json
+                  ? jsonOutput(
+                      createdHook === undefined
+                        ? created
+                        : withheld === undefined
+                          ? { ...created, hook, secret: createdHook.secret }
+                          : { ...created, hook, secretWithheld: withheld },
+                    )
+                  : `Automation created: ${created.id}\n${printAutomation(created)}${printScriptFileSnapshotNote(created, scriptSource)}${hook === undefined || createdHook === undefined ? "" : `New hook:${printHook(hook, withheld === undefined ? { secret: createdHook.secret, example: true } : { secretWithheld: withheld, example: true })}`}`,
+              };
+            } catch (error) {
+              if (eventTrigger?.createdHook !== undefined) {
+                await hooks
+                  .delete({
+                    projectId,
+                    hookId: eventTrigger.createdHook.hook.id,
+                  })
+                  .catch(() => undefined);
+              }
+              throw error;
+            }
           },
         }),
         show: cliCommand({
@@ -1223,29 +1318,65 @@ export function registerAutomationCli(args: {
               description: "Replacement display name, at most 200 characters",
             },
             ...SCHEDULE_OPTIONS,
+            ...EVENT_OPTIONS,
             ...AGENT_OPTIONS,
             ...SCRIPT_OPTIONS,
             json: JSON_OPTION,
           },
           constraints: [
-            { kind: "at-most-one", options: ["cron", "at", "in"] },
+            { kind: "at-most-one", options: ["cron", "at", "in", "on"] },
             { kind: "requires", option: "cron", needs: ["timezone"] },
             { kind: "requires", option: "timezone", needs: ["cron"] },
           ],
           run: async (input, ctx) => {
-            const { request, scriptSource } = await buildUpdateRequest(
-              bb,
-              service,
-              input.options,
-              input.positionals.automationId,
-              ctx,
-            );
-            const updated = await service.update(request);
+            const { request, scriptSource, createdHook } =
+              await buildUpdateRequest(
+                bb,
+                service,
+                hooks,
+                input.options,
+                input.positionals.automationId,
+                ctx,
+              );
+            let updated;
+            try {
+              updated = await service.update(request);
+            } catch (error) {
+              if (createdHook !== undefined) {
+                await hooks
+                  .delete({
+                    projectId: request.projectId,
+                    hookId: createdHook.hook.id,
+                  })
+                  .catch(() => undefined);
+              }
+              throw error;
+            }
+            const withheld =
+              createdHook !== undefined && ctx.threadId
+                ? secretWithheldMessage({
+                    hookId: createdHook.hook.id,
+                    projectId: request.projectId,
+                  })
+                : undefined;
+            const hook =
+              createdHook === undefined
+                ? undefined
+                : await hooks.get({
+                    projectId: request.projectId,
+                    hookId: createdHook.hook.id,
+                  });
             return {
               exitCode: 0,
               stdout: input.options.json
-                ? jsonOutput(updated)
-                : `Automation ${updated.id} updated\n${printAutomation(updated)}${printScriptFileSnapshotNote(updated, scriptSource)}`,
+                ? jsonOutput(
+                    createdHook === undefined
+                      ? updated
+                      : withheld === undefined
+                        ? { ...updated, hook, secret: createdHook.secret }
+                        : { ...updated, hook, secretWithheld: withheld },
+                  )
+                : `Automation ${updated.id} updated\n${printAutomation(updated)}${printScriptFileSnapshotNote(updated, scriptSource)}${hook === undefined || createdHook === undefined ? "" : `New hook:${printHook(hook, withheld === undefined ? { secret: createdHook.secret, example: true } : { secretWithheld: withheld, example: true })}`}`,
             };
           },
         }),
@@ -1368,6 +1499,7 @@ export function registerAutomationCli(args: {
             };
           },
         }),
+        ...createEventCommands({ hooks }),
         delete: cliCommand({
           summary: "Delete an automation",
           positionals: [AUTOMATION_ID_POSITIONAL],

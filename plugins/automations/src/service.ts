@@ -20,6 +20,7 @@ import {
   type AutomationRow,
   type Db,
 } from "./data.js";
+import { getHookForProject } from "./hooks.js";
 import { createAutomationId } from "./ids.js";
 import {
   providerRoutingForEnvironment,
@@ -33,6 +34,7 @@ import {
   automationRunListResponseSchema,
   automationsOverviewResponseSchema,
   type AgentExecutionUpdate,
+  type AutomationEventTrigger,
   type AutomationExecution,
   type AutomationExecutionRequest,
   type AutomationDetailReadResult,
@@ -45,6 +47,7 @@ import {
   type AutomationScriptWorkingDirectory,
   type AutomationsOverviewResponse,
   type ListAutomationsInput,
+  type PermissionMode,
   type ResolvedCreateAutomationInput,
   type ResolvedAutomationRunsInput,
   type RunAutomationInput,
@@ -123,15 +126,76 @@ function validateTrigger(
       cron: trigger.cron,
       timezone: trigger.timezone,
     });
-  } else {
+  } else if (trigger.triggerType === "once") {
     validateOnceDefinition({ runAt: trigger.runAt, now });
+  }
+}
+
+function hasActorAllowList(trigger: AutomationEventTrigger): boolean {
+  return trigger.where.some(
+    (clause) =>
+      clause.path === "_bb.actor" &&
+      (clause.op === "in" || clause.op === "=") &&
+      clause.values.length > 0,
+  );
+}
+
+function hasAuthorAllowList(trigger: AutomationEventTrigger): boolean {
+  return trigger.where.some(
+    (clause) =>
+      clause.path === "_bb.authors" &&
+      clause.op === "within" &&
+      clause.values.length > 0,
+  );
+}
+
+function assertEventTriggerPolicy(
+  db: Db,
+  args: {
+    projectId: string;
+    trigger: AutomationEventTrigger;
+    execution: Pick<AutomationExecutionRequest, "mode"> & {
+      permissionMode?: PermissionMode;
+    };
+  },
+): void {
+  const hook = getHookForProject(db, {
+    projectId: args.projectId,
+    hookId: args.trigger.hookId,
+  });
+  if (hook === null) {
+    throw new Error(
+      `Hook ${args.trigger.hookId} does not exist in this project; create one with \`bb automation hook create\``,
+    );
+  }
+  if (
+    args.execution.mode !== "agent" ||
+    args.execution.permissionMode !== "full"
+  ) {
+    return;
+  }
+  if (!args.trigger.acknowledgeUntrustedInput) {
+    throw new Error(
+      "Full access for an event automation lets outside data steer an unattended agent. Choose accept-edits or auto, or acknowledge the risk with --allow-full-access-for-events (acknowledgeUntrustedInput).",
+    );
+  }
+  if (hook.source !== "webhook" && !hasActorAllowList(args.trigger)) {
+    throw new Error(
+      `Full access for ${hook.source} events also needs an allow-list of actors (--actor <login>), because anyone who can open an issue or comment can cause the event.`,
+    );
+  }
+  if (hook.source !== "webhook" && !hasAuthorAllowList(args.trigger)) {
+    throw new Error(
+      `Full access for ${hook.source} events also needs the author allow-list (a "_bb.authors within <logins>" filter, which --actor adds): the owner can cause an event on an issue, comment or commit that a stranger wrote, and that text reaches the agent.`,
+    );
   }
 }
 
 function computeNextRunAt(
   trigger: ResolvedCreateAutomationInput["trigger"],
   now: number,
-): number {
+): number | null {
+  if (trigger.triggerType === "event") return null;
   if (trigger.triggerType === "once") {
     return trigger.runAt;
   }
@@ -142,7 +206,7 @@ function computeNextRunAt(
   });
 }
 
-async function assertNotRecursiveCreation(
+export async function assertNotRecursiveCreation(
   bb: ServiceApi,
   db: Db,
   createdByThreadId: string | undefined,
@@ -581,7 +645,7 @@ const projectSummarySchema = z
   .passthrough();
 const projectSummaryListSchema = z.array(projectSummarySchema);
 
-async function requireProjectAvailable(
+export async function requireProjectAvailable(
   bb: Pick<ServiceApi, "sdk">,
   projectId: string,
 ): Promise<z.infer<typeof projectAvailableSchema>> {
@@ -659,6 +723,13 @@ export function createAutomationService(args: {
       const now = Date.now();
       validateTrigger(payload.trigger, now);
       await assertNotRecursiveCreation(bb, db, payload.createdByThreadId);
+      if (payload.trigger.triggerType === "event") {
+        assertEventTriggerPolicy(db, {
+          projectId: payload.projectId,
+          trigger: payload.trigger,
+          execution: payload.execution,
+        });
+      }
       if (payload.execution.mode === "agent") {
         await resolvePermissionMode(
           bb,
@@ -741,6 +812,12 @@ export function createAutomationService(args: {
       }
       const now = Date.now();
       const currentExecution = currentAutomation.execution;
+      if (
+        input.trigger?.triggerType === "event" ||
+        currentAutomation.trigger.triggerType === "event"
+      ) {
+        await assertNotRecursiveCreation(bb, db, input.callerThreadId);
+      }
       let stagedScriptFile: string | undefined;
       const patch: Parameters<typeof updateAutomation>[1]["patch"] = {};
       if (input.name !== undefined) patch.name = input.name;
@@ -818,6 +895,24 @@ export function createAutomationService(args: {
           "update",
           currentAutomation.problem,
         );
+      }
+      let finalTrigger = patch.trigger ?? currentAutomation.trigger;
+      const finalExecution = patch.execution ?? currentExecution;
+      if (
+        finalTrigger.triggerType === "event" &&
+        finalTrigger.acknowledgeUntrustedInput &&
+        finalExecution.mode === "agent" &&
+        finalExecution.permissionMode !== "full"
+      ) {
+        finalTrigger = { ...finalTrigger, acknowledgeUntrustedInput: false };
+        patch.trigger = finalTrigger;
+      }
+      if (finalTrigger.triggerType === "event") {
+        assertEventTriggerPolicy(db, {
+          projectId: input.projectId,
+          trigger: finalTrigger,
+          execution: finalExecution,
+        });
       }
       let updated: AutomationRow | null;
       try {
@@ -919,6 +1014,11 @@ export function createAutomationService(args: {
         automation,
         "run",
       );
+      if (automation.triggerType === "event") {
+        throw new Error(
+          "Event automations run when an event arrives. Send a sample event with `bb automation hook test` instead.",
+        );
+      }
       const now = Date.now();
       const { run, deduped } = createManualRun(db, {
         automationId: automation.id,

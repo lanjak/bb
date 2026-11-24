@@ -1,3 +1,5 @@
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   experimental_BbHttpError,
   type BbPluginApi,
@@ -5,13 +7,16 @@ import {
 } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
+  clearRunQueuedMessage,
   closeAutomationRun,
   disableAutomationsForTargetThread,
   getAutomation,
   listRunningAutomationRuns,
   listRunningAutomationRunsByThread,
+  listRunsAwaitingDispatch,
   setAutomationEnabled,
   setAutomationRunThread,
+  setRunQueuedMessage,
   type AutomationRow,
   type AutomationRunRow,
   type Db,
@@ -76,6 +81,25 @@ const sdkThreadSchema = z
   .passthrough();
 type SdkThread = z.infer<typeof sdkThreadSchema>;
 
+const sendResultSchema = z
+  .object({
+    delivery: z.enum(["sent", "queued"]).optional(),
+    queuedMessage: z.object({ id: z.string() }).passthrough().optional(),
+  })
+  .passthrough();
+
+const dispatchedMessageIds = new Set<string>();
+const DISPATCHED_MEMORY = 500;
+
+export function noteDispatchedMessage(db: Db, entryId: string): void {
+  dispatchedMessageIds.add(entryId);
+  if (dispatchedMessageIds.size > DISPATCHED_MEMORY) {
+    const [oldest] = dispatchedMessageIds;
+    if (oldest !== undefined) dispatchedMessageIds.delete(oldest);
+  }
+  clearRunQueuedMessage(db, entryId);
+}
+
 function isThreadGoneError(error: unknown): boolean {
   return error instanceof experimental_BbHttpError && error.status === 404;
 }
@@ -92,11 +116,12 @@ function isProjectGoneError(error: unknown): boolean {
   );
 }
 
-function renderAutomationDueMessage(args: {
+export function renderAutomationDueMessage(args: {
   automationId: string;
   prompt: string;
+  eventBody?: string;
 }): string {
-  return `[bb automation due:${args.automationId}]\n\n${args.prompt}`;
+  return `[bb automation due:${args.automationId}]\n\n${args.eventBody ?? args.prompt}`;
 }
 
 function unusableThreadReason(thread: SdkThread): string | null {
@@ -114,11 +139,17 @@ function unusableThreadReason(thread: SdkThread): string | null {
   }
 }
 
+export interface AgentRunEvent {
+  kind: string;
+  body: string;
+}
+
 interface AgentRunArgs {
   automation: AutomationRow;
   run: AutomationRunRow;
   execution: Extract<AutomationExecution, { mode: "agent" }>;
   onFailure: RunFailureHandler;
+  event?: AgentRunEvent;
 }
 
 export async function executeAgentRun(
@@ -141,8 +172,12 @@ export async function executeAgentRun(
         prompt: renderAutomationDueMessage({
           automationId: args.automation.id,
           prompt: args.execution.prompt,
+          eventBody: args.event?.body,
         }),
-        title: args.automation.name,
+        title:
+          args.event === undefined
+            ? args.automation.name
+            : `${args.automation.name} - ${args.event.kind}`,
         providerId: args.execution.providerId,
         model: args.execution.model,
         reasoningLevel: args.execution.reasoningLevel,
@@ -224,21 +259,29 @@ async function reuseTargetThreadForRun(
     runId: args.run.id,
     threadId: args.targetThreadId,
   });
-  await bb.sdk.threads.send({
-    threadId: args.targetThreadId,
-    mode: "steer-if-active",
-    input: [
-      {
-        type: "text",
-        text: renderAutomationDueMessage({
-          automationId: args.automation.id,
-          prompt: args.execution.prompt,
-        }),
-        mentions: [],
-      },
-    ],
-    permissionMode: args.execution.permissionMode,
-  });
+  const sendResult = sendResultSchema.parse(
+    await bb.sdk.threads.send({
+      threadId: args.targetThreadId,
+      mode: args.event === undefined ? "steer-if-active" : "queue-if-active",
+      input: [
+        {
+          type: "text",
+          text: renderAutomationDueMessage({
+            automationId: args.automation.id,
+            prompt: args.execution.prompt,
+            eventBody: args.event?.body,
+          }),
+          mentions: [],
+        },
+      ],
+      permissionMode: args.execution.permissionMode,
+    }),
+  );
+  const queuedId =
+    sendResult.delivery === "queued" ? sendResult.queuedMessage?.id : undefined;
+  if (queuedId !== undefined && !dispatchedMessageIds.has(queuedId)) {
+    setRunQueuedMessage(db, { runId: args.run.id, queuedMessageId: queuedId });
+  }
 }
 
 function closeRunForUnusableTargetThread(
@@ -262,6 +305,13 @@ function closeRunForUnusableTargetThread(
   bb.log.error(`Automation ${args.automation.id} paused: ${error}`);
 }
 
+export interface ScriptRunEvent {
+  source: string;
+  kind: string;
+  deliveryId: string;
+  payloadJson: string;
+}
+
 interface ScriptRunArgs {
   pluginDataDir: string;
   automation: AutomationRow;
@@ -270,6 +320,7 @@ interface ScriptRunArgs {
   onFailure: RunFailureHandler;
   resolveWorkingDirectory: ScriptWorkingDirectoryResolver;
   scriptRuns: ScriptRunScope;
+  event?: ScriptRunEvent;
 }
 
 export function executeScriptRun(
@@ -285,6 +336,7 @@ async function runScript(
   db: Db,
   args: ScriptRunArgs,
 ): Promise<void> {
+  let payloadFile: string | null = null;
   try {
     const scriptFile = args.execution.scriptFile;
     if (scriptFile === undefined) {
@@ -305,6 +357,21 @@ async function runScript(
         `Project ${args.automation.projectId} has no source on the bb server host`,
       );
     }
+    let env = args.execution.env;
+    if (args.event !== undefined) {
+      payloadFile = await writeEventPayloadFile({
+        pluginDataDir: args.pluginDataDir,
+        runId: args.run.id,
+        content: args.event.payloadJson,
+      });
+      env = {
+        ...env,
+        BB_EVENT_PAYLOAD_FILE: payloadFile,
+        BB_EVENT_KIND: args.event.kind,
+        BB_EVENT_DELIVERY_ID: args.event.deliveryId,
+        BB_EVENT_SOURCE: args.event.source,
+      };
+    }
     const result = await executeStoredScript({
       pluginDataDir: args.pluginDataDir,
       automationId: args.automation.id,
@@ -313,11 +380,15 @@ async function runScript(
       scriptFile,
       interpreter: args.execution.interpreter,
       timeoutMs: args.execution.timeoutMs,
-      env: args.execution.env,
+      env,
       serverUrl: bb.server.loopbackBaseUrl,
       workingDir,
       signal: args.scriptRuns.signal,
     });
+    if (payloadFile !== null) {
+      await rm(payloadFile, { force: true });
+      payloadFile = null;
+    }
     const mapped = mapScriptResultToRun(result);
     closeAutomationRun(db, {
       runId: args.run.id,
@@ -334,11 +405,24 @@ async function runScript(
       `Failed to run script for automation ${args.automation.id}: ${errorMessage(error)}`,
     );
   } finally {
+    if (payloadFile !== null) await rm(payloadFile, { force: true });
     publishAutomationChange(bb, args.automation.projectId, [
       "automations-changed",
       "automation-runs-changed",
     ]);
   }
+}
+
+async function writeEventPayloadFile(args: {
+  pluginDataDir: string;
+  runId: string;
+  content: string;
+}): Promise<string> {
+  const dir = join(args.pluginDataDir, "event-payloads");
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, `${args.runId}.json`);
+  await writeFile(path, args.content, { mode: 0o600 });
+  return path;
 }
 
 function settledRunOutcome(
@@ -382,7 +466,11 @@ export function settleAutomationRunsForThread(
   const outcome = settledRunOutcome(bb.pluginId, event);
   if (outcome === null) return;
   const threadId = event.thread.id;
-  const runs = listRunningAutomationRunsByThread(db, threadId);
+  const awaitsOwnTurn =
+    event.outcome === "completed" || event.outcome === "failed";
+  const runs = listRunningAutomationRunsByThread(db, threadId).filter(
+    (run) => !(awaitsOwnTurn && run.queuedMessageId !== null),
+  );
   const now = Date.now();
   const changedProjects = new Set<string>();
   for (const run of runs) {
@@ -544,5 +632,36 @@ export function disableAutomationsForDeletedThreadEvent(
   });
   for (const automation of disabled) {
     publishAutomationChange(bb, automation.projectId, "automations-changed");
+  }
+}
+
+export async function reconcileQueuedMessages(
+  bb: Pick<BbPluginApi, "log"> & {
+    sdk: {
+      threads: {
+        queue: {
+          list(
+            args: Parameters<BbPluginApi["sdk"]["threads"]["queue"]["list"]>[0],
+          ): Promise<Array<{ id: string }>>;
+        };
+      };
+    };
+  },
+  db: Db,
+): Promise<void> {
+  for (const run of listRunsAwaitingDispatch(db)) {
+    if (run.threadId === null || run.queuedMessageId === null) continue;
+    try {
+      const queued = await bb.sdk.threads.queue.list({
+        threadId: run.threadId,
+      });
+      if (!queued.some((entry) => entry.id === run.queuedMessageId)) {
+        clearRunQueuedMessage(db, run.queuedMessageId);
+      }
+    } catch (error) {
+      bb.log.warn(
+        `Could not check the queue of thread ${run.threadId} for automation run ${run.id}: ${errorMessage(error)}`,
+      );
+    }
   }
 }

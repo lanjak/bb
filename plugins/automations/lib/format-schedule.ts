@@ -88,6 +88,9 @@ export function formatAutomationTrigger(trigger: AutomationTrigger): string {
   if (trigger.triggerType === "once") {
     return "One time";
   }
+  if (trigger.triggerType === "event") {
+    return "On event";
+  }
   return formatCronCadence(trigger.cron);
 }
 

@@ -72,11 +72,12 @@ export function validateOnceDefinition(args: {
 export function computeInitialNextRunAt(args: {
   trigger:
     | { triggerType: "schedule"; cron: string; timezone: string }
-    | { triggerType: "once"; runAt: number };
+    | { triggerType: "once"; runAt: number }
+    | { triggerType: "event" };
   enabled: boolean;
   now: number;
 }): number | null {
-  if (!args.enabled) return null;
+  if (!args.enabled || args.trigger.triggerType === "event") return null;
   if (args.trigger.triggerType === "once") {
     validateOnceDefinition({ runAt: args.trigger.runAt, now: args.now });
     return args.trigger.runAt;

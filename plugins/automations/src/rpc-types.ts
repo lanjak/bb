@@ -9,6 +9,21 @@ import {
   AUTOMATION_SCRIPT_TIMEOUT_DEFAULT_MS,
   AUTOMATION_SCRIPT_TIMEOUT_MAX_MS,
   AUTOMATION_SCRIPT_WORKING_DIRECTORY_MAX_LENGTH,
+  EVENT_DELIVERY_ID_PATTERN,
+  EVENT_KIND_PATTERN,
+  EVENT_KINDS_MAX,
+  EVENT_PATH_MAX_LENGTH,
+  EVENT_PATH_PATTERN,
+  EVENT_PICK_PATHS_MAX,
+  EVENT_PROMPT_BLOCK_BYTES_DEFAULT,
+  EVENT_PROMPT_BLOCK_BYTES_MAX,
+  EVENT_RUNS_PER_HOUR_DEFAULT,
+  EVENT_RUNS_PER_HOUR_MAX,
+  EVENT_WHERE_CLAUSES_MAX,
+  EVENT_WHERE_VALUE_MAX_LENGTH,
+  EVENT_WHERE_VALUES_MAX,
+  HOOK_ID_PATTERN,
+  HOOK_NAME_MAX_LENGTH,
   isPrintableWorkingDirectoryPath,
   SCHEDULE_CRON_MAX_LENGTH,
   SCHEDULE_TIMEZONE_MAX_LENGTH,
@@ -99,7 +114,11 @@ export const automationRunStatusSchema = z.enum([
   "skipped",
 ]);
 export type AutomationRunStatus = z.infer<typeof automationRunStatusSchema>;
-export const automationRunTriggerSchema = z.enum(["schedule", "manual"]);
+export const automationRunTriggerSchema = z.enum([
+  "schedule",
+  "manual",
+  "event",
+]);
 export type AutomationRunTrigger = z.infer<typeof automationRunTriggerSchema>;
 export const automationScriptInterpreterSchema = z.enum([
   "bash",
@@ -148,9 +167,98 @@ const automationOnceTriggerSchema = z
     runAt: z.number().int().positive(),
   })
   .strict();
+export const eventSourceSchema = z.enum(["webhook", "github"]);
+export type EventSource = z.infer<typeof eventSourceSchema>;
+export const hookVerificationSchema = z.enum(["hmac", "token"]);
+export type HookVerification = z.infer<typeof hookVerificationSchema>;
+export const hookIdSchema = z.string().regex(HOOK_ID_PATTERN);
+const eventPathSchema = z
+  .string()
+  .max(EVENT_PATH_MAX_LENGTH)
+  .regex(EVENT_PATH_PATTERN);
+export const eventWhereOpSchema = z.enum([
+  "=",
+  "!=",
+  "in",
+  "within",
+  "contains",
+  "!contains",
+  "exists",
+  "!exists",
+]);
+export type EventWhereOp = z.infer<typeof eventWhereOpSchema>;
+export const eventWhereSchema = z
+  .object({
+    path: eventPathSchema,
+    op: eventWhereOpSchema,
+    values: z
+      .array(z.string().min(1).max(EVENT_WHERE_VALUE_MAX_LENGTH))
+      .max(EVENT_WHERE_VALUES_MAX)
+      .default([]),
+  })
+  .strict()
+  .superRefine((clause, ctx) => {
+    const needsValues = clause.op !== "exists" && clause.op !== "!exists";
+    if (needsValues && clause.values.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: `where operator ${clause.op} needs at least one value`,
+        path: ["values"],
+      });
+    }
+    if (!needsValues && clause.values.length > 0) {
+      ctx.addIssue({
+        code: "custom",
+        message: `where operator ${clause.op} takes no values`,
+        path: ["values"],
+      });
+    }
+    if (
+      (clause.op === "=" ||
+        clause.op === "!=" ||
+        clause.op === "contains" ||
+        clause.op === "!contains") &&
+      clause.values.length > 1
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: `where operator ${clause.op} takes one value; use in for several`,
+        path: ["values"],
+      });
+    }
+  });
+export type EventWhere = z.infer<typeof eventWhereSchema>;
+export const eventKindPatternSchema = z.string().regex(EVENT_KIND_PATTERN);
+
+const automationEventTriggerSchema = z
+  .object({
+    triggerType: z.literal("event"),
+    hookId: hookIdSchema,
+    events: z.array(eventKindPatternSchema).max(EVENT_KINDS_MAX).default([]),
+    where: z.array(eventWhereSchema).max(EVENT_WHERE_CLAUSES_MAX).default([]),
+    pick: z.array(eventPathSchema).max(EVENT_PICK_PATHS_MAX).default([]),
+    maxRunsPerHour: z
+      .number()
+      .int()
+      .min(1)
+      .max(EVENT_RUNS_PER_HOUR_MAX)
+      .default(EVENT_RUNS_PER_HOUR_DEFAULT),
+    maxPayloadBytes: z
+      .number()
+      .int()
+      .min(1024)
+      .max(EVENT_PROMPT_BLOCK_BYTES_MAX)
+      .default(EVENT_PROMPT_BLOCK_BYTES_DEFAULT),
+    acknowledgeUntrustedInput: z.boolean().default(false),
+  })
+  .strict();
+export type AutomationEventTrigger = z.infer<
+  typeof automationEventTriggerSchema
+>;
 export const automationTriggerSchema = z.discriminatedUnion("triggerType", [
   automationScheduleTriggerSchema,
   automationOnceTriggerSchema,
+  automationEventTriggerSchema,
 ]);
 export type AutomationTrigger = z.infer<typeof automationTriggerSchema>;
 
@@ -417,6 +525,7 @@ export const automationRunResponseSchema = z
     threadId: z.string().min(1).nullable(),
     status: automationRunStatusSchema,
     trigger: automationRunTriggerSchema,
+    eventDeliveryId: z.string().nullable(),
     skipReason: z.string().nullable(),
     error: z.string().nullable(),
     output: z.string().nullable(),
@@ -466,6 +575,7 @@ export const updateAutomationInputSchema = z
     execution: automationExecutionRequestSchema.optional(),
     agent: agentExecutionUpdateSchema.optional(),
     script: scriptExecutionUpdateSchema.optional(),
+    callerThreadId: z.string().min(1).optional(),
   })
   .strict()
   .refine(
@@ -545,3 +655,187 @@ export const automationsOverviewResponseSchema = z
 export type AutomationsOverviewResponse = z.infer<
   typeof automationsOverviewResponseSchema
 >;
+
+export const eventOutcomeSchema = z.enum([
+  "queued",
+  "started",
+  "filtered",
+  "paused",
+  "rate_limited",
+  "dropped_queue_full",
+  "expired",
+]);
+export type EventOutcome = z.infer<typeof eventOutcomeSchema>;
+
+export const hookUrlSourceSchema = z.enum(["setting", "app-url", "loopback"]);
+export type HookUrlSource = z.infer<typeof hookUrlSourceSchema>;
+export const hookUrlScopeSchema = z.enum([
+  "public",
+  "private-network",
+  "tailnet",
+  "loopback",
+]);
+export type HookUrlScope = z.infer<typeof hookUrlScopeSchema>;
+
+export const automationHookResponseSchema = z
+  .object({
+    id: z.string(),
+    projectId: z.string(),
+    source: eventSourceSchema,
+    verification: hookVerificationSchema,
+    name: z.string(),
+    secretVersion: z.number().int().min(1),
+    rejectedCount: z.number().int().min(0),
+    lastRejectedAt: z.number().nullable(),
+    createdAt: z.number(),
+    rotatedAt: z.number().nullable(),
+    url: z.string(),
+    urlSource: hookUrlSourceSchema,
+    urlScope: hookUrlScopeSchema,
+    urlWarning: z.string(),
+    automationIds: z.array(z.string()),
+  })
+  .strict();
+export type AutomationHookResponse = z.infer<
+  typeof automationHookResponseSchema
+>;
+
+export const automationHookSecretResponseSchema = z
+  .object({ hook: automationHookResponseSchema, secret: z.string().min(1) })
+  .strict();
+export type AutomationHookSecretResponse = z.infer<
+  typeof automationHookSecretResponseSchema
+>;
+
+export const automationHookListResponseSchema = z.array(
+  automationHookResponseSchema,
+);
+
+const hookProjectInputSchema = z
+  .object({ projectId: z.string().min(1), hookId: hookIdSchema })
+  .strict();
+
+export const listHooksInputSchema = z
+  .object({ projectId: z.string().min(1) })
+  .strict();
+export const getHookInputSchema = hookProjectInputSchema;
+export const createHookInputSchema = z
+  .object({
+    projectId: z.string().min(1),
+    name: z.string().min(1).max(HOOK_NAME_MAX_LENGTH),
+    source: eventSourceSchema,
+    verification: hookVerificationSchema.default("hmac"),
+    callerThreadId: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine(
+    (value) => value.source === "webhook" || value.verification === "hmac",
+    {
+      message: "only a generic webhook can use token verification",
+      path: ["verification"],
+    },
+  );
+export type CreateHookInput = z.input<typeof createHookInputSchema>;
+export type ResolvedCreateHookInput = z.output<typeof createHookInputSchema>;
+export const rotateHookInputSchema = hookProjectInputSchema
+  .extend({ callerThreadId: z.string().min(1).optional() })
+  .strict();
+export const deleteHookInputSchema = rotateHookInputSchema;
+export const testHookInputSchema = hookProjectInputSchema
+  .extend({
+    payload: z.json(),
+    kind: z.string().regex(EVENT_KIND_PATTERN).optional(),
+    dryRun: z.boolean().default(true),
+    callerThreadId: z.string().min(1).optional(),
+  })
+  .strict();
+export type ResolvedTestHookInput = z.output<typeof testHookInputSchema>;
+
+export const automationEventOutcomeResponseSchema = z
+  .object({
+    automationId: z.string(),
+    outcome: eventOutcomeSchema,
+    runId: z.string().nullable(),
+    reason: z.string().nullable(),
+    updatedAt: z.number(),
+  })
+  .strict();
+export type AutomationEventOutcomeResponse = z.infer<
+  typeof automationEventOutcomeResponseSchema
+>;
+
+export const automationEventSummarySchema = z
+  .object({
+    id: z.string(),
+    hookId: z.string(),
+    source: eventSourceSchema,
+    kind: z.string(),
+    receivedAt: z.number(),
+    sample: z.boolean(),
+    payloadBytes: z.number().int().min(0),
+    outcomes: z.array(automationEventOutcomeResponseSchema),
+  })
+  .strict();
+export type AutomationEventSummary = z.infer<
+  typeof automationEventSummarySchema
+>;
+
+export const automationEventDetailSchema = automationEventSummarySchema
+  .extend({
+    payload: z.json().nullable(),
+    promptPreviews: z.array(
+      z.object({ automationId: z.string(), prompt: z.string() }).strict(),
+    ),
+  })
+  .strict();
+export type AutomationEventDetail = z.infer<typeof automationEventDetailSchema>;
+
+export const hookTestResponseSchema = z
+  .object({
+    dryRun: z.boolean(),
+    kind: z.string(),
+    deliveryId: z.string().nullable(),
+    outcomes: z.array(automationEventOutcomeResponseSchema),
+    promptPreviews: z.array(
+      z.object({ automationId: z.string(), prompt: z.string() }).strict(),
+    ),
+  })
+  .strict();
+export type HookTestResponse = z.infer<typeof hookTestResponseSchema>;
+
+export const listEventsInputSchema = z
+  .object({
+    projectId: z.string().min(1),
+    automationId: z.string().min(1).optional(),
+    hookId: hookIdSchema.optional(),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(AUTOMATION_RUNS_LIMIT_MAX)
+      .default(AUTOMATION_RUNS_LIMIT_DEFAULT),
+    cursor: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      (value.automationId === undefined) !== (value.hookId === undefined),
+    { message: "provide exactly one of automationId or hookId" },
+  );
+export type ResolvedListEventsInput = z.output<typeof listEventsInputSchema>;
+export const automationEventListResponseSchema = z
+  .object({
+    events: z.array(automationEventSummarySchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type AutomationEventListResponse = z.infer<
+  typeof automationEventListResponseSchema
+>;
+
+export const getEventInputSchema = z
+  .object({
+    projectId: z.string().min(1),
+    deliveryId: z.string().regex(EVENT_DELIVERY_ID_PATTERN),
+  })
+  .strict();

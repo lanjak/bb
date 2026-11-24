@@ -1687,6 +1687,7 @@ describe("automation CLI --script-file", () => {
         },
       },
       service,
+      hooks: {} as never,
     });
     if (!cli) throw new Error("automation CLI was not registered");
     return {

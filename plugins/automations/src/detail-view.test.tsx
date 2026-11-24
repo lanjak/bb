@@ -180,6 +180,7 @@ describe("Automation detail recipe", () => {
       automationId: "auto_1",
       runMode: "agent",
       trigger: "schedule",
+      eventDeliveryId: null,
       skipReason: null,
       output: null,
       exitCode: null,

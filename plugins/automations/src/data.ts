@@ -29,8 +29,9 @@ const AUTOMATION_COLUMNS = `id, project_id AS projectId, target_thread_id AS tar
   last_run_thread_id AS lastRunThreadId, last_error AS lastError,
   created_at AS createdAt, updated_at AS updatedAt`;
 
-const AUTOMATION_RUN_COLUMNS = `id, automation_id AS automationId, run_mode AS runMode,
-  thread_id AS threadId, status, trigger, skip_reason AS skipReason,
+export const AUTOMATION_RUN_COLUMNS = `id, automation_id AS automationId, run_mode AS runMode,
+  thread_id AS threadId, status, trigger, event_delivery_id AS eventDeliveryId,
+  queued_message_id AS queuedMessageId, skip_reason AS skipReason,
   error, output, exit_code AS exitCode,
   idempotency_key AS idempotencyKey, scheduled_for AS scheduledFor,
   started_at AS startedAt, finished_at AS finishedAt`;
@@ -39,7 +40,7 @@ export type Db = Database.Database;
 
 const statements = new WeakMap<Db, Map<string, Database.Statement>>();
 
-function statement(db: Db, sql: string): Database.Statement {
+export function statement(db: Db, sql: string): Database.Statement {
   let cache = statements.get(db);
   if (cache === undefined) {
     cache = new Map();
@@ -62,7 +63,7 @@ export interface AutomationRow {
   targetThreadId: string | null;
   name: string;
   enabled: boolean;
-  triggerType: "schedule" | "once";
+  triggerType: "schedule" | "once" | "event";
   triggerConfig: string;
   runMode: AutomationRunMode;
   execution: string;
@@ -86,6 +87,8 @@ export interface AutomationRunRow {
   threadId: string | null;
   status: AutomationRunStatus;
   trigger: AutomationRunTrigger;
+  eventDeliveryId: string | null;
+  queuedMessageId: string | null;
   skipReason: string | null;
   error: string | null;
   output: string | null;
@@ -234,6 +237,56 @@ export const migrations = [
      ON automation_runs(automation_id)
      WHERE status = 'running';`,
   `DROP TABLE IF EXISTS automation_thread_marks;`,
+  `CREATE TABLE IF NOT EXISTS automation_hooks (
+     id TEXT PRIMARY KEY,
+     project_id TEXT NOT NULL,
+     source TEXT NOT NULL,
+     verification TEXT NOT NULL,
+     name TEXT NOT NULL,
+     secret_version INTEGER NOT NULL DEFAULT 1,
+     rejected_count INTEGER NOT NULL DEFAULT 0,
+     last_rejected_at INTEGER,
+     created_at INTEGER NOT NULL,
+     rotated_at INTEGER
+   );
+   CREATE INDEX IF NOT EXISTS automation_hooks_project_idx
+     ON automation_hooks(project_id);
+   CREATE TABLE IF NOT EXISTS automation_event_deliveries (
+     id TEXT PRIMARY KEY,
+     hook_id TEXT NOT NULL,
+     delivery_key TEXT NOT NULL,
+     event_kind TEXT NOT NULL,
+     received_at INTEGER NOT NULL,
+     payload_json TEXT,
+     payload_bytes INTEGER NOT NULL,
+     sample INTEGER NOT NULL DEFAULT 0
+   );
+   CREATE INDEX IF NOT EXISTS automation_event_deliveries_hook_idx
+     ON automation_event_deliveries(hook_id, received_at, id);
+   CREATE TABLE IF NOT EXISTS automation_event_dedupe (
+     hook_id TEXT NOT NULL,
+     delivery_key TEXT NOT NULL,
+     seen_at INTEGER NOT NULL,
+     PRIMARY KEY (hook_id, delivery_key)
+   ) WITHOUT ROWID;
+   CREATE INDEX IF NOT EXISTS automation_event_dedupe_seen_idx
+     ON automation_event_dedupe(seen_at);
+   CREATE TABLE IF NOT EXISTS automation_event_outcomes (
+     delivery_id TEXT NOT NULL,
+     automation_id TEXT NOT NULL,
+     outcome TEXT NOT NULL,
+     run_id TEXT,
+     reason TEXT,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (delivery_id, automation_id)
+   );
+   CREATE INDEX IF NOT EXISTS automation_event_outcomes_automation_idx
+     ON automation_event_outcomes(automation_id, outcome, updated_at);
+   ALTER TABLE automation_runs ADD COLUMN event_delivery_id TEXT;
+   ALTER TABLE automation_runs ADD COLUMN queued_message_id TEXT;
+   CREATE INDEX IF NOT EXISTS automation_runs_event_idx
+     ON automation_runs(automation_id, trigger, started_at);`,
 ];
 
 function automationRetryDelayMs(consecutiveFailures: number): number {
@@ -416,6 +469,7 @@ export function toAutomationRunResponse(
     threadId: row.threadId,
     status: row.status,
     trigger: row.trigger,
+    eventDeliveryId: row.eventDeliveryId,
     skipReason: row.skipReason,
     error: row.error,
     output: row.output,
@@ -626,6 +680,10 @@ export function deleteAutomation(
   statement(db, `DELETE FROM automation_runs WHERE automation_id = ?`).run(
     args.automationId,
   );
+  statement(
+    db,
+    `DELETE FROM automation_event_outcomes WHERE automation_id = ?`,
+  ).run(args.automationId);
   statement(db, `DELETE FROM automations WHERE id = ? AND project_id = ?`).run(
     args.automationId,
     args.projectId,
@@ -959,6 +1017,35 @@ export function setAutomationRunThread(
     args.runId,
   );
   return getAutomationRun(db, args.runId);
+}
+
+export function setRunQueuedMessage(
+  db: Db,
+  args: { runId: string; queuedMessageId: string },
+): void {
+  statement(
+    db,
+    `UPDATE automation_runs SET queued_message_id = ?
+     WHERE id = ? AND status = 'running'`,
+  ).run(args.queuedMessageId, args.runId);
+}
+
+export function clearRunQueuedMessage(db: Db, queuedMessageId: string): number {
+  return statement(
+    db,
+    `UPDATE automation_runs SET queued_message_id = NULL
+     WHERE queued_message_id = ?`,
+  ).run(queuedMessageId).changes;
+}
+
+export function listRunsAwaitingDispatch(db: Db): AutomationRunRow[] {
+  return statement(
+    db,
+    `SELECT
+         ${AUTOMATION_RUN_COLUMNS}
+       FROM automation_runs
+       WHERE status = 'running' AND queued_message_id IS NOT NULL`,
+  ).all() as AutomationRunRow[];
 }
 
 export function listRunningAutomationRuns(db: Db): AutomationRunRow[] {

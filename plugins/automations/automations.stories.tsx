@@ -282,6 +282,7 @@ function runsFor(
           : index === 0
             ? "manual"
             : "schedule",
+      eventDeliveryId: null,
       skipReason: script && status === "skipped" ? "empty output" : null,
       error:
         status === "failed"
@@ -707,6 +708,7 @@ function failedAutomationRuns(): AutomationRunResponse[] {
     automationId: FAILED_AUTOMATION.id,
     runMode: "agent",
     trigger: "schedule",
+    eventDeliveryId: null,
     skipReason: null,
     output: null,
     exitCode: null,

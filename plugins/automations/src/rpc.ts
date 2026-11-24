@@ -1,4 +1,9 @@
 import {
+  automationEventDetailSchema,
+  automationEventListResponseSchema,
+  automationHookListResponseSchema,
+  automationHookResponseSchema,
+  automationHookSecretResponseSchema,
   automationDetailReadResultSchema,
   automationDetailResponseSchema,
   automationListResponseSchema,
@@ -8,13 +13,23 @@ import {
   automationRunsInputSchema,
   automationsOverviewResponseSchema,
   createAutomationInputSchema,
+  createHookInputSchema,
+  deleteHookInputSchema,
+  getEventInputSchema,
+  getHookInputSchema,
+  hookTestResponseSchema,
   listAutomationsInputSchema,
+  listEventsInputSchema,
+  listHooksInputSchema,
+  rotateHookInputSchema,
+  testHookInputSchema,
   projectAutomationInputSchema,
   runAutomationInputSchema,
   updateAutomationInputSchema,
 } from "./rpc-types.js";
 import { z } from "zod";
 import { defineRpcContract } from "@get-bb/plugin-sdk";
+import type { HookService } from "./hook-service.js";
 import type { AutomationService } from "./service.js";
 
 export const automationRpcContract = defineRpcContract({
@@ -58,9 +73,44 @@ export const automationRpcContract = defineRpcContract({
     input: automationRunsInputSchema,
     output: automationRunListResponseSchema,
   },
+  automations_hooks_list: {
+    input: listHooksInputSchema,
+    output: automationHookListResponseSchema,
+  },
+  automations_hook_get: {
+    input: getHookInputSchema,
+    output: automationHookResponseSchema,
+  },
+  automations_hook_create: {
+    input: createHookInputSchema,
+    output: automationHookSecretResponseSchema,
+  },
+  automations_hook_rotate: {
+    input: rotateHookInputSchema,
+    output: automationHookSecretResponseSchema,
+  },
+  automations_hook_delete: {
+    input: deleteHookInputSchema,
+    output: z.object({ ok: z.literal(true) }).strict(),
+  },
+  automations_hook_test: {
+    input: testHookInputSchema,
+    output: hookTestResponseSchema,
+  },
+  automations_events: {
+    input: listEventsInputSchema,
+    output: automationEventListResponseSchema,
+  },
+  automations_event_get: {
+    input: getEventInputSchema,
+    output: automationEventDetailSchema,
+  },
 });
 
-export function createRpcHandlers(service: AutomationService) {
+export function createRpcHandlers(
+  service: AutomationService,
+  hooks: HookService,
+) {
   return {
     automations_overview() {
       return service.overview();
@@ -91,6 +141,30 @@ export function createRpcHandlers(service: AutomationService) {
     },
     automations_runs(input: z.output<typeof automationRunsInputSchema>) {
       return service.runs(input);
+    },
+    automations_hooks_list(input: z.output<typeof listHooksInputSchema>) {
+      return hooks.list(input);
+    },
+    automations_hook_get(input: z.output<typeof getHookInputSchema>) {
+      return hooks.get(input);
+    },
+    automations_hook_create(input: z.output<typeof createHookInputSchema>) {
+      return hooks.create(input);
+    },
+    automations_hook_rotate(input: z.output<typeof rotateHookInputSchema>) {
+      return hooks.rotate(input);
+    },
+    automations_hook_delete(input: z.output<typeof deleteHookInputSchema>) {
+      return hooks.delete(input);
+    },
+    automations_hook_test(input: z.output<typeof testHookInputSchema>) {
+      return hooks.test(input);
+    },
+    automations_events(input: z.output<typeof listEventsInputSchema>) {
+      return hooks.events(input);
+    },
+    automations_event_get(input: z.output<typeof getEventInputSchema>) {
+      return hooks.event(input);
     },
   };
 }

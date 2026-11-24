@@ -132,6 +132,14 @@ const rpcMethods = [
   "automations_resume",
   "automations_run",
   "automations_runs",
+  "automations_hooks_list",
+  "automations_hook_get",
+  "automations_hook_create",
+  "automations_hook_rotate",
+  "automations_hook_delete",
+  "automations_hook_test",
+  "automations_events",
+  "automations_event_get",
 ].sort();
 
 function project(projectId = PROJECT_ID) {
@@ -349,7 +357,14 @@ describe("automations server plugin harness", () => {
       "thread.failed": 0,
       "thread.deleted": 0,
     });
-    expect(harness.registrations.settingsDescriptors).toEqual({});
+    expect(Object.keys(harness.registrations.settingsDescriptors)).toEqual([
+      "webhookBaseUrl",
+    ]);
+    expect(
+      harness.registrations.httpRoutes.map(
+        (route) => `${route.method} ${route.path} ${route.auth}`,
+      ),
+    ).toEqual(["POST /webhook none"]);
 
     await harness.dispose();
   });

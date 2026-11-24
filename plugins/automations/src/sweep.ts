@@ -120,6 +120,7 @@ async function processDueAutomation(
   let execution;
   try {
     const trigger = parseAutomationTrigger(args.automation.triggerConfig);
+    if (trigger.triggerType === "event") return;
     execution = parseAutomationExecution(args.automation.execution);
     newNextRunAt =
       trigger.triggerType === "once"
@@ -188,7 +189,7 @@ async function processDueAutomation(
   }
 }
 
-async function hasConnectedHost(
+export async function hasConnectedHost(
   bb: Pick<BbPluginApi, "log"> & {
     sdk: { hosts: { list(): Promise<unknown> } };
   },
