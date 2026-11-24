@@ -1672,6 +1672,11 @@ accepted bind hosts are `127.0.0.1` and `0.0.0.0` (IPv4 only); containers must
 also publish the port. With wildcard binding the startup `Server listening`
 and `app` lines show `http://0.0.0.0:<port>`.
 
+Port forwarding adds to what the server exposes: any client that can reach and
+sign in to the bb server can relay to every enrolled machine's loopback ports,
+including local services that expect only local callers. Keep the server on
+loopback, a private network or bb Connect.
+
 The data directory holds all bb-managed state: the SQLite database, logs, host
 identity, thread storage, custom themes, and plugins. It defaults to `~/.bb/`
 for the packaged app. Use `--data-dir` for fully isolated instances.

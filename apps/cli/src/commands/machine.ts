@@ -1,4 +1,5 @@
 import { registerMachineEnvironmentCommands } from "./machine-environment.js";
+import { registerMachineForwardCommand } from "./machine-forward.js";
 import {
   enrollMachine,
   type MachineEnrollmentOptions,
@@ -225,6 +226,7 @@ export function registerMachineCommands(
     .description("Inspect execution machines");
 
   registerMachineEnvironmentCommands(machine, getUrl);
+  registerMachineForwardCommand(machine, getUrl);
 
   machine
     .command("enroll")

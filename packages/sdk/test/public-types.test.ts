@@ -277,6 +277,8 @@ type ExpectedHostsKey =
   | "pathsExist"
   | "pickFolder"
   | "providerCliStatus"
+  | "experimental_portRelayUrl"
+  | "experimental_portRelayAccess"
   | "experimental_resume"
   | "experimental_retryCleanup"
   | "retryUpdate"

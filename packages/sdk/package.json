@@ -55,6 +55,7 @@
     "@bb/core-ui": "workspace:*",
     "@bb/domain": "workspace:*",
     "@bb/host-daemon-contract": "workspace:*",
+    "@bb/host-port-forward": "workspace:*",
     "@bb/server-contract": "workspace:*",
     "@bb/templates": "workspace:*",
     "ws": "^8.22.1",

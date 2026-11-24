@@ -96,6 +96,7 @@ Use `--selected-model <model-id>` to discover its reasoning choices and include 
 - `bb machine suspend`
 - `bb machine resume`
 - `bb machine reconcile`
+- `bb machine forward`
 - `bb machine retry-cleanup`
 - `bb machine retry-update`
 - `bb machine provider-cli`

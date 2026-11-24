@@ -53,11 +53,54 @@ does not prove reachability.
   bb machine provider-cli status <machine>
   bb machine provider-cli install <machine> <provider-id>
     --action <install|update>
+  bb machine forward <port>[:<local-port>] (--machine <id-or-name> | --thread <id>)
+    --bind <127.0.0.1|::1|localhost>      Local address to listen on (loopback only)
+    --json                                Print the forward as JSON when it starts
 
 `bb machine show` includes `threadStorageRootPath` from the latest daemon
 session without waking the machine (null before the first session).
 `bb machine list --json` includes lifecycle phase, progress, and any suspension
 or resume error.
+
+`bb machine forward 5432` listens on local port 5432 (`127.0.0.1` and `::1`)
+and relays every connection to port 5432 on the machine, like `ssh -L`.
+`5173:54321` listens on local port 54321 instead, and `5173:0` on a free port.
+The command fails with `local_port_busy` when anything holds the local port on
+`127.0.0.1` or `::1`. `--bind ::1` listens on `[::1]` only. `--host` is an
+alias of `--machine`, and `--thread` picks the machine of the thread's
+environment. It runs until Ctrl-C (exit 0).
+
+The forward carries any TCP traffic, such as HTTP, WebSockets and database
+connections, through the bb server, so the machine needs no account or tunnel
+and can be enrolled directly to the server. It can reach any loopback port of
+the machine (not only the ports a thread started), and it never dials another
+address: the machine connects only to its own `127.0.0.1` and `::1`. Any
+process on your computer can use the local port, and a browser sends its cookies
+for `localhost:<port>` to the remote service. Any client that can reach and sign
+in to the bb server can relay to every enrolled machine's loopback ports, so
+keep the server on loopback, a private network or bb Connect. The server refuses
+a relay request that comes from a web page on another origin.
+
+A machine that reaches the server through bb Connect uses a machine credential,
+and the server lets only the owner's own session open relays. The command checks
+this before it listens and exits with `machine_credential`. Use the desktop app,
+or set `BB_SERVER_URL` to a direct server URL.
+
+A failed connection prints its code: `host_offline`, `relay_limit` (at most 256
+open connections for a machine, and 64 for each signed-in user; bb Connect
+sessions count as one user, and connections without sign-in count only against
+the machine), `refused` (nothing listens on that port), `timeout` or
+`relay_unreachable` with the HTTP status when something other than the relay
+answers. `host_not_found`, `invalid_port`, `machine_credential` and a
+`relay_unreachable` with a 2xx, 3xx, 401, 403 or 404 status end the command with
+exit 1; the others are printed for that connection and the forward keeps
+running.
+
+The SDK has `hosts.experimental_portRelayUrl({ hostId, port })` (the WebSocket
+URL, in every runtime), `hosts.experimental_portRelayAccess()` and, in Node,
+`experimental_forwardHostPort({ sdk, hostId, port, localPort? })`. It listens on
+`localPort`, or on `port` when you omit it (`0` picks a free one), and returns
+`{ localPort, localHost, close() }`.
 
 Each machine has a permission limit: the highest permission mode any thread on
 that machine can run with. The default is Full Access. A thread that asks for

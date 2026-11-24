@@ -2942,6 +2942,9 @@ importers:
       '@bb/host-daemon-contract':
         specifier: workspace:*
         version: link:../host-daemon-contract
+      '@bb/host-port-forward':
+        specifier: workspace:*
+        version: link:../host-port-forward
       '@bb/server-contract':
         specifier: workspace:*
         version: link:../server-contract

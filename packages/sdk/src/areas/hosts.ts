@@ -4,8 +4,10 @@ import {
   oldServerCopyDeleteJobResponseSchema,
   type HostProviderCliInstallJob,
   type OldServerCopyDeleteJob,
+  type HostPortRelayAccessResponse,
 } from "@bb/server-contract";
 import type { Host, HostType } from "@bb/domain";
+import { hostPortRelayUrl } from "@bb/server-contract";
 import type {
   CreateHostJoinCodeResponse,
   CreateMachineRequest,
@@ -55,6 +57,11 @@ export interface HostUpdateArgs extends UpdateHostRequest {
 
 export interface HostRetryUpdateArgs {
   hostId: string;
+}
+
+export interface HostPortRelayUrlArgs {
+  hostId: string;
+  port: number;
 }
 
 export interface HostActionArgs {
@@ -187,6 +194,19 @@ export interface HostsArea {
   providerCliStatus(
     args: HostProviderCliStatusArgs,
   ): Promise<HostProviderCliStatusResult>;
+  /**
+   * The WebSocket URL of the relay to a loopback port of a machine: GET it
+   * with an `Upgrade: websocket` request and each connection carries the
+   * bytes of one TCP connection to `127.0.0.1:<port>` on that machine, in
+   * binary frames of at most 64 KiB; the text frame `fin` half-closes.
+   * Browsers send their own Origin, which the server checks.
+   */
+  experimental_portRelayUrl(args: HostPortRelayUrlArgs): string;
+  /**
+   * Whether this connection may open port relays. A machine credential (an
+   * enrolled machine that reaches the server through bb Connect) may not.
+   */
+  experimental_portRelayAccess(): Promise<HostPortRelayAccessResponse>;
   experimental_resume(args: HostActionArgs): Promise<Host>;
   experimental_retryCleanup(
     args: HostActionArgs,
@@ -195,6 +215,15 @@ export interface HostsArea {
   experimental_suspend(args: HostActionArgs): Promise<Host>;
   experimental_reconcile(args: HostActionArgs): Promise<Host>;
   update(args: HostUpdateArgs): Promise<HostUpdateResult>;
+}
+
+function absoluteBaseUrl(baseUrl: string): string {
+  if (/^https?:\/\//u.test(baseUrl)) return baseUrl;
+  if (typeof location === "undefined")
+    throw new Error(
+      "A relative bb base URL has no origin to build a relay URL.",
+    );
+  return new URL(baseUrl === "" ? "/" : baseUrl, location.href).href;
 }
 
 export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
@@ -449,6 +478,20 @@ export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
           },
           ...signalRequestArgs(input.signal),
         ),
+      );
+    },
+    experimental_portRelayUrl(input) {
+      if (!Number.isInteger(input.port) || input.port < 1 || input.port > 65535)
+        throw new Error("The port must be an integer from 1 to 65535.");
+      return hostPortRelayUrl({
+        baseUrl: absoluteBaseUrl(transport.baseUrl),
+        hostId: input.hostId,
+        port: input.port,
+      });
+    },
+    async experimental_portRelayAccess() {
+      return transport.readJson(
+        transport.api.v1.system["port-relay-access"].$get(),
       );
     },
     async experimental_resume(input) {
