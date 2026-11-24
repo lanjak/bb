@@ -403,6 +403,7 @@ import {
   updateProjectSourceRequestSchema,
   updateThreadRequestSchema,
 } from "./api-types.js";
+import type { HostPortRelayAccessResponse } from "./host-port-relay.js";
 import {
   type ThreadTabsWireResponse,
   type UpdateThreadTabsRequest,
@@ -1947,6 +1948,12 @@ export const publicApiRoutes = {
       method: "get",
       request: noRequest(),
       response: jsonResponse<SystemAttentionResponse>(),
+    }),
+    portRelayAccess: defineRoute({
+      path: "/system/port-relay-access",
+      method: "get",
+      request: noRequest(),
+      response: jsonResponse<HostPortRelayAccessResponse>(),
     }),
     mobileAppReleases: defineRoute({
       path: "/system/mobile-app-releases",

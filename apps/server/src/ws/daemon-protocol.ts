@@ -150,7 +150,10 @@ export interface DaemonSocketEvents {
 
 export function createDaemonSocketEvents(
   deps: WorkSessionDeps &
-    Pick<AppDeps, "hub" | "logger" | "sharedPorts" | "terminalSessions"> &
+    Pick<
+      AppDeps,
+      "hub" | "hostPortRelays" | "logger" | "sharedPorts" | "terminalSessions"
+    > &
     LoggedPendingInteractionWorkSessionDeps,
   target: DaemonSocketTarget,
   plugins?: Pick<
@@ -284,7 +287,8 @@ export function onDaemonSocketOpen(
 }
 
 export function onDaemonSocketMessage(
-  deps: WorkSessionDeps & Pick<AppDeps, "sharedPorts" | "terminalSessions">,
+  deps: WorkSessionDeps &
+    Pick<AppDeps, "hostPortRelays" | "sharedPorts" | "terminalSessions">,
   args: DaemonSocketMessageArgs,
   plugins?: Pick<
     PluginService,
@@ -400,6 +404,10 @@ export function onDaemonSocketMessage(
             "Ignoring stale host RPC response",
           );
         }
+        return;
+      }
+      if (message.type === "host-port.connect-failed") {
+        deps.hostPortRelays.connectFailed(args.hostId, message);
         return;
       }
       if (message.type === "connect-tunnel.identity") {

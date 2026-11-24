@@ -939,6 +939,19 @@ export class ServerConnection {
       return;
     }
 
+    if (message.data.type === "host-port.connect") {
+      const connectMessage = message.data;
+      void Promise.resolve(
+        this.options.onHostPortConnect?.(connectMessage),
+      ).catch((error) => {
+        this.options.logger.warn(
+          { relayId: connectMessage.relayId, ...runtimeErrorLogFields(error) },
+          "Host port connect handler failed",
+        );
+      });
+      return;
+    }
+
     if (message.data.type === "connect-shares.replace") {
       const sharesMessage = message.data;
       void Promise.resolve(

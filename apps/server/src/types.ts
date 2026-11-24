@@ -13,6 +13,7 @@ import type { TerminalSessionLifecycle } from "./services/terminals/terminal-ses
 import type { LifecycleDedupers } from "./lifecycle-dedupers.js";
 import type { NotificationHub } from "./ws/hub.js";
 import type { WatchInterestCoordinator } from "./ws/watch-interests.js";
+import type { HostPortRelays } from "./ws/host-port-relay.js";
 import type { HostSharedPortCoordinator } from "./ws/host-shared-ports.js";
 import type { SkillTreeRegistry } from "./services/skills/injected-skills.js";
 import type { ProviderRegistryService } from "./services/providers/provider-registry.js";
@@ -59,6 +60,7 @@ export interface AppDeps {
   terminalSessions: TerminalSessionLifecycle;
   watchInterests: WatchInterestCoordinator;
   sharedPorts: HostSharedPortCoordinator;
+  hostPortRelays: HostPortRelays;
   walCheckpointer: WalCheckpointer;
 }
 

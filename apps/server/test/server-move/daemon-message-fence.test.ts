@@ -17,6 +17,7 @@ const SNAPSHOT_FENCE_CLASSIFICATION: Record<
   "environment-metadata-change": "fenced",
   "environment.hook.progress": "unfenced",
   heartbeat: "unfenced",
+  "host-port.connect-failed": "unfenced",
   "host-rpc.response": "unfenced",
   "machine.shutdown-ack": "unfenced",
   "plugin-host.signal": "fenced",

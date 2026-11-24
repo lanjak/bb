@@ -12,6 +12,10 @@ import {
 } from "./commands.js";
 import { desktopBrowserChangedSchema } from "./desktop-browser.js";
 import {
+  hostPortConnectFailedMessageSchema,
+  hostPortConnectMessageSchema,
+} from "./host-port-relay.js";
+import {
   serverMovedMessageSchema,
   serverMoveProgressMessageSchema,
 } from "./server-move.js";
@@ -700,6 +704,7 @@ export const hostDaemonServerWsMessageSchema = z.discriminatedUnion("type", [
   hostDaemonTerminalCloseMessageSchema,
   hostDaemonTerminalStreamMessageSchema,
   hostDaemonTerminalAckMessageSchema,
+  hostPortConnectMessageSchema,
 ]);
 export type HostDaemonServerWsMessage = z.infer<
   typeof hostDaemonServerWsMessageSchema
@@ -865,6 +870,7 @@ export const hostDaemonDaemonWsMessageSchema = z.discriminatedUnion("type", [
   hostDaemonTerminalExitedMessageSchema,
   hostDaemonTerminalErrorMessageSchema,
   hostDaemonOnlineRpcResponseMessageSchema,
+  hostPortConnectFailedMessageSchema,
 ]);
 export type HostDaemonDaemonWsMessage = z.infer<
   typeof hostDaemonDaemonWsMessageSchema

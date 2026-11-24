@@ -5,6 +5,7 @@ import {
   type HostDaemonOpenThreadWork,
   type HostDaemonLoadedEnvironment,
   type HostDaemonConnectSharesReplaceMessage,
+  type HostPortConnectMessage,
   type HostDaemonOnlineRpcCancelMessage,
   type HostDaemonOnlineRpcRequestMessage,
   type HostDaemonServerWsMessage,
@@ -57,6 +58,7 @@ export type HostDaemonServerTerminalMessage = Exclude<
   | HostDaemonOnlineRpcCancelMessage
   | HostDaemonWatchSetReplaceMessage
   | HostDaemonConnectSharesReplaceMessage
+  | HostPortConnectMessage
 >;
 
 export type ServerMovedNotice =
@@ -109,6 +111,7 @@ export interface ServerConnectionOptions {
   onConnectSharesReplace?: (
     message: HostDaemonConnectSharesReplaceMessage,
   ) => void | Promise<void>;
+  onHostPortConnect?: (message: HostPortConnectMessage) => void | Promise<void>;
   onSessionOpened?: (
     session: HostDaemonSessionOpenResponse,
   ) => void | Promise<void>;

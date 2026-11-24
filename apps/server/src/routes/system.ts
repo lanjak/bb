@@ -171,6 +171,14 @@ export function registerSystemRoutes(
     context.json({ hasAttention: hasActiveThreadAttention(deps.db) }),
   );
 
+  get(routes.portRelayAccess, (context) =>
+    context.json(
+      getGateAuthKind(context) === "machine"
+        ? { allowed: false, reason: "machine_credential" as const }
+        : { allowed: true, reason: null },
+    ),
+  );
+
   function readAppKeybindingOverrides(): AppKeybindingOverrides {
     try {
       return getAppKeybindingOverrides(deps.db);

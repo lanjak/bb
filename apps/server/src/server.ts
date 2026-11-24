@@ -86,11 +86,13 @@ import { registerInternalSessionRoutes } from "./internal/session.js";
 import { registerInternalSkillRoutes } from "./internal/skills.js";
 import { registerInternalToolCallRoutes } from "./internal/tool-calls.js";
 import {
+  getAuthenticatedDaemon,
   setAuthenticatedDaemon,
   verifyAuthenticatedDaemon,
 } from "./internal/auth.js";
 import {
   captureTrustedRemoteAddress,
+  getGateAuthKind,
   resolveRequestAccessRoute,
   resolveRequestAppSurface,
 } from "./request-context.js";
@@ -119,7 +121,12 @@ import {
 import {
   HOST_DAEMON_PROTOCOL_VERSION,
   HOST_DAEMON_WS_RESUME_FROM_QUERY_PARAM,
+  HOST_PORT_RELAY_TOKEN_HEADER,
+  hostPortRelayIdSchema,
+  hostPortRelayPortSchema,
 } from "@bb/host-daemon-contract";
+import { getNonDestroyedHost } from "@bb/db";
+import { isRelaySocket } from "./ws/host-port-relay.js";
 import {
   createPluginCatalogService,
   type PluginCatalogService,
@@ -1028,6 +1035,77 @@ export function createApp(
             socket,
             terminalId,
           }),
+      };
+    }),
+  );
+
+  app.get(
+    "/ws/host-ports/:hostId/:port",
+    upgradeWebSocket((context) => {
+      assertBrowserWebSocketAllowed(context);
+      declineSameMachineWebSocketCompression(context);
+      const hostId = context.req.param("hostId") ?? "";
+      const rawPort = context.req.param("port");
+      const port = hostPortRelayPortSchema.safeParse(
+        rawPort !== undefined && /^[0-9]+$/u.test(rawPort)
+          ? Number(rawPort)
+          : Number.NaN,
+      );
+      const gate = getGateAuthKind(context);
+      const relayEvents = () => {
+        const relays = deps.hostPortRelays;
+        if (gate === "machine")
+          return relays.refuse("machine_credential", { hostId });
+        if (!port.success) return relays.refuse("invalid_port", { hostId });
+        if (getNonDestroyedHost(deps.db, hostId) === null)
+          return relays.refuse("host_not_found", { hostId });
+        return relays.client({
+          hostId,
+          port: port.data,
+          principal: gate === "session" ? "connect-session" : null,
+        });
+      };
+      const events = relayEvents();
+      return {
+        onOpen: (_event, socket) => {
+          if (isRelaySocket(socket.raw)) events.onOpen(socket.raw);
+          else socket.close(1011, "error");
+        },
+        onMessage: (event) => events.onMessage(event.data),
+        onClose: () => events.onClose(),
+      };
+    }),
+  );
+
+  app.get(
+    "/internal/host-ports/:relayId",
+    upgradeWebSocket((context) => {
+      declineSameMachineWebSocketCompression(context);
+      const relayId = hostPortRelayIdSchema.safeParse(
+        context.req.param("relayId"),
+      );
+      const token = context.req.header(HOST_PORT_RELAY_TOKEN_HEADER);
+      if (!relayId.success || token === undefined) {
+        throw new ApiError(404, "relay_not_found", "No such relay.");
+      }
+      const { hostId } = getAuthenticatedDaemon(context);
+      let attached: ReturnType<typeof deps.hostPortRelays.attachDaemon> | null =
+        null;
+      return {
+        onOpen: (_event, socket) => {
+          if (!isRelaySocket(socket.raw)) {
+            socket.close(1011, "error");
+            return;
+          }
+          attached = deps.hostPortRelays.attachDaemon({
+            relayId: relayId.data,
+            hostId,
+            token,
+            socket: socket.raw,
+          });
+        },
+        onMessage: (event) => attached?.onMessage(event.data),
+        onClose: () => attached?.onClose(),
       };
     }),
   );

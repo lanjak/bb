@@ -56,6 +56,7 @@ import {
   NotificationHub as NotificationHubImpl,
 } from "../../src/ws/hub.js";
 import { WatchInterestCoordinator } from "../../src/ws/watch-interests.js";
+import { HostPortRelays } from "../../src/ws/host-port-relay.js";
 import { HostSharedPortCoordinator } from "../../src/ws/host-shared-ports.js";
 import {
   PluginToolCallRegistry,
@@ -183,6 +184,7 @@ export async function createTestAppHarness(
   const hub = new NotificationHubImpl();
   const watchInterests = new WatchInterestCoordinator({ db, hub });
   const sharedPorts = new HostSharedPortCoordinator({ db, hub });
+  const hostPortRelays = new HostPortRelays({ hub, logger });
   const providerRegistry = createProviderRegistryService({
     readUserProviderPreferences: () => {
       const settings = getAppSettings(db);
@@ -376,6 +378,7 @@ export async function createTestAppHarness(
     terminalSessions,
     watchInterests,
     sharedPorts,
+    hostPortRelays,
     walCheckpointer,
   };
   const { app, pluginCatalogService, pluginService, serverMove } =

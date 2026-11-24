@@ -36,6 +36,7 @@ import {
 } from "./runtime-manager.js";
 import { WatchManager } from "./watch-manager.js";
 import { ConnectTunnelClient } from "./connect-tunnel/index.js";
+import { HostPortRelayManager } from "./host-ports/relay.js";
 import { TerminalManager } from "./terminals/terminal-manager.js";
 import {
   createServerClient,
@@ -939,6 +940,15 @@ export async function createHostDaemonApp(
 
   let requestDaemonRestart = (): void => undefined;
   let requestMachineShutdown = async (): Promise<void> => undefined;
+  const hostPortRelays = new HostPortRelayManager({
+    serverUrl: options.serverUrl,
+    hostKey: options.hostKey,
+    serverHeaders: options.serverHeaders ?? {},
+    logger: options.logger,
+    sendToServer: (message) => {
+      sendServerMessage(message);
+    },
+  });
   const connection = new ServerConnection({
     serverUrl: options.serverUrl,
     hostKey: options.hostKey,
@@ -1002,6 +1012,7 @@ export async function createHostDaemonApp(
         ports: message.ports,
       });
     },
+    onHostPortConnect: (message) => hostPortRelays.connect(message),
     onTerminalMessage: (message) => terminalManager.handleMessage(message),
     onSessionOpened: async (session) => {
       sessionState.value = session.sessionId;
@@ -1107,6 +1118,7 @@ export async function createHostDaemonApp(
       await options.closeMachineAuthProxy?.();
       await localApi?.close();
       connectTunnel.shutdown();
+      hostPortRelays.closeAll();
       await watchManager.shutdown();
       disposeParcelWatcherBackend();
       await terminalManager.shutdownAll();

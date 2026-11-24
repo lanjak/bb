@@ -13,6 +13,7 @@ declare module "ws" {
   export interface ClientOptions {
     agent?: Agent;
     headers?: Record<string, string>;
+    maxPayload?: number;
     perMessageDeflate?: boolean | PerMessageDeflateOptions;
   }
 
@@ -23,6 +24,7 @@ declare module "ws" {
       protocols?: string | string[],
       options?: ClientOptions,
     );
+    static readonly CONNECTING: number;
     static readonly OPEN: number;
     readonly readyState: number;
     readonly bufferedAmount: number;
@@ -38,6 +40,8 @@ declare module "ws" {
     ): void;
     close(code?: number, reason?: string): void;
     terminate(): void;
+    pause(): void;
+    resume(): void;
     on(event: "open", listener: () => void): this;
     on(event: "message", listener: (data: RawData) => void): this;
     on(

@@ -62,6 +62,7 @@ import type {
   ServerLogger,
   ServerRuntimeConfig,
 } from "../../../apps/server/src/types.js";
+import { HostPortRelays } from "../../../apps/server/src/ws/host-port-relay.js";
 import { HostSharedPortCoordinator } from "../../../apps/server/src/ws/host-shared-ports.js";
 import { NotificationHub } from "../../../apps/server/src/ws/hub.js";
 import { WatchInterestCoordinator } from "../../../apps/server/src/ws/watch-interests.js";
@@ -215,6 +216,7 @@ async function startIntegrationServer(
   }
   const hub = new NotificationHub();
   const sharedPorts = new HostSharedPortCoordinator({ db, hub });
+  const hostPortRelays = new HostPortRelays({ hub, logger: testLogger });
   const watchInterests = new WatchInterestCoordinator({ db, hub });
   const config: ServerRuntimeConfig = {
     appVersion: INTEGRATION_APP_VERSION,
@@ -353,6 +355,7 @@ async function startIntegrationServer(
     machineAuth,
     pendingInteractions,
     sharedPorts,
+    hostPortRelays,
     skillTreeRegistry,
     telemetry,
     terminalSessions,
