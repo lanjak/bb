@@ -1,0 +1,33 @@
+{
+  "name": "@bb/host-port-forward",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Forward a local TCP port to a loopback port on a bb machine through the bb server.",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "oxlint src test",
+    "typecheck": "tsrs --noEmit",
+    "lint:type-aware": "oxlint -c ../../.oxlintrc.type-aware.json",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@bb/server-contract": "workspace:*",
+    "ws": "^8.22.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@bb/tsconfig": "workspace:*",
+    "@types/node": "^22.20.5",
+    "@types/ws": "^8.18.2",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.12"
+  }
+}
