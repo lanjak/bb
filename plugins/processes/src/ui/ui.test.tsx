@@ -43,6 +43,7 @@ function machine(overrides: Partial<MachineView> = {}): MachineView {
     cpuStatus: "ok",
     disks: [
       {
+        label: "/home",
         path: "/home",
         totalBytes: 500 * GIB,
         freeBytes: 300 * GIB,
@@ -200,6 +201,7 @@ describe("Resources badge", () => {
           reasons: ["Disk /home 3% free"],
           disks: [
             {
+              label: "/home",
               path: "/home",
               totalBytes: 100,
               freeBytes: 3,

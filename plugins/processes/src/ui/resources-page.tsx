@@ -24,21 +24,25 @@ const STATUS_TEXT: Record<UsageStatus, string> = {
 
 export function Meter({
   label,
+  title,
   percent,
   status,
   detail,
 }: {
   label: string;
+  title?: string;
   percent: number | null;
   status: UsageStatus;
   detail: string;
 }) {
   const width = percent === null ? 0 : Math.min(100, Math.max(0, percent));
   return (
-    <div className="flex min-w-0 flex-col gap-1">
+    <div className="flex min-w-0 flex-col gap-1" title={title}>
       <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="truncate tabular-nums text-foreground">{detail}</span>
+        <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+        <span className="shrink-0 whitespace-nowrap tabular-nums text-foreground">
+          {detail}
+        </span>
       </div>
       <div
         role="meter"
@@ -87,7 +91,7 @@ function MachineMeters({ machine }: { machine: MachineView }) {
         detail={
           machine.cpuPercent === null
             ? "measuring"
-            : `${formatPercent(machine.cpuPercent)} of ${machine.cpuCount ?? "?"} cores`
+            : `${formatPercent(machine.cpuPercent)} (${machine.cpuCount ?? "?"} cores)`
         }
       />
       <Meter
@@ -99,10 +103,11 @@ function MachineMeters({ machine }: { machine: MachineView }) {
       {machine.disks.map((disk) => (
         <Meter
           key={disk.path}
-          label={`Disk ${plain(disk.path)}`}
+          label={`Disk ${plain(disk.label)}`}
+          title={disk.path}
           percent={100 - disk.freePercent}
           status={disk.status}
-          detail={`${formatBytes(disk.freeBytes)} free of ${formatBytes(disk.totalBytes)}`}
+          detail={`${formatBytes(disk.freeBytes)} free`}
         />
       ))}
     </div>

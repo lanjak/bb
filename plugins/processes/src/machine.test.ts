@@ -178,6 +178,21 @@ describe("machine readers", () => {
     ]);
   });
 
+  it("labels the daemon's data directory", async () => {
+    const disks = await readDisks(
+      dependencies({
+        statPath: async (target) => ({
+          device: target,
+          totalBytes: 100,
+          freeBytes: 40,
+        }),
+      }),
+      ["/var/bb", "/work"],
+      (target) => (target === "/var/bb" ? "bb data" : target),
+    );
+    expect(disks.map((disk) => disk.label)).toEqual(["bb data", "/work"]);
+  });
+
   it("samples CPU after a first reading, and loads on non-Windows machines", async () => {
     const deps = dependencies({}, { "/proc/meminfo": MEMINFO });
     const sampler = createMachineSampler(deps);

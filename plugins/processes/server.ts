@@ -51,8 +51,7 @@ const EMPTY_LIST_MESSAGES = {
 } as const;
 
 const STOP_MESSAGES: Record<Exclude<StopOutcome, "stopped">, string> = {
-  "not-found":
-    "No command of that thread has this process id. Run `bb processes thread` for the commands of the thread.",
+  "not-found": "No command of that thread has this process id.",
   "not-stoppable":
     "This machine cannot stop processes, or this process is protected.",
   changed: "The process changed since it was listed. List the thread again.",

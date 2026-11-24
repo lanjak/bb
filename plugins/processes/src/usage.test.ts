@@ -32,6 +32,7 @@ function service(
       },
       disks: [
         {
+          label: "bb data",
           path: "/d",
           device: "1",
           totalBytes: (state.disk?.totalGiB ?? 1000) * GIB,

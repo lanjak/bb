@@ -55,6 +55,7 @@ export const machineSampleSchema = z
     disks: z.array(
       z
         .object({
+          label: z.string(),
           path: z.string(),
           device: z.string(),
           totalBytes: z.number(),
@@ -170,6 +171,7 @@ export type UsageStatus = z.infer<typeof usageStatusSchema>;
 
 const diskViewSchema = z
   .object({
+    label: z.string(),
     path: z.string(),
     totalBytes: z.number(),
     freeBytes: z.number(),

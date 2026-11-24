@@ -15,6 +15,7 @@ export interface MachineMemory {
 }
 
 export interface MachineDisk {
+  label: string;
   path: string;
   device: string;
   totalBytes: number;
@@ -227,12 +228,14 @@ export async function readMemory(
 export async function readDisks(
   deps: MachineDependencies,
   paths: readonly string[],
+  labelFor: (target: string) => string = (target) => target,
 ): Promise<MachineDisk[]> {
   const disks = new Map<string, MachineDisk>();
   for (const target of paths) {
     const info = await deps.statPath(target);
     if (info === null || disks.has(info.device)) continue;
     disks.set(info.device, {
+      label: labelFor(target),
       path: target,
       device: info.device,
       totalBytes: info.totalBytes,
@@ -248,7 +251,10 @@ const STALE_CPU_MS = 45_000;
 export function createMachineSampler(deps: MachineDependencies) {
   const cpu = new MachineCpuTracker(STALE_CPU_MS);
   return {
-    async sample(paths: readonly string[]): Promise<MachineSample> {
+    async sample(
+      paths: readonly string[],
+      dataDir: string | null = null,
+    ): Promise<MachineSample> {
       if (!cpu.hasRecentReading(deps.now())) {
         cpu.record(sumCpuTimes(deps.cpus()), deps.now());
         await deps.sleep(FIRST_READ_GAP_MS);
@@ -258,7 +264,9 @@ export function createMachineSampler(deps: MachineDependencies) {
       const cpuPercent = cpu.record(sumCpuTimes(cpus), at);
       const [memory, disks] = await Promise.all([
         readMemory(deps),
-        readDisks(deps, paths),
+        readDisks(deps, paths, (target) =>
+          target === dataDir ? "bb data" : target,
+        ),
       ]);
       return {
         platform: deps.platform,

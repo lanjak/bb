@@ -440,9 +440,10 @@ export function createProcessesHostEntry(
       },
       "machine.sample": async ({ paths }, context) =>
         machineSampleFrom(
-          await machine.sample([
-            ...new Set([context.experimental_paths.dataDir, ...paths]),
-          ]),
+          await machine.sample(
+            [...new Set([context.experimental_paths.dataDir, ...paths])],
+            context.experimental_paths.dataDir,
+          ),
         ),
       "processes.sample": async ({ includeOthers }) =>
         deps === null

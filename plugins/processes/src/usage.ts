@@ -154,7 +154,7 @@ export function createUsageService(deps: UsageDependencies) {
 
   function view(host: UsageHost, sample: MachineSampleResult): MachineView {
     const base = deps.thresholds();
-    const reasons: string[] = [];
+    const found: Array<{ status: UsageStatus; text: string }> = [];
     let status: UsageStatus = "ok";
     const relaxed = relaxThresholds(base);
     const memoryKey = `${host.id}:memory`;
@@ -170,11 +170,13 @@ export function createUsageService(deps: UsageDependencies) {
     previous.set(memoryKey, memory.status);
     status = worst(status, memory.status);
     if (memory.status !== "ok")
-      reasons.push(
-        sample.memory.pressure === null
-          ? `Memory ${Math.round(memory.percent)}% used`
-          : `Memory pressure ${sample.memory.pressure}`,
-      );
+      found.push({
+        status: memory.status,
+        text:
+          sample.memory.pressure === null
+            ? `Memory ${Math.round(memory.percent)}% used`
+            : `Memory pressure ${sample.memory.pressure}`,
+      });
     const disks = sample.disks.map((disk) => {
       const diskKey = `${host.id}:disk:${disk.path}`;
       const strictDisk = diskStatus(disk, base);
@@ -189,10 +191,12 @@ export function createUsageService(deps: UsageDependencies) {
       previous.set(diskKey, result.status);
       status = worst(status, result.status);
       if (result.status !== "ok")
-        reasons.push(
-          `Disk ${disk.path} ${Math.round(result.freePercent)}% free`,
-        );
+        found.push({
+          status: result.status,
+          text: `Disk ${disk.label} ${Math.round(result.freePercent)}% free`,
+        });
       return {
+        label: disk.label,
         path: disk.path,
         totalBytes: disk.totalBytes,
         freeBytes: disk.freeBytes,
@@ -217,8 +221,15 @@ export function createUsageService(deps: UsageDependencies) {
         : "ok";
     if (saturated) {
       status = worst(status, "warning");
-      reasons.push("CPU saturated");
+      found.push({ status: "warning", text: "CPU saturated" });
     }
+    const reasons = [...found]
+      .sort(
+        (left, right) =>
+          Number(right.status === "critical") -
+          Number(left.status === "critical"),
+      )
+      .map((reason) => reason.text);
     return {
       hostId: host.id,
       name: host.name,

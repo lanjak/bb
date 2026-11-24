@@ -86,6 +86,7 @@ function machineSample(scenario: Scenario): MachineSampleResult {
     },
     disks: [
       {
+        label: "bb data",
         path: "/home",
         device: "1",
         totalBytes: 400 * GIB,
@@ -317,7 +318,7 @@ describe("processes server entry: usage", () => {
         status: "ok",
         cpuPercent: 20,
         memory: { percent: 25 },
-        disks: [{ path: "/home", freePercent: 60 }],
+        disks: [{ label: "bb data", path: "/home", freePercent: 60 }],
       },
       { hostId: "host_2", online: false, memory: null },
     ]);
@@ -375,6 +376,18 @@ describe("processes server entry: usage", () => {
       machines: Array<{ status: string }>;
     };
     expect(result.machines[0]!.status).toBe("warning");
+  });
+
+  it("names the critical reason first", async () => {
+    const host = await start({ memoryUsed: 15 * GIB });
+    await host.harness.setSettings({ diskCriticalFreePercent: 80 });
+    const result = (await host.harness.callRpc("resources.machines", {})) as {
+      machines: Array<{ status: string; reasons: string[] }>;
+    };
+    expect(result.machines[0]).toMatchObject({
+      status: "critical",
+      reasons: ["Disk bb data 60% free", "Memory 94% used"],
+    });
   });
 
   it("ranks the threads of a machine and keeps unknown threads apart", async () => {
