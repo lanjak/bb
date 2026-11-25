@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from "@bb/shared-ui/dialog";
 import { ConfirmDeleteDialog } from "@bb/shared-ui/confirm-delete-dialog";
+import { appToast } from "@/components/ui/app-toast";
 import { useRemoveHost } from "@/hooks/mutations/host-mutations";
 import { canForceRemoveMachine } from "@/components/machines/machine-status";
 import { useMachineThreadPreview } from "@/hooks/queries/thread-queries";
@@ -124,7 +125,12 @@ export function MachineRemoveDialog({
                 removeHost.mutate(
                   { hostId: target.id, force },
                   {
-                    onSuccess: () => {
+                    onSuccess: ({ warnings }) => {
+                      for (const warning of warnings)
+                        appToast.warning(`${target.name} was removed`, {
+                          description: warning,
+                          duration: Number.POSITIVE_INFINITY,
+                        });
                       onOpenChange(false);
                       onRemoved?.(target);
                     },

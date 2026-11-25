@@ -432,16 +432,29 @@ act on `BB_DATA_DIR` or `~/.bb` unless `--data-dir <dir>` is passed.
 Reconnect a disconnected machine whose server access or host key was revoked
 or became stale, without changing its BB host ID:
 
-  bb machine reconnect <id-or-name>       Print a short-lived reconnect command and wait for reconnection
-                                          (refused for a connected machine)
-    --json                                Print the command and expiry without waiting
+  bb machine reconnect <id-or-name>       Reconnect through the machine's provider when it can,
+                                          otherwise print a short-lived command; waits for the
+                                          reconnection (refused for a connected machine)
+    --print-command                       Print the command even when the provider can reconnect;
+                                          this stops a running provider reconnect
+    --json                                Print the response without waiting
 
-Run the printed command on the affected machine; if it fails, run it again. The
-machine re-enrolls with a new host key and server access and restarts its
-daemon service. Environments, workspaces, and thread associations are kept. The
-command reuses the data directory the daemon last reported (an explicit
-`BB_DATA_DIR` takes precedence) and refuses a directory that does not hold this
-machine. The server's own machine cannot be reconnected this way.
+Run the printed command on the affected machine; if it fails, run it again. A
+machine whose provider can reach its computer (for example an SSH machine)
+needs no command: bb checks that the computer answers, runs the installer over
+the provider's connection, and prints its output. This also updates a daemon
+that could not update itself. If the provider cannot reach the computer, bb says
+why and prints the command instead. Either way the machine re-enrolls with a new
+host key and server access and restarts its daemon service. Environments,
+workspaces, and thread associations are kept. The installer reuses the data
+directory the daemon last reported (an explicit `BB_DATA_DIR` takes precedence)
+and refuses a directory that does not hold this machine. The server's own
+machine cannot be reconnected this way. SDK:
+`sdk.hosts.experimental_reconnect({ hostId, printCommand? })` returns
+`{ mode: "operation" }` or `{ mode: "command", command, unavailableReason }`;
+follow an operation through `hosts.get`: `lifecycle.pendingLog` holds the
+output, and the run failed when `lifecycle.message` starts with
+`Machine reconnect failed:`.
 
 `install-machine.sh --start|--stop|--uninstall --host-id <id>` starts, stops, or
 removes an owned local installation; optional `--server-url <url>` and

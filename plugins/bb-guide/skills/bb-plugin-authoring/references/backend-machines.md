@@ -80,6 +80,10 @@ plugin settings and pass a non-secret reference such as a target name. The
 frontend control for these inputs is the `experimental_machineProviderInputs`
 slot (frontend-core-slots.md).
 
+`remove()` can return `{ status: "removed", warning }`. bb returns the warning
+with the removal response, and `bb machine remove` and the app show it. Use it to
+say what stays on the computer and how the user removes it.
+
 Create receives parsed inputs, a stable key, monotonic attempt, durable
 progress reporter, and abort signal. It must be idempotent by key: if
 enrollment completed before the server crashed, the next call reuses the
@@ -183,6 +187,20 @@ cleanup is blocking removal. `bb.sdk.hosts.get({ hostId })` also returns nullabl
   needs Node, npm, and curl on the machine; the helper does not install OS
   packages. It restarts enrolled identities, including a restored
   preinstalled snapshot.
+- `uninstall({ hostId, executor, report, signal })` runs the installer's
+  uninstall action on a machine your provider owns: it stops the service and
+  removes the machine's data directory. It succeeds when nothing is installed.
+  Use it from `remove` when the computer outlives the machine. A system service
+  installed as root needs a root executor.
+
+A provider whose computer outlives the machine, such as one reached over SSH,
+can declare `executor({ hostId, resource, signal })` returning a
+`MachineExecutor`. bb Reconnect then reinstalls and updates the daemon through
+it instead of printing a command, keeping the machine's identity and server
+access. Rebuild the executor from `resource`; throw an error the user can act
+on (for example when your transport host is offline) and bb shows the manual
+command with that message. Apps describe such a provider as "over
+<displayName>".
 
 A `MachineExecutor` implements
 `exec({ command, stdin, timeoutMs, signal, onOutput })` returning

@@ -2882,6 +2882,7 @@ export interface NormalizedPluginMachineProvider {
   create: PluginMachineProviderDeclaration["create"];
   suspend: NonNullable<PluginMachineProviderDeclaration["suspend"]> | null;
   resume: NonNullable<PluginMachineProviderDeclaration["resume"]> | null;
+  executor: NonNullable<PluginMachineProviderDeclaration["executor"]> | null;
   remove: PluginMachineProviderDeclaration["remove"];
 }
 
@@ -2934,6 +2935,12 @@ export function validatePluginMachineProviderDeclaration(
     declaration.availability,
     "availability",
   );
+  assertOptionalFunction(
+    "machine provider",
+    id,
+    declaration.executor,
+    "an executor",
+  );
 
   return {
     id,
@@ -2950,6 +2957,7 @@ export function validatePluginMachineProviderDeclaration(
     suspend: declaration.suspend ?? null,
     resume: declaration.resume ?? null,
     remove: declaration.remove,
+    executor: declaration.executor ?? null,
   };
 }
 

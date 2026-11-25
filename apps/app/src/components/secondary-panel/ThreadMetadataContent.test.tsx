@@ -193,6 +193,7 @@ describe("EnvironmentRow", () => {
             inputs: null,
             acceptsEmptyInputs: true,
             supportsSuspend: true,
+            supportsExecutor: false,
           },
         ],
       },

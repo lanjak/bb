@@ -5,6 +5,7 @@ import {
 } from "./machine-enrollment.js";
 import { Command } from "commander";
 import { jsonValueSchema, type Host, type JsonValue } from "@bb/domain";
+import { MACHINE_RECONNECT_FAILURE_PREFIX } from "@bb/server-contract";
 import { action, CliExitError } from "../action.js";
 import type { HostProviderCliInstallResult } from "@bb/sdk";
 import { createCliBbSdk } from "../client.js";
@@ -43,6 +44,10 @@ interface MachineMutationCommandOptions extends MachineListCommandOptions {
 
 interface MachineRemoveCommandOptions extends MachineMutationCommandOptions {
   force?: boolean;
+}
+
+interface MachineReconnectCommandOptions extends MachineListCommandOptions {
+  printCommand?: boolean;
 }
 
 interface MachineProviderInstallOptions extends MachineListCommandOptions {
@@ -87,6 +92,46 @@ async function waitForMachineLifecycle(args: {
     host = await args.getHost();
   }
   return host;
+}
+
+function appendedLog(previous: string, next: string): string {
+  for (let start = 0; start < previous.length; start += 1) {
+    if (next.startsWith(previous.slice(start)))
+      return next.slice(previous.length - start);
+  }
+  return next;
+}
+
+async function followMachineReconnect(args: {
+  hostId: string;
+  getHost: () => Promise<Host>;
+}): Promise<void> {
+  const deadline = Date.now() + MACHINE_LIFECYCLE_TIMEOUT_MS;
+  let printed = "";
+  for (;;) {
+    const host = await args.getHost();
+    const added = appendedLog(printed, host.lifecycle.pendingLog);
+    if (added !== "") process.stderr.write(added);
+    printed = host.lifecycle.pendingLog;
+    const message = host.lifecycle.message;
+    if (message?.startsWith(MACHINE_RECONNECT_FAILURE_PREFIX))
+      throw new Error(message);
+    if (
+      host.lifecycle.phase === "removing" ||
+      host.lifecycle.phase === "destroyed"
+    )
+      throw new Error(
+        message ?? `Machine entered the ${host.lifecycle.phase} phase`,
+      );
+    if (host.status === "connected" && message === null) return;
+    if (Date.now() >= deadline)
+      throw new Error(
+        `Timed out waiting for machine ${args.hostId} to reconnect`,
+      );
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, MACHINE_LIFECYCLE_POLL_MS),
+    );
+  }
 }
 
 export function providerCliInstallFailure(
@@ -416,19 +461,41 @@ export function registerMachineCommands(
   machine
     .command("reconnect <id-or-name>")
     .description("Reconnect a machine, keeping its host ID")
+    .option(
+      "--print-command",
+      "Print the install command even when the machine provider can reconnect",
+    )
     .option("--json", "Print machine-readable JSON output")
     .action(
-      action(async (target: string, opts: MachineListCommandOptions) => {
+      action(async (target: string, opts: MachineReconnectCommandOptions) => {
         const hostId = await resolveMachineHostId({
           serverUrl: getUrl(),
           target,
         });
         const sdk = createCliBbSdk(getUrl());
-        const reconnect = await sdk.hosts.experimental_reconnect({ hostId });
+        const reconnect = await sdk.hosts.experimental_reconnect({
+          hostId,
+          ...(opts.printCommand ? { printCommand: true } : {}),
+        });
         if (opts.json) {
           outputJson(opts, reconnect);
           return;
         }
+        if (reconnect.mode === "operation") {
+          console.log(
+            `Reconnecting machine ${hostId} through its provider. It keeps its host ID.`,
+          );
+          await followMachineReconnect({
+            hostId,
+            getHost: () => sdk.hosts.get({ hostId }),
+          });
+          console.log(`Machine ${hostId} reconnected successfully.`);
+          return;
+        }
+        if (reconnect.unavailableReason !== null)
+          console.error(
+            `The machine provider cannot reconnect this machine: ${reconnect.unavailableReason}`,
+          );
         console.log(
           `Machine ${hostId} keeps its host ID. Run this command on the machine within 15 minutes:`,
         );

@@ -1,6 +1,7 @@
 import { hostCommandMayWake } from "./wake-policy.js";
 import { isHostCleanupAllowed } from "./cleanup-context.js";
 import { assertMachineLifecycleAdmission } from "../machines/lifecycle.js";
+import { isMachineReconnectOperationId } from "../machines/reconnect.js";
 import {
   getHost,
   getLatestSessionForHost,
@@ -213,10 +214,13 @@ async function prepareHostForWork(
     },
   );
   assertMachineLifecycleAdmission(deps, args.hostId);
+  const machineOperationId =
+    getHost(deps.db, args.hostId)?.machineOperationId ?? null;
   if (
     (args.command.type === "thread.start" ||
       args.command.type === "turn.submit") &&
-    getHost(deps.db, args.hostId)?.machineOperationId !== null &&
+    machineOperationId !== null &&
+    !isMachineReconnectOperationId(machineOperationId) &&
     !["active", "starting"].includes(
       getThread(deps.db, args.command.threadId)?.status ?? "",
     )

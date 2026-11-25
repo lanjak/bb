@@ -69,7 +69,7 @@ import {
 } from "../services/machines/provider-orchestration.js";
 import { getMachineEnrollmentService } from "../services/machines/machine-services.js";
 import { manualHostCommand } from "../services/machines/manual-provider.js";
-import { prepareReconnect } from "../services/machines/reconnect.js";
+import { reconnectMachine } from "../services/machines/reconnect.js";
 import { emitPluginHostDeleted } from "../services/plugins/plugin-thread-events.js";
 import { resolveHostProviderEnv } from "../services/plugins/plugin-agent-contributions.js";
 
@@ -211,23 +211,15 @@ export function registerHostRoutes(
     );
   });
 
-  post(routes.reconnect, async (context) => {
+  post(routes.reconnect, async (context, query) => {
     assertHostManagementAllowed(context);
-    const hostId = context.req.param("id");
-    const host = requireMutableHost(deps, hostId);
-    if (resolvePrimaryHostId(deps) === hostId || host.phase !== "active")
-      throw new ApiError(
-        409,
-        "machine_reconnect_unavailable",
-        "Only active machines other than the server's own can be reconnected",
-      );
-    if (deps.hub.hasDaemonForHost(hostId))
-      throw new ApiError(
-        409,
-        "machine_reconnect_not_needed",
-        "Machine is connected and doesn't need reconnecting",
-      );
-    return context.json(await prepareReconnect(deps, hostId), 201);
+    return context.json(
+      await reconnectMachine(deps, {
+        hostId: context.req.param("id"),
+        printCommand: query.printCommand === "true",
+      }),
+      201,
+    );
   });
 
   patch(routes.update, (context, payload) => {

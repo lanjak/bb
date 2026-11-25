@@ -101,6 +101,7 @@ const modalMachineProvider: SystemMachineProvider = {
   inputs: null,
   acceptsEmptyInputs: true,
   supportsSuspend: true,
+  supportsExecutor: false,
 };
 
 function systemConfig(): SystemConfigResponse {
@@ -845,6 +846,8 @@ describe("MachinesSettingsSection", () => {
     vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
     vi.mocked(sdk.hosts.list).mockResolvedValue([primaryHost, offlineHost]);
     vi.mocked(sdk.hosts.experimental_reconnect).mockResolvedValue({
+      mode: "command",
+      unavailableReason: null,
       command:
         "curl -fsSL -H 'X-BB-Enrollment: bbde_test' 'https://bb.example.com/install.sh' | sh",
       windowsCommand:
@@ -869,6 +872,53 @@ describe("MachinesSettingsSection", () => {
     expect(
       await screen.findByText("Waiting for the machine to reconnect…"),
     ).toBeDefined();
+  });
+
+  it("follows a provider reconnect and offers the manual command after it fails", async () => {
+    vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
+    vi.mocked(sdk.hosts.list).mockResolvedValue([
+      primaryHost,
+      {
+        ...offlineHost,
+        lifecycle: {
+          ...offlineHost.lifecycle,
+          message:
+            "Machine reconnect failed: Could not connect to the computer",
+          pendingLog:
+            "ssh: connect to host dev-vm port 22: Connection refused\n",
+        },
+      },
+    ]);
+    vi.mocked(sdk.hosts.experimental_reconnect).mockResolvedValue({
+      mode: "operation",
+      hostId: offlineHost.id,
+      progress: "in-progress",
+    });
+    stubSidebarBootstrapFetch();
+
+    renderSection();
+
+    await screen.findByText("dev-vm");
+    await openHostMenu("dev-vm");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reconnect" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Machine reconnect failed: Could not connect to the computer",
+    );
+    expect(screen.getByLabelText("Reconnect log").textContent).toContain(
+      "Connection refused",
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show manual command" }),
+    );
+    await waitFor(() => {
+      expect(
+        vi.mocked(sdk.hosts.experimental_reconnect),
+      ).toHaveBeenLastCalledWith({
+        hostId: offlineHost.id,
+        printCommand: true,
+      });
+    });
   });
 
   it("hides Move server here while a move is underway", async () => {

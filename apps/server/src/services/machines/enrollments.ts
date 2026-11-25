@@ -38,6 +38,7 @@ export type MachineEnrollment =
   | { id: string; hostId: string; state: "enrolled" };
 
 export interface MachineEnrollments {
+  assertOwnedHost(hostId: string): void;
   clearPending(key: string): void;
   prepare(request: {
     key: string;
@@ -122,6 +123,9 @@ export function createMachineEnrollmentService(
       return host;
     }
     return {
+      assertOwnedHost(hostId) {
+        hostForId(hostId);
+      },
       clearPending(key) {
         for (const [hostId, entry] of pending) {
           if (entry.owner === owner && entry.launchKey === key)

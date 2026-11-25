@@ -4,6 +4,7 @@ import type {
   StandardSchemaV1,
   StandardSchemaV1InferOutput,
 } from "@get-bb/plugin-sdk";
+import type { MachineExecutor } from "./machine-bootstrap.js";
 
 export type PluginMachineProviderResource = Exclude<JsonValue, null>;
 
@@ -58,12 +59,22 @@ type PluginMachineProviderRemoveContext = Omit<
   "checkpoint"
 >;
 
+export interface PluginMachineProviderExecutorContext {
+  hostId: string;
+  resource: PluginMachineProviderResource;
+  signal: AbortSignal;
+}
+
 export interface PluginMachineProviderResourceResult {
   resource: PluginMachineProviderResource;
 }
 
 export type PluginMachineProviderRemoveResult =
-  | { status: "removed" }
+  | {
+      status: "removed";
+      /** What the user must still do by hand. bb returns it with the removal result. */
+      warning?: string;
+    }
   | { status: "failed"; message: string };
 
 export interface PluginMachineProviderDefinition<
@@ -105,4 +116,14 @@ export interface PluginMachineProviderDefinition<
   remove(
     context: PluginMachineProviderRemoveContext,
   ): Promise<PluginMachineProviderRemoveResult>;
+  /**
+   * Reach the computer behind a machine so bb can run its installer there.
+   * With it, core Reconnect reinstalls or updates the daemon through the
+   * executor instead of printing a command. Throw with a message the user can
+   * act on when the computer cannot be reached; bb then offers the command.
+   * Apps describe providers that declare it as "Over <displayName>".
+   */
+  executor?(
+    context: PluginMachineProviderExecutorContext,
+  ): MachineExecutor | Promise<MachineExecutor>;
 }

@@ -112,9 +112,12 @@ describe("bb machine command output", () => {
 
   it("prints a reconnect command and waits for the same host", async () => {
     const reconnect = vi.fn(async () => ({
+      mode: "command",
       command: "curl -fsSL reconnect | sh",
+      windowsCommand: "irm reconnect | iex",
       expiresAt: Date.now() + 60_000,
       hostId: "host-remote",
+      unavailableReason: null,
     }));
     const get = vi.fn(async () => ({
       ...hosts[1]!,

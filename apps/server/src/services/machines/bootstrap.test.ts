@@ -12,6 +12,7 @@ const bootstrap: EnrollmentBootstrap = {
 
 function harness() {
   const enrollments: MachineEnrollments = {
+    assertOwnedHost: vi.fn(),
     clearPending: vi.fn(),
     prepare: vi.fn<MachineEnrollments["prepare"]>(async () => ({
       id: "enrollment",
@@ -115,6 +116,51 @@ describe("machine bootstrap", () => {
       }),
     );
     expect(h.enrollments.waitForConnection).toHaveBeenCalledOnce();
+  });
+
+  it("uninstalls only a machine the plugin owns, through the installer", async () => {
+    const h = harness();
+    await h.api.uninstall({
+      hostId: "host_1",
+      executor: { exec: h.exec },
+      report: h.report,
+      signal: new AbortController().signal,
+    });
+    expect(h.enrollments.assertOwnedHost).toHaveBeenCalledWith("host_1");
+    expect(h.exec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: ["sh", "-s", "--", "--uninstall", "--host-id", "host_1"],
+        stdin: expect.stringContaining("Usage: install.sh"),
+      }),
+    );
+
+    vi.mocked(h.enrollments.assertOwnedHost).mockImplementation(() => {
+      throw new Error("Machine enrollment was not found");
+    });
+    await expect(
+      h.api.uninstall({
+        hostId: "host_2",
+        executor: { exec: h.exec },
+        report: h.report,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("Machine enrollment was not found");
+    expect(h.exec).toHaveBeenCalledOnce();
+  });
+
+  it("stops waiting for an executor that ignores the abort signal", async () => {
+    const h = harness();
+    const controller = new AbortController();
+    h.exec.mockImplementation(() => new Promise<never>(() => {}));
+    const pending = h.api.uninstall({
+      hostId: "host_1",
+      executor: { exec: h.exec },
+      report: h.report,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(h.exec).toHaveBeenCalledOnce());
+    controller.abort(new Error("removal cancelled"));
+    await expect(pending).rejects.toThrow("removal cancelled");
   });
 
   it("does no work after abort", async () => {

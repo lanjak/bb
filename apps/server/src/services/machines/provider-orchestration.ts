@@ -14,6 +14,10 @@ import { handleHostRemoved } from "../../internal/session-owner-side-effects.js"
 import type { WorkSessionDeps } from "../../types.js";
 import { maintainMachine } from "./lifecycle.js";
 import { serverAccess } from "./server-access.js";
+import {
+  abortMachineReconnect,
+  recoverInterruptedMachineReconnect,
+} from "./reconnect.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -112,7 +116,12 @@ const createResultSchema = z.discriminatedUnion("status", [
 ]);
 const resourceResultSchema = z.object({ resource: resourceSchema }).strict();
 const removeResultSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.literal("removed") }).strict(),
+  z
+    .object({
+      status: z.literal("removed"),
+      warning: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({ status: z.literal("failed"), message: z.string().min(1) })
     .strict(),
@@ -131,6 +140,7 @@ const createOperations = new WeakMap<object, Map<string, ActiveOperation>>();
 const suspendOperations = new WeakMap<object, Map<string, ActiveOperation>>();
 const resumeOperations = new WeakMap<object, Map<string, ActiveOperation>>();
 const removeOperations = new WeakMap<object, Map<string, ActiveOperation>>();
+const removalWarnings = new WeakMap<object, Map<string, string>>();
 const machineSweepOperations = new WeakMap<
   object,
   Map<string, ActiveOperation>
@@ -274,7 +284,7 @@ async function removeResource(
     resource: PluginMachineProviderResource;
     signal: AbortSignal;
   },
-): Promise<void> {
+): Promise<string | undefined> {
   const invocation = await invokeMachineProvider(record, "machine remove", () =>
     record.provider.remove({
       hostId: args.hostId,
@@ -286,6 +296,7 @@ async function removeResource(
   if (!invocation.ok) throw new Error(invocation.error);
   const result = removeResultSchema.parse(invocation.value);
   if (result.status === "failed") throw new Error(result.message);
+  return result.warning;
 }
 
 async function runCreate(
@@ -1103,7 +1114,13 @@ export function readMachineRemovalOutcome(
 ): HostRemovalResponse {
   const row = getHost(deps.db, hostId);
   if (row === null || row.destroyedAt !== null) {
-    return { ...operationComplete(), warnings: [] };
+    const warnings = perDbRegistry(removalWarnings, deps.db);
+    const warning = warnings.get(hostId);
+    warnings.delete(hostId);
+    return {
+      ...operationComplete(),
+      warnings: warning === undefined ? [] : [warning],
+    };
   }
   if (row.teardownStatus === "failed") {
     throw new ApiError(
@@ -1270,6 +1287,7 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
   await Promise.all([
     suspending?.done.catch(() => {}),
     resuming?.done.catch(() => {}),
+    abortMachineReconnect(deps, hostId),
   ]);
   removing = perDbRegistry(removeOperations, deps.db).get(hostId);
   if (removing !== undefined) {
@@ -1306,6 +1324,7 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
     key: hostId,
     run: async (signal) => {
       try {
+        let warning: string | undefined;
         if (resource === null) {
           const invocation = await invokeMachineProvider(
             record,
@@ -1320,8 +1339,13 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
           if (!invocation.ok) throw new Error(invocation.error);
           const result = removeResultSchema.parse(invocation.value);
           if (result.status === "failed") throw new Error(result.message);
+          warning = result.warning;
         } else {
-          await removeResource(deps, record, { hostId, resource, signal });
+          warning = await removeResource(deps, record, {
+            hostId,
+            resource,
+            signal,
+          });
         }
         const current = getHost(deps.db, hostId);
         if (
@@ -1348,6 +1372,13 @@ async function removeMachine(deps: Deps, hostId: string): Promise<void> {
           teardownStatus: "removed",
           statusMessage: creationFailureMessage,
         });
+        if (warning !== undefined) {
+          perDbRegistry(removalWarnings, deps.db).set(hostId, warning);
+          deps.logger.warn(
+            { hostId, warning },
+            "Machine removed with a warning",
+          );
+        }
         deps.lifecycleDedupers.providerModelCatalogs.forgetHost(deps, hostId);
         deps.hub.notifyHost(hostId, ["host-disconnected"]);
         if (destroyed !== null) emitPluginHostDeleted(destroyed);
@@ -1372,6 +1403,7 @@ export async function sweepProviderMachine(
   hostId: string,
 ): Promise<void> {
   requestAutomaticMachineRemoval(deps, hostId);
+  recoverInterruptedMachineReconnect(deps, hostId);
   let row = getHost(deps.db, hostId);
   if (
     row === null ||

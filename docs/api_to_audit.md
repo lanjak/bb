@@ -1310,6 +1310,48 @@ bootstrap, competing lifecycle operations, wrong-owner rejection and no
 duplicate enrollment. Standalone SDK submit/launch/follow/cancel must match
 CLI create/status/cancel.
 
+## `PluginMachineProviderDefinition.executor`
+
+An optional member of the `bb.experimental_machines.register` declaration.
+`executor({ hostId, resource, signal })` returns a `MachineExecutor` for the
+computer behind an existing machine. When it is declared, core Reconnect
+(`POST /hosts/:id/reconnect-commands`, `bb machine reconnect`,
+`sdk.hosts.experimental_reconnect` and the app's Reconnect dialog) runs the
+installer through it: it checks the computer with `true`, runs the installer
+with a new enrollment credential, and waits for the daemon. As with the manual
+command, the machine's server access changes only when the installer redeems the
+credential.
+Progress is saved in the host's `pendingLog` while the machine stays active;
+failures start the status message with `Machine reconnect failed:`. A thrown
+error from `executor` falls back to the manual command with that message.
+`supportsExecutor` on the machine provider list tells clients, and apps describe
+such providers as "over <displayName>". The core manual provider declares none
+and keeps the printed command.
+
+Callers: the bundled SSH plugin (`plugins/machine-ssh`).
+
+Docs: `backend-machines.md`.
+
+**Audit before stabilizing.** Confirm a second transport fits the context, that
+`pendingLog` and a message prefix are enough progress for clients, that a
+restart during a run recovers, that removal aborts a run, and that the
+"over <displayName>" wording reads well for other providers.
+
+## `bb.experimental_machines.uninstall`
+
+`uninstall({ hostId, executor, report, signal })` runs the installer's
+`--uninstall --host-id` action through a `MachineExecutor` for a machine that
+the calling plugin's provider owns. It succeeds when no installation is found.
+Core refuses another plugin's host.
+
+Callers: the bundled SSH plugin's `remove`.
+
+Docs: `backend-machines.md`.
+
+**Audit before stabilizing.** Confirm behavior on macOS launch agents, system
+units that need root, and a second provider that removes compute it does not
+destroy.
+
 ## `@get-bb/plugin-sdk/machine-provider`
 
 Exports the machine provider's definition, input, availability/validation,
@@ -5089,6 +5131,18 @@ cleanup of a checkpointed allocation before successful enrollment, including a
 safe no-op uninstall when installation never began, and retry after partial
 installation. Migration and live vendor verification remain part of the
 integration release gate.
+
+## Machine provider removal `warning`
+
+`PluginMachineProviderRemoveResult` with `status: "removed"` takes an optional
+`warning`: what the user must still do by hand. The removal response of
+`DELETE /hosts/:id` returns it in `warnings` when that request completes the
+removal. A removal that a later sweep completes only logs it.
+
+**Audit before stabilizing.** Decide whether a warning must outlive the request,
+for a removal that finishes in the background.
+
+Callers: the bundled SSH plugin's `remove` (`plugins/machine-ssh`).
 
 ## Machine provider `reconcileCleanup`
 

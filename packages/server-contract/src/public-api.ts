@@ -130,6 +130,7 @@ import {
   type HostDirectoryQuery,
   type HostDiscoveredReposResponse,
   type HostEnrollmentCommandResponse,
+  type HostReconnectQuery,
   type HostReconnectResponse,
   type HostListQuery,
   type HostDeleteQuery,
@@ -332,6 +333,7 @@ import {
   hostDirectoryQuerySchema,
   hostListQuerySchema,
   hostDeleteQuerySchema,
+  hostReconnectQuerySchema,
   hostProviderCliStatusQuerySchema,
   environmentCleanupQuerySchema,
   hostCloneDefaultPathQuerySchema,
@@ -950,7 +952,9 @@ export const publicApiRoutes = {
     reconnect: defineRoute({
       path: "/hosts/:id/reconnect-commands",
       method: "post",
-      request: noRequest<PathId>(),
+      request: optionalQueryRequest<PathId, HostReconnectQuery>(
+        hostReconnectQuerySchema,
+      ),
       response: jsonResponse<HostReconnectResponse>({ status: 201 }),
     }),
     update: defineRoute({

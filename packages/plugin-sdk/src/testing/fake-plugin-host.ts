@@ -1624,6 +1624,7 @@ function createFakePluginHostInternal(
     },
     ...(options.machineBootstrap ?? {
       bootstrap: unavailableMachineBootstrap,
+      uninstall: unavailableMachineBootstrap,
     }),
     register(declaration) {
       assertLive();

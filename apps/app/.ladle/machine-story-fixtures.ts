@@ -117,6 +117,7 @@ export function machineProvider(
     inputs: null,
     acceptsEmptyInputs: true,
     supportsSuspend: false,
+    supportsExecutor: false,
     ...overrides,
   };
 }
@@ -129,6 +130,7 @@ export const MODAL_MACHINE_PROVIDER = machineProvider({
   icon: "./modal-logo.svg",
   logoUrl: modalLogoUrl,
   supportsSuspend: true,
+  supportsExecutor: false,
 });
 
 export const MANUAL_MACHINE_PROVIDER = machineProvider({

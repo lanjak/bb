@@ -14,6 +14,7 @@ const provider = {
   inputs: null,
   acceptsEmptyInputs: true,
   supportsSuspend: true,
+  supportsExecutor: false,
 };
 
 afterEach(() => {

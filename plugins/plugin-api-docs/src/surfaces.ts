@@ -1470,6 +1470,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Provide machines that bb creates and manages, such as cloud sandboxes. With this, a plugin can:",
         bullets: [
           "Create, suspend, resume, and remove machines on demand",
+          "Let bb reconnect, update, and uninstall a machine over the plugin's own connection",
           "Pair them with an [environment provider](environment-providers) for one-step threads",
           "Recover safely after restarts or cancelled creates",
         ],
@@ -1488,6 +1489,8 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "MachineExecutor",
           "MachineBootstrapRequest",
           "MachineBootstrapApi",
+          "MachineUninstallRequest",
+          "PluginMachineProviderExecutorContext",
           "PluginMachineProviderDeclaration",
           "PluginMachineValidateDecision",
           "PluginMachineProviderInputsRegistration",

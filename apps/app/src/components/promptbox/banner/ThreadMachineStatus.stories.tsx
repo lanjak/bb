@@ -20,6 +20,7 @@ const modalProvider: SystemMachineProvider = {
   inputs: null,
   acceptsEmptyInputs: true,
   supportsSuspend: true,
+  supportsExecutor: false,
 };
 
 function PausedMachine({ hostName }: { hostName: string }) {

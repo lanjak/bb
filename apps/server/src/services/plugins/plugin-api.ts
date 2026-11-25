@@ -1348,6 +1348,10 @@ export function createPluginApi(options: {
     };
 
   const enrollmentApi: MachineEnrollments = {
+    assertOwnedHost(hostId) {
+      assertLive();
+      options.getMachineEnrollments().assertOwnedHost(hostId);
+    },
     clearPending(key) {
       assertLive();
       options.getMachineEnrollments().clearPending(key);

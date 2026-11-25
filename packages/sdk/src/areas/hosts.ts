@@ -62,6 +62,7 @@ export interface HostActionArgs {
 }
 
 export interface HostReconnectArgs extends HostActionArgs {
+  printCommand?: boolean;
   signal?: AbortSignal;
 }
 
@@ -290,7 +291,10 @@ export function createHostsArea(args: CreateSdkAreaArgs): HostsArea {
     async experimental_reconnect(input) {
       return transport.readJson(
         transport.api.v1.hosts[":id"]["reconnect-commands"].$post(
-          { param: { id: input.hostId } },
+          {
+            param: { id: input.hostId },
+            query: input.printCommand ? { printCommand: "true" } : {},
+          },
           ...signalRequestArgs(input.signal),
         ),
       );

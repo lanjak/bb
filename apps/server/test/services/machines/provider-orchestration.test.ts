@@ -539,6 +539,32 @@ describe("machine retirement", () => {
       expect(getStoredProviderModelCatalog(harness.db, key)).toBeNull();
     }));
 
+  it("returns what a removal left behind with the delete response", async () =>
+    withTestHarness(async (harness) => {
+      installMachineProvider({
+        remove: async () => ({
+          status: "removed",
+          warning: "The daemon may still run on the computer.",
+        }),
+      });
+      const { host } = seedHostSession(harness.deps);
+      updateHost(harness.db, harness.hub, host.id, {
+        machineProviderId: "test-machine",
+        resource: { allocation: "unreachable" },
+        phase: "active",
+      });
+
+      const response = await harness.app.request(`/api/v1/hosts/${host.id}`, {
+        method: "DELETE",
+      });
+
+      expect(await readJson(response)).toMatchObject({
+        progress: "complete",
+        warnings: ["The daemon may still run on the computer."],
+      });
+      expect(getHost(harness.db, host.id)?.phase).toBe("destroyed");
+    }));
+
   it("announces the removed machine to plugins once", async () =>
     withTestHarness(async (harness) => {
       installMachineProvider();

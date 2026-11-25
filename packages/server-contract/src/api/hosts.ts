@@ -94,14 +94,32 @@ export type HostEnrollmentCommandResponse = z.infer<
   typeof hostEnrollmentCommandResponseSchema
 >;
 
-export const hostReconnectResponseSchema = z
-  .object({
-    command: z.string().min(1),
-    windowsCommand: z.string().min(1),
-    expiresAt: z.number().int().positive(),
-    hostId: z.string().min(1),
-  })
-  .strict();
+export const MACHINE_RECONNECT_FAILURE_PREFIX = "Machine reconnect failed:";
+
+export const hostReconnectQuerySchema = z.object({
+  printCommand: z.enum(["true", "false"]).optional(),
+});
+export type HostReconnectQuery = z.input<typeof hostReconnectQuerySchema>;
+
+export const hostReconnectResponseSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("command"),
+      hostId: z.string().min(1),
+      command: z.string().min(1),
+      windowsCommand: z.string().min(1),
+      expiresAt: z.number().int().positive(),
+      unavailableReason: z.string().min(1).nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("operation"),
+      hostId: z.string().min(1),
+      progress: z.literal("in-progress"),
+    })
+    .strict(),
+]);
 export type HostReconnectResponse = z.infer<typeof hostReconnectResponseSchema>;
 
 export const createHostJoinCodeResponseSchema = z.object({
