@@ -187,6 +187,11 @@ cleanup is blocking removal. `bb.sdk.hosts.get({ hostId })` also returns nullabl
   needs Node, npm, and curl on the machine; the helper does not install OS
   packages. It restarts enrolled identities, including a restored
   preinstalled snapshot.
+- Add `access: { providerId }` to `bootstrap` to pin that machine to one
+  server access route (`connect`, `direct`, `local-network` or a plugin's
+  provider id) instead of the server's route order. bb saves it on the machine,
+  keeps it on repair and Reconnect, and fails the bootstrap when the route is
+  unknown, unavailable, or differs from the one already saved.
 - `uninstall({ hostId, executor, report, signal })` runs the installer's
   uninstall action on a machine your provider owns: it stops the service and
   removes the machine's data directory. It succeeds when nothing is installed.

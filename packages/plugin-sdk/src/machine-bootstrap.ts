@@ -17,6 +17,12 @@ export interface MachineBootstrapRequest {
   executor: MachineExecutor;
   report: PluginMachineProviderProgress;
   signal: AbortSignal;
+  /**
+   * Pin this machine to one server access route instead of the server's route
+   * order. The id is saved on the machine, so repair and Reconnect keep it.
+   * Bootstrap fails when the route is unknown or unavailable.
+   */
+  access?: { providerId: string };
 }
 
 export interface MachineUninstallRequest {

@@ -43,6 +43,7 @@ export interface MachineEnrollments {
   prepare(request: {
     key: string;
     signal: AbortSignal;
+    access?: { providerId: string };
   }): Promise<MachineEnrollment>;
   waitForConnection(request: {
     enrollmentId: string;
@@ -59,6 +60,7 @@ interface EnrollmentServiceDependencies {
       key: string;
       hostId: string;
       signal: AbortSignal;
+      providerId?: string;
     }): Promise<ServerAccessGrant>;
   };
   isConnected(hostId: string): boolean;
@@ -150,6 +152,15 @@ export function createMachineEnrollmentService(
             getMachineProvider(host.machineProviderId ?? "")?.pluginId !== owner
           )
             throw new Error("Machine creation belongs to a different plugin");
+          const providerId = request.access?.providerId;
+          if (
+            providerId !== undefined &&
+            host.serverAccessProviderId !== null &&
+            host.serverAccessProviderId !== providerId
+          )
+            throw new Error(
+              `Machine already reaches the server through "${host.serverAccessProviderId}"`,
+            );
           if (host.lastSeenAt !== null || deps.isConnected(host.id)) {
             pending.delete(host.id);
             return { id: host.id, hostId: host.id, state: "enrolled" };
@@ -161,6 +172,7 @@ export function createMachineEnrollmentService(
               request.signal,
               AbortSignal.timeout(60_000),
             ]),
+            ...(providerId === undefined ? {} : { providerId }),
           });
           request.signal.throwIfAborted();
           await deps.machineAuth.revokeHostEnrollKeys({ hostId: host.id });

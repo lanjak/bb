@@ -534,19 +534,37 @@ function anchorCandidates(
   ];
 }
 
+function requestedCandidates(
+  deps: Dependencies,
+  hostId: string,
+  providerId: string,
+): ServerAccessProviderEntry[] {
+  const entry = orderedServerAccessProviders(deps).find(
+    (candidate) => candidate.id === providerId,
+  );
+  if (entry === undefined)
+    throw new Error(`Server access provider "${providerId}" is not registered`);
+  setHostColumns(deps.db, hostId, { serverAccessProviderId: providerId });
+  return [entry];
+}
+
 async function resolve(
   deps: Dependencies,
   args: {
     key: string;
     hostId: string;
     signal: AbortSignal;
+    providerId?: string;
   },
 ): Promise<ServerAccessGrant> {
   args.signal.throwIfAborted();
   const host = getHost(deps.db, args.hostId);
   if (!host || host.destroyedAt !== null)
     throw new Error("Machine identity is unavailable");
-  const candidates = anchorCandidates(deps, host);
+  const candidates =
+    args.providerId === undefined
+      ? anchorCandidates(deps, host)
+      : requestedCandidates(deps, host.id, args.providerId);
   let firstError: unknown = null;
   for (const entry of candidates) {
     try {

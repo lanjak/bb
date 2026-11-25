@@ -5132,6 +5132,23 @@ safe no-op uninstall when installation never began, and retry after partial
 installation. Migration and live vendor verification remain part of the
 integration release gate.
 
+## `MachineBootstrapRequest.access`
+
+An optional `{ providerId }` on `bb.experimental_machines.bootstrap` that pins
+one machine to a server access route, such as `connect` or `direct`, without
+changing the server's route order (#4406). Core saves it in the host's
+`serverAccessProviderId`, so repair and Reconnect use it again. An unknown or
+unavailable route fails the bootstrap, as does a route that differs from the one
+the machine already has.
+
+Docs: `backend-machines.md`.
+
+Callers: the bundled SSH plugin's `create` (`plugins/machine-ssh`).
+
+**Audit before stabilizing.** Decide whether a machine may move to another route
+after enrollment, and confirm a second provider (a local microVM sandbox with a
+loopback route) can use it.
+
 ## Machine provider removal `warning`
 
 `PluginMachineProviderRemoveResult` with `status: "removed"` takes an optional

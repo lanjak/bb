@@ -221,6 +221,76 @@ describe("production machine enrollment wiring", () => {
     });
   });
 
+  it("pins the server route a bootstrap asks for and keeps it on repair", async () => {
+    await withTestHarness(async (h) => {
+      const api = await installPlugin(h, "enrollment-runtime");
+      const grant = (url: string) => async () => ({ id: url, serverUrl: url });
+      for (const [id, url] of [
+        ["route-first", "https://first.example.test"],
+        ["route-chosen", "https://chosen.example.test"],
+      ] as const)
+        api.experimental_serverAccess.register({
+          id,
+          displayName: id,
+          description: "Reach the server through a test route.",
+          routeKind: "custom",
+          availability: () => ({ status: "available" }),
+          acquire: grant(url),
+          release: async () => {},
+        });
+      setAppSettings(h.db, {
+        ...defaultAppSettings,
+        serverAccessOrder: ["route-first"],
+        machineServerUrl: null,
+      });
+      launch(h, "route-launch", "enrollment-runtime-machine");
+      const enrollments = getMachineEnrollmentService(h.deps).forOwner(
+        "enrollment-runtime",
+      );
+      const prepare = (providerId: string) =>
+        enrollments.prepare({
+          key: "route-launch",
+          signal: new AbortController().signal,
+          access: { providerId },
+        });
+
+      await expect(prepare("route-missing")).rejects.toThrow(
+        'Server access provider "route-missing" is not registered',
+      );
+      const enrollment = await prepare("route-chosen");
+      expect(enrollment).toMatchObject({
+        bootstrap: { serverUrl: "https://chosen.example.test" },
+      });
+      await expect(prepare("route-first")).rejects.toThrow(
+        'Machine already reaches the server through "route-chosen"',
+      );
+      await expect(
+        serverAccess.repair(h.deps, {
+          key: enrollment.hostId,
+          hostId: enrollment.hostId,
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ serverUrl: "https://chosen.example.test" });
+    });
+  });
+
+  it("refuses the configured-URL route when no URL is set", async () => {
+    await withTestHarness(async (h) => {
+      await installPlugin(h, "enrollment-runtime");
+      setAppSettings(h.db, { ...defaultAppSettings, machineServerUrl: null });
+      launch(h, "direct-launch", "enrollment-runtime-machine");
+      await expect(
+        getMachineEnrollmentService(h.deps)
+          .forOwner("enrollment-runtime")
+          .prepare({
+            key: "direct-launch",
+            signal: new AbortController().signal,
+            access: { providerId: "direct" },
+          }),
+      ).rejects.toThrow(/URL/u);
+    });
+  });
+
   it("rejects foreign launches, checkpoints before failed access, and releases with the original owner key", async () => {
     await withTestHarness(async (h) => {
       const api = await installPlugin(h, "enrollment-runtime");

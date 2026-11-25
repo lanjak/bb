@@ -18,6 +18,7 @@ export function createMachineBootstrapApi(
         const enrollment = await enrollments.prepare({
           key: request.key,
           signal: request.signal,
+          ...(request.access === undefined ? {} : { access: request.access }),
         });
         request.signal.throwIfAborted();
         request.report.step(
