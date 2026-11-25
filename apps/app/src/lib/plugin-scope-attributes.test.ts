@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 async function freshKeepPluginScopeAttributes(): Promise<() => void> {
   vi.resetModules();
@@ -19,6 +19,10 @@ function scopeAttributes(element: Element): string[] {
 }
 
 describe("keepPluginScopeAttributes", () => {
+  beforeAll(async () => {
+    await import("./plugin-scope-attributes");
+  }, 60_000);
+
   afterEach(() => {
     document.body.replaceChildren();
   });

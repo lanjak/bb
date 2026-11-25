@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { BbDesktopInfo, BbDesktopTheme } from "@bb/desktop-contract";
 import { createBbDesktopApi } from "@/test/bb-desktop-test-utils";
 
@@ -60,6 +60,11 @@ function installColorSchemeMediaQuery(initialDark: boolean): {
     },
   };
 }
+
+beforeAll(async () => {
+  await Promise.all([import("./useDesktopThemeSync"), import("./useTheme")]);
+  vi.resetModules();
+}, 60_000);
 
 afterEach(() => {
   cleanup();

@@ -10,7 +10,7 @@ import {
 import type { ThreadQueuedMessage } from "@bb/domain";
 import { makeThreadQueuedMessage } from "@bb/test-helpers/domain-fixtures";
 import { useState } from "react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import {
   LazyQueuedMessagesList,
   QueuedMessagesPendingCard,
@@ -23,6 +23,10 @@ vi.mock("./QueuedMessagesList", (importOriginal) => {
   mocks.imported();
   return importOriginal();
 });
+
+beforeAll(async () => {
+  await vi.importActual("./QueuedMessagesList");
+}, 60_000);
 
 afterEach(() => {
   cleanup();
