@@ -508,6 +508,52 @@ exec '${process.execPath}' "$@"
     );
   });
 
+  it("uninstalls a root machine whose system unit systemd never loaded", () => {
+    const fixture = createFixture();
+    mkdirSync(join(fixture.homeDir, ".bb-machines", "owned"), {
+      recursive: true,
+    });
+    const dataDir = realpathSync(
+      join(fixture.homeDir, ".bb-machines", "owned"),
+    );
+    writeJoinedState({ ...fixture, dataDir });
+    writeFileSync(join(dataDir, "host-daemon-port"), "40000\n");
+    mkdirSync(join(dataDir, "systemd"), { recursive: true });
+    writeFileSync(
+      join(
+        dataDir,
+        "systemd/bb-host-daemon-machine-getbb-app-host-test.service",
+      ),
+      `[Service]\nEnvironment="BB_DATA_DIR=${dataDir}"\n`,
+    );
+    writeExecutable(join(fixture.binDir, "uname"), "#!/bin/sh\necho Linux\n");
+    writeExecutable(join(fixture.binDir, "id"), "#!/bin/sh\necho 0\n");
+    writeExecutable(
+      join(fixture.binDir, "systemctl"),
+      '#!/bin/sh\ncase "$2" in daemon-reload) exit 0 ;; *) echo "Unit does not exist" >&2; exit 1 ;; esac\n',
+    );
+    writeExecutable(
+      join(fixture.binDir, "selinuxenabled"),
+      "#!/bin/sh\nexit 0\n",
+    );
+    const semanageLog = join(fixture.homeDir, "semanage.log");
+    writeExecutable(
+      join(fixture.binDir, "semanage"),
+      `#!/bin/sh\nprintf '%s\\n' "$*" >>"${semanageLog}"\n`,
+    );
+
+    const result = runScript(
+      ["--uninstall", "--host-id", "host-test", "--data-dir", dataDir],
+      fixture,
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(dataDir)).toBe(false);
+    expect(readFileSync(semanageLog, "utf8")).toBe(
+      `fcontext -d ${selinuxPattern(join(dataDir, "systemd"))}\n`,
+    );
+  });
+
   it("stops and uninstalls a Linux service after a server move rewrote its server URL", () => {
     const fixture = createFixture();
     mkdirSync(join(fixture.homeDir, ".bb-machines", "machine.getbb.app"), {

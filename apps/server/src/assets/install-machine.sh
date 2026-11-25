@@ -291,6 +291,8 @@ run_lifecycle() {
   if [ -f "$service_file" ]; then
     if [ "$platform" = darwin ]; then
       launchctl bootout "gui/$(id -u)" "$service_file" >/dev/null 2>&1 || true
+    elif [ "$systemd_scope" = --system ] && ! systemctl --system cat "$service_name" >/dev/null 2>&1; then
+      :
     elif [ "$lifecycle_action" = uninstall ]; then
       systemctl "$systemd_scope" disable --now "$service_name"
     else
@@ -307,6 +309,9 @@ run_lifecycle() {
   [ "$lifecycle_attempt" -lt 80 ] || { fail_step "Machine daemon did not stop within 20 seconds."; exit 1; }
   rm -f "$pid_file"
   if [ "$lifecycle_action" = uninstall ]; then
+    if [ "$systemd_scope" = --system ] && selinuxenabled 2>/dev/null && command -v semanage >/dev/null 2>&1; then
+      semanage fcontext -d "$(selinux_unit_pattern "$(cd "${service_file%/*}" && pwd -P)")" >/dev/null 2>&1 || true
+    fi
     if [ -f "$service_file" ]; then rm -f "$service_file"; fi
     if [ "$platform" = linux ]; then systemctl "$systemd_scope" daemon-reload; fi
     node -e 'require("node:fs").rmSync(process.argv[1], { recursive: true })' "$data_dir"
