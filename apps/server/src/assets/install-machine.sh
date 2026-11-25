@@ -109,6 +109,10 @@ ready_row() {
   log " " "$(dim "$ready_label") $2"
 }
 
+selinux_unit_pattern() {
+  printf '%s(/.*)?' "$(printf '%s' "$1" | sed 's/[][\.*^$+?(){}|]/\\&/g')"
+}
+
 run_lifecycle() {
   case "$host_id" in *[!A-Za-z0-9_-]*|'') fail_step "Invalid machine host ID."; exit 2 ;; esac
   lifecycle_data_dir=${requested_data_dir:-${BB_DATA_DIR:-}}
@@ -1075,6 +1079,22 @@ systemd_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g'
 }
 
+label_system_unit() {
+  if command -v semanage >/dev/null 2>&1; then
+    unit_pattern=$(selinux_unit_pattern "$1")
+    if { semanage fcontext -a -t systemd_unit_file_t "$unit_pattern" ||
+      semanage fcontext -m -t systemd_unit_file_t "$unit_pattern"; } >/dev/null 2>&1 &&
+      restorecon -R "$1"; then
+      return 0
+    fi
+  fi
+  if ! chcon -t systemd_unit_file_t "$1" "$2"; then
+    warning_step "Could not label the systemd unit for SELinux, so systemd may refuse to read it."
+    return 0
+  fi
+  detail "A SELinux relabel resets this label. Install semanage (policycoreutils-python-utils), then run the installer again."
+}
+
 enable_user_linger() {
   linger_enabled=no
   command -v loginctl >/dev/null 2>&1 || return 0
@@ -1235,6 +1255,9 @@ ManagedOOMPreference=avoid
 [Install]
 WantedBy=$service_target
 EOF
+  if [ "$systemd_scope" = --system ] && selinuxenabled 2>/dev/null; then
+    label_system_unit "$service_dir" "$service_file"
+  fi
   systemctl "$systemd_scope" daemon-reload
   enable_unit="$service_name.service"
   if [ "$systemd_scope" = --system ]; then enable_unit="$service_file"; fi

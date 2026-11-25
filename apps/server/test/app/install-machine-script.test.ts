@@ -1886,13 +1886,23 @@ fi
     );
   });
 
+  const selinuxPattern = (directory: string) =>
+    `${directory.replace(/[[\]\\.*^$+?(){}|]/gu, "\\$&")}(/.*)?`;
+
   it.each([
-    { container: false, homeName: "home" },
-    { container: true, homeName: "home" },
-    { container: false, homeName: "root % home" },
+    { container: false, homeName: "home", selinux: false, semanage: true },
+    { container: true, homeName: "home", selinux: true, semanage: true },
+    {
+      container: false,
+      homeName: "root % home",
+      selinux: false,
+      semanage: true,
+    },
+    { container: false, homeName: "home", selinux: true, semanage: true },
+    { container: false, homeName: "home", selinux: true, semanage: false },
   ])(
     "installs a persistent root unit that keeps HOME (%j)",
-    ({ container, homeName }) => {
+    ({ container, homeName, selinux, semanage }) => {
       const fixture = createFixture(homeName);
       writeJoinedState(fixture);
       writeServerInstallTools(fixture, 200);
@@ -1904,6 +1914,19 @@ fi
         `#!/bin/sh\nexit ${container ? 0 : 1}\n`,
       );
       const scope = container ? "--user" : "--system";
+      writeExecutable(
+        join(fixture.binDir, "selinuxenabled"),
+        `#!/bin/sh\nexit ${selinux ? 0 : 1}\n`,
+      );
+      for (const [tool, exitCode] of [
+        ["chcon", 0],
+        ["restorecon", 0],
+        ["semanage", semanage ? 0 : 1],
+      ] as const)
+        writeExecutable(
+          join(fixture.binDir, tool),
+          `#!/bin/sh\nprintf '${tool} %s\\n' "$*" >>"${join(fixture.dataDir, "systemctl.log")}"\nexit ${exitCode}\n`,
+        );
       writeExecutable(
         join(fixture.binDir, "systemctl"),
         `#!/bin/sh
@@ -1959,8 +1982,19 @@ fi
             realpathSync(fixture.dataDir),
             "systemd/bb-host-daemon-machine-getbb-app-host-test.service",
           );
+      const unitDirectory = dirname(enableUnit);
+      const rule = `-t systemd_unit_file_t ${selinuxPattern(unitDirectory)}`;
+      const labelled =
+        !selinux || container
+          ? ""
+          : semanage
+            ? `semanage fcontext -a ${rule}\nrestorecon -R ${unitDirectory}\n`
+            : `semanage fcontext -a ${rule}\nsemanage fcontext -m ${rule}\nchcon -t systemd_unit_file_t ${unitDirectory} ${enableUnit}\n`;
+      expect(result.stdout.includes("A SELinux relabel resets")).toBe(
+        selinux && !container && !semanage,
+      );
       expect(readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8")).toBe(
-        `${container ? "--user show-environment\n" : ""}${scope} daemon-reload\n${scope} enable ${enableUnit}\n${scope} restart bb-host-daemon-machine-getbb-app-host-test.service\n`,
+        `${container ? "--user show-environment\n" : ""}${labelled}${scope} daemon-reload\n${scope} enable ${enableUnit}\n${scope} restart bb-host-daemon-machine-getbb-app-host-test.service\n`,
       );
     },
   );
@@ -2016,10 +2050,7 @@ fi
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(scenario.stdout);
     expect(result.stderr).toContain(scenario.stderr);
-    const calls = readFileSync(
-      join(fixture.dataDir, "loginctl.log"),
-      "utf8",
-    );
+    const calls = readFileSync(join(fixture.dataDir, "loginctl.log"), "utf8");
     expect(
       calls.includes(
         `--no-ask-password enable-linger ${userInfo().username}\n`,

@@ -952,6 +952,13 @@ command, and still succeeds. Set `BB_INSTALL_NO_LINGER=1` on the installer
 command to leave lingering unchanged. Uninstalling a machine does not disable
 lingering.
 
+A root install keeps its unit under the data directory. With SELinux on, the
+installer labels the unit `systemd_unit_file_t`. Where `semanage` exists, the
+label is a file context rule, which survives a relabel. Without `semanage` (for
+example on a Fedora cloud image), a relabel of the file system resets the label,
+and systemd cannot start the daemon at the next boot. Install
+`policycoreutils-python-utils`, then run the installer again.
+
 The installer writes these `config.json` fields; they are managed by bb, not
 user knobs. Do not copy, edit, or commit them, and re-add the machine instead of
 changing them:
