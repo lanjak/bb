@@ -607,6 +607,7 @@ export async function createThreadFromRequest(
   options: {
     providerInput?: ThreadCreateServiceRequestInput["input"];
     forkSourceEnvironmentId?: string;
+    callerThreadId?: string | null;
   } = {},
 ) {
   const project = requirePublicProjectForThreadCreate(
@@ -845,6 +846,8 @@ export async function createThreadFromRequest(
       projectId: request.projectId,
       requestedEnvironment: request.environment,
       inspectGitCheckout,
+      requestedByThreadId:
+        rawRequestInput.senderThreadId ?? options.callerThreadId ?? null,
     });
   request.input = await resolvePromptAttachmentReferences({
     db: deps.db,

@@ -329,7 +329,10 @@ describe("Modal machine provider", () => {
       ],
     });
     await expect(
-      harness.provider.validate?.({ inputs: { preset: "Missing" } }),
+      harness.provider.validate?.({
+        inputs: { preset: "Missing" },
+        requestedByThreadId: null,
+      }),
     ).resolves.toEqual({
       action: "refuse",
       message: 'The Modal sandbox preset "Missing" is not configured.',

@@ -5149,6 +5149,23 @@ Callers: the bundled SSH plugin's `create` (`plugins/machine-ssh`).
 after enrollment, and confirm a second provider (a local microVM sandbox with a
 loopback route) can use it.
 
+## `PluginMachineProviderValidateContext.requestedByThreadId`
+
+The agent thread that asked for the machine, taken from the CLI's caller-thread
+header on `POST /hosts` and thread creation, or a thread spawn's
+`senderThreadId`; null for app requests and when unknown. A provider can refuse
+actions that need a person, such as trusting a new SSH host key. It identifies
+cooperating agents only: a caller that drops the header reads as null, so it is
+not an authorization boundary.
+
+Docs: `backend-machines.md`.
+
+Callers: the bundled SSH plugin's `validate`.
+
+**Audit before stabilizing.** Decide whether bb should attribute requests from
+agent tool calls and plugin SDK calls, and whether providers need an
+authenticated requester instead.
+
 ## Machine provider removal `warning`
 
 `PluginMachineProviderRemoveResult` with `status: "removed"` takes an optional

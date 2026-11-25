@@ -174,6 +174,7 @@ export async function createEnvironmentBeforeThread(
         args.provider?.inputs ?? (record.provider.inputs === null ? null : {}),
     },
     createGitCheckoutInspector(deps),
+    null,
   );
   const host = getNonDestroyedHostWithStatus(deps, hostId);
   if (host === null) refuse(`Machine ${hostId} no longer exists`, 404);

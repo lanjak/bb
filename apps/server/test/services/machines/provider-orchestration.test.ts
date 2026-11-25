@@ -72,6 +72,7 @@ describe("machine creation hosts", () => {
         key: "thread-machine",
         machineProviderId: "test-machine",
         inputs: null,
+        requestedByThreadId: null,
       });
       await started.promise;
       expect(submitted).toMatchObject({
@@ -264,6 +265,7 @@ describe("machine creation hosts", () => {
         key: "cancel-key",
         machineProviderId: "test-machine",
         inputs: null,
+        requestedByThreadId: null,
       });
       await started.promise;
 
@@ -305,6 +307,7 @@ describe("machine creation hosts", () => {
         key: "checkpoint-key",
         machineProviderId: "test-machine",
         inputs: null,
+        requestedByThreadId: null,
       });
       await checkpointed.promise;
       const operationId = getHost(harness.db, host.id)!.machineOperationId;
@@ -840,6 +843,7 @@ it.each(["null result", "null checkpoint", "missing name"])(
         key: "invalid-resource",
         machineProviderId: record.provider.id,
         inputs: null,
+        requestedByThreadId: null,
       });
       await expect
         .poll(() => getHost(harness.db, host.id)?.phase)

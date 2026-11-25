@@ -77,6 +77,10 @@ export function resolveRequestAccessRoute(
     : "direct";
 }
 
+export function getCallerThreadId(context: RequestHeaderReader): string | null {
+  return context.req.header(CALLER_THREAD_HEADER_NAME) ?? null;
+}
+
 export function resolveRequestAppSurface(
   context: RequestHeaderReader,
 ): RequestAppSurface {
@@ -109,7 +113,7 @@ export function resolveRequestSource(
   if (context.req.header(CLI_REQUEST_HEADER_NAME) !== undefined) {
     return {
       kind: "cli",
-      callerThreadId: context.req.header(CALLER_THREAD_HEADER_NAME) ?? null,
+      callerThreadId: getCallerThreadId(context),
     };
   }
   const surface = resolveRequestAppSurface(context);

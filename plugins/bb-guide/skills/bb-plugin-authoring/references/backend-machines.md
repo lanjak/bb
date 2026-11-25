@@ -80,6 +80,11 @@ plugin settings and pass a non-secret reference such as a target name. The
 frontend control for these inputs is the `experimental_machineProviderInputs`
 slot (frontend-core-slots.md).
 
+`validate({ inputs, requestedByThreadId })` runs before the machine is
+reserved. `requestedByThreadId` names the agent thread that asked (through the
+`bb` CLI or a thread spawn) and is null otherwise; refuse there what only a
+person may do. It is attribution, not authorization.
+
 `remove()` can return `{ status: "removed", warning }`. bb returns the warning
 with the removal response, and `bb machine remove` and the app show it. Use it to
 say what stays on the computer and how the user removes it.

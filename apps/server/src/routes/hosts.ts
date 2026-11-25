@@ -34,6 +34,7 @@ import {
   operationInProgress,
 } from "../services/lib/operation-response.js";
 import {
+  getCallerThreadId,
   getGateAuthKind,
   type RequestHeaderReader,
 } from "../request-context.js";
@@ -159,7 +160,13 @@ export function registerHostRoutes(
 
   post(routes.create, async (context, payload) => {
     assertHostManagementAllowed(context);
-    return context.json(await submitMachine(deps, payload), 201);
+    return context.json(
+      await submitMachine(deps, {
+        ...payload,
+        requestedByThreadId: getCallerThreadId(context),
+      }),
+      201,
+    );
   });
 
   post(routes.createJoinCode, async (context) => {

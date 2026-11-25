@@ -48,6 +48,7 @@ import {
 import type { Hono } from "hono";
 import type { AppDeps } from "../../types.js";
 import { ApiError } from "../../errors.js";
+import { getCallerThreadId } from "../../request-context.js";
 import {
   parseInteger,
   parsePaginationQuery,
@@ -398,15 +399,18 @@ export function registerThreadBaseRoutes(app: Hono, deps: AppDeps): void {
     if (payload.sectionId) {
       requireThreadSection(deps, payload.sectionId);
     }
-    const thread = await createThreadFromRequest(deps, {
-      ...payload,
-      origin: payload.origin,
-    });
+    const thread = await createThreadFromRequest(
+      deps,
+      { ...payload, origin: payload.origin },
+      { callerThreadId: getCallerThreadId(context) },
+    );
     return context.json(toThreadResponseFromThread(deps, { thread }), 201);
   });
 
   post(routes.fork, async (context, payload) => {
-    const thread = await createThreadForkFromRequest(deps, payload);
+    const thread = await createThreadForkFromRequest(deps, payload, {
+      callerThreadId: getCallerThreadId(context),
+    });
     return context.json(toThreadResponseFromThread(deps, { thread }), 201);
   });
 

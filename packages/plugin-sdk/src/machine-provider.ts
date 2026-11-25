@@ -27,6 +27,12 @@ export type PluginMachineProviderValidateContext<
     PluginMachineProviderInputsSchema,
 > = {
   inputs: InputsValue<S>;
+  /**
+   * The agent thread that asked for this machine, from the `bb` CLI or a thread
+   * spawn, and null otherwise. It identifies well-behaved agents; it is not an
+   * authorization boundary.
+   */
+  requestedByThreadId: string | null;
 };
 
 export interface PluginMachineProviderLifecycleContext {
@@ -38,7 +44,7 @@ export interface PluginMachineProviderLifecycleContext {
 export type PluginMachineProviderCreateContext<
   S extends PluginMachineProviderInputsSchema =
     PluginMachineProviderInputsSchema,
-> = PluginMachineProviderValidateContext<S> &
+> = Pick<PluginMachineProviderValidateContext<S>, "inputs"> &
   PluginMachineProviderLifecycleContext & {
     key: string;
     attempt: number;

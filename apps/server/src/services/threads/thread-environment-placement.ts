@@ -227,6 +227,7 @@ export async function completeProviderSelection(
   projectId: string,
   selection: ProviderSelection,
   inspectGitCheckout: GitCheckoutInspector,
+  requestedByThreadId: string | null,
 ): Promise<ProviderSelection> {
   const environmentProviderId = record.provider.id;
   const requires = record.provider.requires;
@@ -241,6 +242,7 @@ export async function completeProviderSelection(
     const prepared = await prepareMachineProviderSelection({
       machineProviderId: selection.machine.machineProviderId,
       inputs: selection.machine.inputs,
+      requestedByThreadId,
     });
     machine = { ...selection.machine, inputs: prepared.inputs };
   }
@@ -435,6 +437,7 @@ export interface ResolveThreadEnvironmentPlacementArgs {
   projectId: string;
   requestedEnvironment: EnvironmentArgs | ProviderEnvironmentArgs;
   inspectGitCheckout: GitCheckoutInspector;
+  requestedByThreadId: string | null;
 }
 
 function reuseEnvironmentPlacement(
@@ -619,6 +622,7 @@ export async function resolveProviderOperationContext(
           thread.projectId,
           { machine: intent.machine, inputs: intent.inputs },
           createGitCheckoutInspector(deps),
+          null,
         );
   } catch (error) {
     throw providerFailure(
@@ -939,6 +943,7 @@ async function reserveEnvironmentBeforeMachine(
         args.thread.projectId,
         args.intent,
         createGitCheckoutInspector(deps),
+        null,
       );
   if (selection.machine.type !== "new")
     throw new Error("Expected a new machine selection");
@@ -1304,7 +1309,7 @@ export function prepareProviderEnvironment(
 
 async function providerPlacement(
   deps: PlacementDeps,
-  args: { projectId: string; inspectGitCheckout: GitCheckoutInspector },
+  args: ResolveThreadEnvironmentPlacementArgs,
   environmentProviderId: string,
   requested: ProviderSelection,
 ): Promise<ThreadEnvironmentPlacement> {
@@ -1321,6 +1326,7 @@ async function providerPlacement(
     projectId,
     requested,
     args.inspectGitCheckout,
+    args.requestedByThreadId,
   );
   if (selection.machine.type === "existing") {
     const hostId = selection.machine.hostId;

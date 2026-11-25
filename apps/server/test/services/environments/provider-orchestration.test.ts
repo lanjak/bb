@@ -2345,6 +2345,7 @@ describe("existing-path provider selection", () => {
           harness.deps,
           {
             inspectGitCheckout: createGitCheckoutInspector(harness.deps),
+            requestedByThreadId: null,
             projectId: fixture.context.project.id,
             requestedEnvironment: {
               type: "provider",
@@ -2381,6 +2382,7 @@ describe("existing-path provider selection", () => {
       });
       const placement = await resolveThreadEnvironmentPlacement(harness.deps, {
         inspectGitCheckout: createGitCheckoutInspector(harness.deps),
+        requestedByThreadId: null,
         projectId: fixture.context.project.id,
         requestedEnvironment: {
           type: "provider",
@@ -2428,6 +2430,7 @@ describe("existing-path provider selection", () => {
       await expect(
         resolveThreadEnvironmentPlacement(harness.deps, {
           inspectGitCheckout: createGitCheckoutInspector(harness.deps),
+          requestedByThreadId: null,
           projectId: fixture.context.project.id,
           requestedEnvironment: {
             type: "provider",
@@ -2738,6 +2741,7 @@ describe("worktree adoption cleanup", () => {
           harness.deps,
           {
             inspectGitCheckout: createGitCheckoutInspector(harness.deps),
+            requestedByThreadId: null,
             projectId: fixture.context.project.id,
             requestedEnvironment: {
               type: "provider",

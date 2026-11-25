@@ -1,3 +1,4 @@
+import { CALLER_THREAD_HEADER_NAME } from "@bb/config/app-surface";
 import { createBbSdk } from "@bb/sdk/core";
 import { createHttpTransport } from "@bb/sdk/node";
 import { spawnSync } from "node:child_process";
@@ -68,6 +69,34 @@ function requestJoinCode(app: {
 }
 
 describe("public host management", () => {
+  it("tells provider validate which agent thread asked for a machine", async () => {
+    await withTestHarness(async (harness) => {
+      const requesters: Array<string | null> = [];
+      installMachineProvider({
+        validate: ({ requestedByThreadId }) => {
+          requesters.push(requestedByThreadId);
+          return { action: "refuse", message: "Not today" };
+        },
+      });
+      const create = (headers: Record<string, string>) =>
+        harness.app.request(`${API}/hosts`, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...headers },
+          body: JSON.stringify({
+            machineProviderId: "test-machine",
+            inputs: null,
+          }),
+        });
+
+      expect((await create({})).status).toBe(409);
+      expect(
+        (await create({ [CALLER_THREAD_HEADER_NAME]: "thr_agent" })).status,
+      ).toBe(409);
+
+      expect(requesters).toEqual([null, "thr_agent"]);
+    });
+  });
+
   it("reads machine paths after an offline session without requiring threads", async () => {
     await withTestHarness(async (harness) => {
       const host = seedHost(harness.deps, { id: "host_paths" });

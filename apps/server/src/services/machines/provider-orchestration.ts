@@ -434,6 +434,7 @@ export async function parseMachineProviderInputs(
 export async function prepareMachineProviderSelection(args: {
   machineProviderId: string;
   inputs: JsonValue | null;
+  requestedByThreadId: string | null;
 }): Promise<{ record: PluginMachineProviderRecord; inputs: JsonValue | null }> {
   const record = getMachineProvider(args.machineProviderId);
   if (record === undefined) {
@@ -454,7 +455,13 @@ export async function prepareMachineProviderSelection(args: {
       `"${record.provider.id}" machine provider validate`,
       () =>
         decideWithinBox(
-          () => Promise.resolve(record.provider.validate?.({ inputs })),
+          () =>
+            Promise.resolve(
+              record.provider.validate?.({
+                inputs,
+                requestedByThreadId: args.requestedByThreadId,
+              }),
+            ),
           machineProviderDecisionTimeoutMs(),
         ),
     );
@@ -601,6 +608,7 @@ export async function submitMachine(
     key?: string;
     machineProviderId: string;
     inputs: JsonValue | null;
+    requestedByThreadId: string | null;
   },
 ): Promise<Host> {
   const key = args.key ?? `machine-${randomUUID()}`;
