@@ -2,7 +2,19 @@
 
 import type { SetStateAction } from "react";
 import { createStore, type WritableAtom } from "jotai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+beforeAll(async () => {
+  await Promise.all([
+    import("@/components/promptbox/composer-provider"),
+    import("@/components/sidebar/threadListProvider"),
+    import("@/components/code/codeRendererProvider"),
+    import("@/components/plugin/PluginThreadHeaderTitle"),
+    import("@/components/plugin/thread-rail-outline-pick"),
+    import("@/lib/file-opener-preference"),
+  ]);
+  vi.resetModules();
+}, 60_000);
 
 afterEach(() => {
   window.localStorage.clear();
