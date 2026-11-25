@@ -39,6 +39,7 @@ vi.mock("@/lib/sdk", () => ({
       experimental_deleteOldServerCopy: vi.fn(),
       list: vi.fn(),
       experimental_listProviders: vi.fn(),
+      experimental_reconnect: vi.fn(),
       providerCliStatus: vi.fn(),
       experimental_resume: vi.fn(),
       experimental_retryCleanup: vi.fn(),
@@ -197,6 +198,48 @@ afterEach(() => {
 });
 
 describe("MachineSettingsView", () => {
+  it("offers an executor update for a machine whose daemon is too old", async () => {
+    vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
+    vi.mocked(sdk.hosts.list).mockResolvedValue([
+      host({
+        status: "disconnected",
+        machineProviderId: "ssh",
+        lastRejectedProtocolVersion: 1,
+      }),
+    ]);
+    stubSupportingFetches();
+    vi.mocked(sdk.hosts.experimental_listProviders).mockResolvedValue([
+      {
+        id: "ssh",
+        displayName: "SSH",
+        description: "Install bb over SSH.",
+        icon: "Terminal",
+        logoUrl: null,
+        pluginId: "machine-ssh",
+        inputs: null,
+        acceptsEmptyInputs: false,
+        supportsSuspend: false,
+        supportsExecutor: true,
+        ephemeral: false,
+      },
+    ]);
+    vi.mocked(sdk.hosts.experimental_reconnect).mockReturnValue(
+      new Promise(() => {}),
+    );
+
+    renderView();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Update over SSH" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "Update over SSH" }),
+    ).toBeDefined();
+    expect(sdk.hosts.experimental_reconnect).toHaveBeenCalledWith({
+      hostId: HOST_ID,
+    });
+  });
+
   it("links update issues to Updates in a warning pill", async () => {
     vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
     vi.mocked(sdk.hosts.list).mockResolvedValue([host()]);

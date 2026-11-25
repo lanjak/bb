@@ -852,6 +852,7 @@ export const systemMachineProviderSchema = z.object({
   acceptsEmptyInputs: z.boolean(),
   supportsSuspend: z.boolean(),
   supportsExecutor: z.boolean(),
+  ephemeral: z.boolean(),
 });
 export type SystemMachineProvider = z.infer<typeof systemMachineProviderSchema>;
 

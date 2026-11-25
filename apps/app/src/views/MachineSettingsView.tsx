@@ -18,6 +18,7 @@ import {
 } from "@/components/machines/MachineRemoveDialog";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
 import { MachineReconnectDialog } from "@/components/machines/MachineReconnectDialog";
+import { machineExecutorUpdateLabel } from "@/components/machines/machine-executor";
 import { MoveServerDialog } from "@/components/machines/MoveServerDialog";
 import {
   OldServerCopySection,
@@ -299,6 +300,8 @@ export function MachineSettingsView() {
       : (machineProviders?.find(
           (provider) => provider.id === host.machineProviderId,
         ) ?? null);
+  const executorUpdateLabel =
+    host === null ? null : machineExecutorUpdateLabel(host, machineProvider);
 
   const projects: MachineProject[] = useMemo(() => {
     const navigation = sidebarNavigationQuery.data?.projects ?? [];
@@ -529,6 +532,17 @@ export function MachineSettingsView() {
             </SettingsDetailRow>
             <SettingsDetailRow label="Updates">
               <span>{updateStatus ?? "Up to date"}</span>
+              {executorUpdateLabel === null ? null : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => setReconnectOpen(true)}
+                >
+                  {executorUpdateLabel}
+                </Button>
+              )}
               {hostCanRetryUpdate(host) ? (
                 <Button
                   type="button"

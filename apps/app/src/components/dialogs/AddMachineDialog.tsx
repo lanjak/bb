@@ -28,6 +28,10 @@ import {
 import { Icon } from "@bb/shared-ui/icon";
 import { InlineTextButton, PendingStatus } from "@bb/shared-ui/sign-in-panel";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
+import { ProviderMachineSetup } from "@/components/dialogs/ProviderMachineSetup";
+import { useSystemMachineProviders } from "@/hooks/queries/machine-provider-queries";
+import { usePluginSlotKind } from "@/lib/plugin-slots";
+import type { SystemMachineProvider } from "@bb/server-contract";
 import { useHosts } from "@/hooks/queries/host-queries";
 import { sdk } from "@/lib/sdk";
 import { useClipboardCopy } from "@/lib/clipboard";
@@ -106,11 +110,104 @@ export function AddMachineContent({
   const serverMachineName =
     hosts.data?.find((host) => host.id === serverPrimaryHostId)?.name ?? null;
   return (
-    <ManualMachineSetup
+    <AddMachineChoice
       serverMachineName={serverMachineName}
       onOpenChange={onOpenChange}
       onEnrollmentFailed={onEnrollmentFailed}
     />
+  );
+}
+
+export function useAddableMachineProviders(): SystemMachineProvider[] {
+  const { providers } = useSystemMachineProviders();
+  const slots = usePluginSlotKind("machineProviderInputs");
+  return (providers ?? []).filter(
+    (provider) =>
+      provider.id !== MANUAL_MACHINE_PROVIDER_ID &&
+      !provider.ephemeral &&
+      slots.some(
+        (slot) =>
+          slot.machineProviderId === provider.id &&
+          slot.pluginId === provider.pluginId,
+      ),
+  );
+}
+
+function AddMachineChoice({
+  serverMachineName,
+  onOpenChange,
+  onEnrollmentFailed,
+}: {
+  serverMachineName: string | null;
+  onOpenChange: (open: boolean) => void;
+  onEnrollmentFailed: EnrollmentFailureHandler | undefined;
+}) {
+  const addable = useAddableMachineProviders();
+  const [choice, setChoice] = useState(MANUAL_MACHINE_PROVIDER_ID);
+  const provider = addable.find((candidate) => candidate.id === choice) ?? null;
+  const chooser =
+    addable.length === 0 ? null : (
+      <MachineSetupChooser
+        providers={addable}
+        choice={provider?.id ?? MANUAL_MACHINE_PROVIDER_ID}
+        onChoose={setChoice}
+      />
+    );
+  return provider === null ? (
+    <ManualMachineSetup
+      chooser={chooser}
+      serverMachineName={serverMachineName}
+      onOpenChange={onOpenChange}
+      onEnrollmentFailed={onEnrollmentFailed}
+    />
+  ) : (
+    <ProviderMachineSetup
+      key={provider.id}
+      provider={provider}
+      chooser={chooser}
+      onOpenChange={onOpenChange}
+    />
+  );
+}
+
+export function MachineSetupChooser({
+  providers,
+  choice,
+  onChoose,
+}: {
+  providers: readonly SystemMachineProvider[];
+  choice: string;
+  onChoose: (providerId: string) => void;
+}) {
+  const options = [
+    { id: MANUAL_MACHINE_PROVIDER_ID, label: "Run a command" },
+    ...providers.map((provider) => ({
+      id: provider.id,
+      label: provider.supportsExecutor
+        ? `Over ${provider.displayName}`
+        : provider.displayName,
+    })),
+  ];
+  return (
+    <div
+      role="group"
+      aria-label="How to add the machine"
+      className="flex flex-wrap items-center gap-1"
+    >
+      {options.map((option) => (
+        <Button
+          key={option.id}
+          type="button"
+          size="sm"
+          variant={choice === option.id ? "secondary" : "ghost"}
+          aria-pressed={choice === option.id}
+          className="h-7 px-2.5 text-xs"
+          onClick={() => onChoose(option.id)}
+        >
+          {option.label}
+        </Button>
+      ))}
+    </div>
   );
 }
 
@@ -348,10 +445,12 @@ function useManualMachineEnrollment(
 }
 
 export function ManualMachineSetup({
+  chooser,
   serverMachineName,
   onOpenChange,
   onEnrollmentFailed,
 }: {
+  chooser?: ReactNode;
   serverMachineName: string | null;
   onOpenChange: (open: boolean) => void;
   onEnrollmentFailed?: EnrollmentFailureHandler | undefined;
@@ -359,6 +458,7 @@ export function ManualMachineSetup({
   const enrollment = useManualMachineEnrollment(onEnrollmentFailed);
   return (
     <ManualMachineSetupView
+      chooser={chooser}
       command={enrollment.command}
       connectedHost={enrollment.connectedHost}
       serverMachineName={serverMachineName}
@@ -527,6 +627,7 @@ function QuickMachineCommand({
 }
 
 export function ManualMachineSetupView({
+  chooser,
   command,
   connectedHost,
   serverMachineName,
@@ -535,6 +636,7 @@ export function ManualMachineSetupView({
   onRegenerate,
   onOpenMachine,
 }: {
+  chooser?: ReactNode;
   command: EnrollmentCommand | null;
   connectedHost: Host | null;
   serverMachineName: string | null;
@@ -556,6 +658,7 @@ export function ManualMachineSetupView({
             "Run this command on the machine you want to add. It installs bb and keeps the machine connected to this server."}
         </DialogDescription>
       </DialogHeader>
+      {chooser}
       {errorMessage === null ? null : (
         <div className="flex justify-end">
           <Button variant="outline" size="sm" onClick={onRetry}>

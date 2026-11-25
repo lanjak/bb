@@ -1289,6 +1289,23 @@ Docs: `frontend-components.md`.
 shape works across machine providers, that ready/blocked is sufficient, and
 that provider changes and crashed controls cannot retain stale launch inputs.
 
+## `PluginMachineProviderInputsProps.experimental_localHostId`
+
+The bb machine running on the viewer's device (the local daemon the app can
+reach), or null when there is none or it is not known yet. bb passes it to every
+`experimental_machineProviderInputs` control so a control can default to this
+device, as the SSH machines control does for Connect from.
+
+Core callers: `useMachineProviderInputs`, which renders the control in Add
+machine and in the New Thread composer, and the bundled SSH plugin
+(`plugins/machine-ssh/app.tsx`).
+
+Docs: `frontend-core-slots.md`.
+
+**Audit before stabilizing.** Confirm the meaning on mobile and on a browser that
+cannot reach its local daemon, and whether a general app SDK hook should replace
+the prop.
+
 ## `bb.experimental_machines` (`register`)
 
 Registers a project-independent machine provider: required id, displayName,

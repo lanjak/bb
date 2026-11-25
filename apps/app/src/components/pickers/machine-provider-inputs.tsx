@@ -1,4 +1,5 @@
 import { PluginSlotMount } from "@/components/plugin/PluginSlotMount";
+import { useHostDaemon } from "@/hooks/useHostDaemon";
 import {
   usePluginSlotKind,
   type PluginMachineProviderInputsSlot,
@@ -32,6 +33,25 @@ function findRegistration(
     (slot) =>
       slot.machineProviderId === provider.id &&
       slot.pluginId === provider.pluginId,
+  );
+}
+
+function MachineProviderInputsControl({
+  component: InputsComponent,
+  value,
+  onChange,
+}: {
+  component: PluginMachineProviderInputsSlot["component"];
+  value: JsonValue | null;
+  onChange: (next: PluginMachineProviderInputsChange) => void;
+}) {
+  const { localDaemonHostId } = useHostDaemon();
+  return (
+    <InputsComponent
+      value={value}
+      onChange={onChange}
+      experimental_localHostId={localDaemonHostId}
+    />
   );
 }
 
@@ -118,7 +138,6 @@ export function useMachineProviderInputs({
   if (provider === null || registration === undefined) {
     return { value, blockedReason, control: null };
   }
-  const InputsComponent = registration.component;
   return {
     value,
     blockedReason,
@@ -130,7 +149,11 @@ export function useMachineProviderInputs({
         instanceId={instanceId}
         onCrash={reportCrash}
       >
-        <InputsComponent value={value} onChange={handleChange} />
+        <MachineProviderInputsControl
+          component={registration.component}
+          value={value}
+          onChange={handleChange}
+        />
       </PluginSlotMount>
     ),
   };

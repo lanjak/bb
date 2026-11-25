@@ -102,6 +102,7 @@ const modalMachineProvider: SystemMachineProvider = {
   acceptsEmptyInputs: true,
   supportsSuspend: true,
   supportsExecutor: false,
+  ephemeral: false,
 };
 
 function systemConfig(): SystemConfigResponse {

@@ -214,7 +214,9 @@ onChange }` — the control the New Thread environment picker renders beside
   provider whose schema rejects `{}` cannot be submitted until its control
   reports ready inputs. Experimental: see `docs/api_to_audit.md`.
 - `experimental_machineProviderInputs` → `{ value, onChange }` — the same
-  contract for a machine provider's `inputs`, rendered by machine creation
+  contract for a machine provider's `inputs`, plus
+  `experimental_localHostId` (the machine on the viewer's device, or null),
+  rendered by machine creation
   surfaces and as a compact chip before the environment provider's chip when
   a composition creates the machine. Registration:
   `{ machineProviderId, component }`. Report a ready default on mount and open

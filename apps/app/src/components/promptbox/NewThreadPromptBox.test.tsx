@@ -135,6 +135,7 @@ describe("ProjectlessMachineSlot", () => {
               acceptsEmptyInputs: true,
               supportsSuspend: true,
               supportsExecutor: false,
+              ephemeral: false,
             },
           ],
         })}
@@ -229,6 +230,7 @@ describe("EnvironmentSlot", () => {
     acceptsEmptyInputs: true,
     supportsSuspend: true,
     supportsExecutor: false,
+    ephemeral: false,
   };
 
   function makeEnvironment(overrides: {

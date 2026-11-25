@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import type { Host } from "@bb/domain";
 import { MACHINE_RECONNECT_FAILURE_PREFIX } from "@bb/server-contract";
 import { Button } from "@bb/shared-ui/button";
@@ -11,6 +11,7 @@ import {
 } from "@bb/shared-ui/dialog";
 import { Icon } from "@bb/shared-ui/icon";
 import { MachineLaunchCommand } from "@/components/dialogs/AddMachineDialog";
+import { MachineProgressLog } from "@/components/machines/MachineProgressLog";
 import { MachineStatusDot } from "@/components/machines/MachineStatusDot";
 import { machineExecutorPhrase } from "@/components/machines/machine-executor";
 import { useReconnectHost } from "@/hooks/mutations/host-mutations";
@@ -85,8 +86,9 @@ export function MachineReconnectView({
   onReconnect: (printCommand: boolean) => void;
   onDone: () => void;
 }) {
+  const [outdated] = useState(() => host.lastRejectedProtocolVersion !== null);
   const title =
-    host.lastRejectedProtocolVersion !== null && executorPhrase !== null
+    outdated && executorPhrase !== null
       ? `Update ${executorPhrase}`
       : "Reconnect machine";
   const overOperation = prepared?.mode === "operation";
@@ -175,23 +177,12 @@ function MachineReconnectOperation({
     ? message
     : null;
   const connected = host.status === "connected" && message === null;
-  const logRef = useRef<HTMLPreElement>(null);
-  const log = host.lifecycle.pendingLog;
-  useEffect(() => {
-    const element = logRef.current;
-    if (element !== null) element.scrollTop = element.scrollHeight;
-  }, [log]);
   return (
     <>
-      {log === "" ? null : (
-        <pre
-          ref={logRef}
-          aria-label="Reconnect log"
-          className="max-h-60 overflow-auto rounded-md border border-border bg-muted/30 p-3 font-mono text-xs whitespace-pre-wrap break-words text-foreground"
-        >
-          {log}
-        </pre>
-      )}
+      <MachineProgressLog
+        log={host.lifecycle.pendingLog}
+        label="Reconnect log"
+      />
       {failure === null ? (
         <ReconnectStatusRow
           connected={connected}

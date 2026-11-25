@@ -4244,6 +4244,12 @@ export interface PluginEnvironmentProviderInputsRegistration {
 export interface PluginMachineProviderInputsProps {
   /** The value persisted with the machine selection. */
   value: JsonValue | null;
+  /**
+   * The bb machine running on this device, or null when this device runs none or
+   * it is not known yet. A control can use it as a default, for example the
+   * machine to connect from. Experimental: see docs/api_to_audit.md.
+   */
+  experimental_localHostId: string | null;
   /** Replace the submitted value or block submission with a visible reason. */
   onChange(next: PluginMachineProviderInputsChange): void;
 }

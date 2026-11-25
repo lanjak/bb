@@ -619,6 +619,7 @@ export function registerSystemRoutes(
           acceptsEmptyInputs: await machineProviderAcceptsEmptyInputs(record),
           supportsSuspend: record.provider.suspend !== null,
           supportsExecutor: record.provider.executor !== null,
+          ephemeral: record.provider.ephemeral,
         })),
       ),
     });

@@ -4,6 +4,7 @@ import { RETRY_ACTION_ICON } from "@bb/domain/update-state";
 import type { ResourceOverflowMenuItem } from "@bb/shared-ui/resource-list";
 import { serverMachineRemoveDisabledReason } from "@/components/machines/MachineRemoveDialog";
 import { machineLifecycleAction } from "@/components/machines/MachineLifecycleActions";
+import { machineExecutorUpdateLabel } from "@/components/machines/machine-executor";
 import { canReconnectMachine } from "@/components/machines/machine-status";
 import { hostCanRetryUpdate } from "@/lib/host-update-status";
 
@@ -46,7 +47,9 @@ export function machineActions(args: MachineActionsArgs): MachineAction[] {
   if (canReconnectMachine(args.host))
     actions.push({
       id: "reconnect",
-      label: "Reconnect",
+      label:
+        machineExecutorUpdateLabel(args.host, args.machineProvider) ??
+        "Reconnect",
       icon: "RotateCcw",
       onSelect: args.onReconnect,
     });

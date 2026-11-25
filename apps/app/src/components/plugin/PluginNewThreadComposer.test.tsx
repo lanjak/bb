@@ -2907,6 +2907,7 @@ describe("NewThreadComposer environment providers", () => {
         acceptsEmptyInputs: true,
         supportsSuspend: false,
         supportsExecutor: false,
+        ephemeral: false,
       },
     ];
     mocks.serverAccessReady = false;
