@@ -128,3 +128,16 @@ it.each([false, true])(
     expect(getNotificationCenterState().open).toBe(false);
   },
 );
+
+it("keeps the line breaks of a notification description", () => {
+  render(<NotificationCenter />);
+  act(() => {
+    appToast.warning("Build box was removed", {
+      description: "The daemon may still run.\nUninstall failed: timed out",
+    });
+    openNotificationCenter();
+  });
+  expect(screen.getByText(/The daemon may still run\./u).className).toContain(
+    "whitespace-pre-wrap",
+  );
+});

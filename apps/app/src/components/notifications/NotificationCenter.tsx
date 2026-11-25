@@ -100,7 +100,7 @@ function NotificationRow({ focused, notification, now }: NotificationRowProps) {
           {notification.title}
         </div>
         {notification.description === null ? null : (
-          <div className="mt-0.5 break-words text-xs leading-5 text-muted-foreground">
+          <div className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
             {notification.description}
           </div>
         )}
