@@ -57,7 +57,7 @@ const provider = (
   description: "Install bb over SSH.",
   icon: "Terminal",
   logoUrl: null,
-  pluginId: "machine-ssh",
+  pluginId: "bb--machine-ssh",
   inputs: {},
   acceptsEmptyInputs: false,
   supportsSuspend: false,
@@ -101,7 +101,7 @@ const creating = {
 const config = makeSystemConfig();
 
 beforeEach(() => {
-  setPluginSlotRegistrations("machine-ssh", {
+  setPluginSlotRegistrations("bb--machine-ssh", {
     homepageSections: [],
     settingsSections: [],
     navPanels: [],
@@ -141,7 +141,7 @@ beforeEach(() => {
     provider({
       id: "cloud",
       displayName: "Cloud sandbox",
-      pluginId: "machine-ssh",
+      pluginId: "bb--machine-ssh",
       ephemeral: true,
     }),
   ]);
@@ -157,7 +157,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  removePluginSlotRegistrations("machine-ssh");
+  removePluginSlotRegistrations("bb--machine-ssh");
   vi.clearAllMocks();
 });
 

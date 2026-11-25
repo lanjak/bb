@@ -926,6 +926,7 @@
         "$TURBO_ROOT$/plugins/environment-modal-sandbox/**",
         "$TURBO_ROOT$/plugins/environment-personal-workspace/**",
         "$TURBO_ROOT$/plugins/environment-project-checkout/**",
+        "$TURBO_ROOT$/plugins/machine-ssh/**",
         "!$TURBO_ROOT$/plugins/*/node_modules/**",
         "!$TURBO_ROOT$/plugins/*/dist/**",
         "!$TURBO_ROOT$/plugins/*/.bundled-runtime/**",
@@ -1378,6 +1379,25 @@
       ]
     },
     "bb-plugin-environment-modal-sandbox#test": {
+      "env": ["VITEST_MAX_WORKERS"],
+      "dependsOn": [
+        "//#ensure-native-modules",
+        "@get-bb/plugin-sdk#build",
+        "topo"
+      ],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "bb-plugin-bb--machine-ssh#typecheck": {
+      "dependsOn": ["@get-bb/plugin-sdk#build:types", "topo"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugin-registry/flavors/**"
+      ]
+    },
+    "bb-plugin-bb--machine-ssh#test": {
       "env": ["VITEST_MAX_WORKERS"],
       "dependsOn": [
         "//#ensure-native-modules",

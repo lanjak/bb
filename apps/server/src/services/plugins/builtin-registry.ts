@@ -91,6 +91,11 @@ export const BUILTIN_PLUGINS = [
     defaultEnabled: true,
   },
   {
+    name: "machine-ssh",
+    pluginId: "bb--machine-ssh",
+    defaultEnabled: true,
+  },
+  {
     name: "custom-instructions",
     pluginId: "custom-instructions",
     defaultEnabled: true,

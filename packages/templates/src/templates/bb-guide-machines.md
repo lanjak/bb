@@ -131,6 +131,26 @@ does not allow that without a password, the installer prints the `sudo` command
 to run and continues. Set `BB_INSTALL_NO_LINGER=1` when you run the installer to
 leave lingering as it is. Uninstalling the machine does not turn lingering off.
 
+SSH machines
+
+The built-in SSH machines plugin adds a Linux or macOS computer that one of your
+machines (the Connect from machine) reaches over SSH. ssh runs there with its
+keys, agent, `~/.ssh/config` and ProxyJump; bb copies no key and never writes
+`~/.ssh`. In the app, choose Add machine, then Over SSH. From the CLI:
+
+  bb ssh hosts [--via <machine>]           ssh_config aliases on that machine
+  bb ssh probe <destination> [--via]       Check it and show its host key
+  bb ssh add <destination> [--via] [--name <name>] [--host-key SHA256:...]
+      [--no-keep-running] [--access <route>] [--no-wait]
+
+A new host key needs `--host-key` (or the app's confirmation) from a person. bb
+refuses it from an agent thread that identifies itself through the `bb` CLI. This
+is a guardrail, not a security boundary: do not work around it. The new computer
+needs Node.js 22.19 or newer, npm, curl and key or agent sign-in.
+`bb machine reconnect` reinstalls and updates the daemon over SSH.
+`bb machine remove` uninstalls it and prints what stays on the computer. See the
+`ssh-machines` skill.
+
 Application logs rotate in `logs/server.N.log` and `logs/host-daemon.N.log`
 under the selected data directory. Startup errors, crashes, and other output
 that bypasses the logger are appended to `logs/server-stdio.log` and

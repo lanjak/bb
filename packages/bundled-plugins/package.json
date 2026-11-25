@@ -31,6 +31,7 @@
     "bb-plugin-bb--github-pr-status": "workspace:*",
     "bb-plugin-inline-vis": "workspace:*",
     "bb-plugin-keep-awake": "workspace:*",
+    "bb-plugin-bb--machine-ssh": "workspace:*",
     "bb-plugin-memory": "workspace:*",
     "bb-plugin-navigation": "workspace:*",
     "bb-plugin-monaco-editor": "workspace:*",

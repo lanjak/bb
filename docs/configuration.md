@@ -704,6 +704,24 @@ Cycle shortcuts act only from the active composer or an open picker; other
 editable controls keep their Option-composed input. Reasoning cycles through
 the current model's supported efforts from low to high.
 
+## SSH Machines
+
+The SSH machines plugin runs `ssh` on the Connect from machine. It reads
+`~/.ssh/config` under the daemon's `HOME`, then `/etc/ssh/ssh_config`, and uses
+the ssh agent in `SSH_AUTH_SOCK` (on Linux it also looks in the systemd user
+environment and `$XDG_RUNTIME_DIR`). Keys that you confirm are kept in the
+plugin's own `known_hosts` file in that daemon's plugin data directory. bb never
+writes `~/.ssh`: it sets `UpdateHostKeys no` and `CheckHostIP no` on each
+connection.
+
+On the new computer bb uses the `node` on the SSH PATH. When that is missing or
+older than 22.19, it asks the interactive login shell, then the login shell, then
+looks in the default nvm, fnm, asdf, mise, Volta, Homebrew and `/usr/local/bin`
+locations.
+
+bb refuses a new host key from an agent thread that identifies itself through the
+`bb` CLI. This is a guardrail against mistakes, not a security boundary.
+
 ## Client SSH Targets
 
 `~/.bb/client.json` is local to the machine showing the UI; the remote server

@@ -215,7 +215,7 @@ describe("MachineSettingsView", () => {
         description: "Install bb over SSH.",
         icon: "Terminal",
         logoUrl: null,
-        pluginId: "machine-ssh",
+        pluginId: "bb--machine-ssh",
         inputs: null,
         acceptsEmptyInputs: false,
         supportsSuspend: false,
