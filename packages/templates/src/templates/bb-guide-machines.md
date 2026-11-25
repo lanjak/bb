@@ -123,6 +123,14 @@ remove `--auto-update` from the launchd plist or systemd user unit and reload
 that service; foreground `bb-app host-daemon` runs leave it off unless you pass
 `--auto-update`.
 
+On Linux, the installer writes a systemd user unit unless it runs as root on a
+systemd host. A user unit stops when your last login session ends, so the
+installer enables lingering for your account (`loginctl enable-linger`), which
+keeps the daemon running after you log out and starts it at boot. If the system
+does not allow that without a password, the installer prints the `sudo` command
+to run and continues. Set `BB_INSTALL_NO_LINGER=1` when you run the installer to
+leave lingering as it is. Uninstalling the machine does not turn lingering off.
+
 Application logs rotate in `logs/server.N.log` and `logs/host-daemon.N.log`
 under the selected data directory. Startup errors, crashes, and other output
 that bypasses the logger are appended to `logs/server-stdio.log` and

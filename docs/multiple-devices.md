@@ -229,7 +229,10 @@ unavailable on a systemd host, installation fails before enrolling or creating
 a unit; rerun it from a systemd user session. In containers and on machines without systemd
 as init, the installer runs a detached daemon instead. Set
 `BB_INSTALL_SKIP_SERVICE=1` only when a detached daemon is acceptable: no
-service starts it after a reboot. The temporary daemon used
+service starts it after a reboot. After installing a user service, the installer
+enables lingering so the daemon keeps running after you log out
+(`BB_INSTALL_NO_LINGER=1` skips this; see
+[configuration](configuration.md#machine-installer)). The temporary daemon used
 for a first join is not supervised. When the installer starts a previously
 joined daemon without a service, its launcher restarts it after crashes and
 self-updates while the launcher remains running.

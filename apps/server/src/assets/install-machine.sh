@@ -1075,6 +1075,27 @@ systemd_escape() {
   printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g'
 }
 
+enable_user_linger() {
+  linger_enabled=no
+  command -v loginctl >/dev/null 2>&1 || return 0
+  linger_user=$(id -un)
+  if [ "$(loginctl show-user "$linger_user" --property=Linger --value 2>/dev/null || true)" = yes ]; then
+    linger_enabled=yes
+    return 0
+  fi
+  if [ "${BB_INSTALL_NO_LINGER:-0}" = 1 ]; then
+    detail "Linger was left off (BB_INSTALL_NO_LINGER=1), so the daemon stops when your last login session ends."
+    return 0
+  fi
+  if loginctl --no-ask-password enable-linger "$linger_user" >/dev/null 2>&1; then
+    linger_enabled=yes
+    complete_step "Enabled lingering for $linger_user, so the daemon keeps running after you log out"
+    return 0
+  fi
+  warning_step "Could not enable lingering for $linger_user, so the daemon stops when your last login session ends."
+  detail "To keep it running after you log out, run this once: sudo loginctl enable-linger $linger_user" >&2
+}
+
 if [ "$platform" = darwin ]; then
   service_dir="$HOME/Library/LaunchAgents"
   service_label="app.getbb.host-daemon.$service_slug"
@@ -1235,6 +1256,7 @@ EOF
     exit 1
   fi
   complete_step "Installed and started the systemd service ($systemd_scope)"
+  if [ "$systemd_scope" = --user ]; then enable_user_linger; fi
   printf '\n'
   log "$(green "●")" "$(bold "bb machine is ready")"
   printf '\n'
@@ -1245,6 +1267,8 @@ EOF
   printf '\n'
   if [ "$systemd_scope" = --system ]; then
     detail "Starts automatically when this machine boots."
+  elif [ "$linger_enabled" = yes ]; then
+    detail "Starts when this machine boots and keeps running after you log out."
   else
     detail "Starts with your systemd user session."
   fi

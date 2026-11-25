@@ -944,6 +944,14 @@ without systemd as init it runs a detached daemon instead. Set
 `BB_INSTALL_SKIP_SERVICE=1` on the installer command only when running without a
 service is intentional; nothing then restarts the daemon after a reboot.
 
+A systemd user service stops when the user's last login session ends, so after a
+user-service install the installer enables lingering for that user
+(`loginctl --no-ask-password enable-linger`). If the system requires a password
+for it, the installer warns, prints the `sudo loginctl enable-linger <user>`
+command, and still succeeds. Set `BB_INSTALL_NO_LINGER=1` on the installer
+command to leave lingering unchanged. Uninstalling a machine does not disable
+lingering.
+
 The installer writes these `config.json` fields; they are managed by bb, not
 user knobs. Do not copy, edit, or commit them, and re-add the machine instead of
 changing them:

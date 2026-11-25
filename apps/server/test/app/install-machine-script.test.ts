@@ -12,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { createServer as createNetServer } from "node:net";
 import { delimiter, dirname, join } from "node:path";
 import { CLI_LAUNCHER_MARKER } from "@bb/config/cli-command";
@@ -50,7 +50,25 @@ function createFixture(homeName = "home"): {
     join(binDir, "sleep"),
     '#!/bin/sh\ncase "$1" in 1) exec /bin/sleep 0.1 ;; *) exec /bin/sleep "$@" ;; esac\n',
   );
+  writeLoginctl({ binDir, dataDir, homeDir }, { linger: "yes" });
   return { binDir, dataDir, homeDir };
+}
+
+function writeLoginctl(
+  fixture: { binDir: string; dataDir: string; homeDir: string },
+  args: { linger: "yes" | "no"; enableExitCode?: number },
+): void {
+  writeExecutable(
+    join(fixture.binDir, "loginctl"),
+    `#!/bin/sh
+printf '%s\\n' "$*" >>"${join(fixture.dataDir, "loginctl.log")}"
+case "$*" in
+  *--property=Linger*) printf '%s\\n' '${args.linger}' ;;
+  *enable-linger*) exit ${args.enableExitCode ?? 0} ;;
+  *) exit 1 ;;
+esac
+`,
+  );
 }
 
 function writeExecutable(path: string, contents: string): void {
@@ -1769,7 +1787,10 @@ printf '%s\n' "$*" >>"${join(fixture.dataDir, "launchctl.log")}"
       join(fixture.binDir, "loginctl"),
       `#!/bin/sh
 printf '%s\\n' "$*" >>"${join(fixture.dataDir, "loginctl.log")}"
-printf '%s\\n' '${runtimeDir}'
+case "$*" in
+  *--property=Linger*) printf '%s\\n' yes ;;
+  *) printf '%s\\n' '${runtimeDir}' ;;
+esac
 `,
     );
     writeExecutable(
@@ -1792,7 +1813,7 @@ fi
 
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(join(fixture.dataDir, "loginctl.log"), "utf8")).toBe(
-      `show-user ${process.getuid?.()} --property=RuntimePath --value\n`,
+      `show-user ${process.getuid?.()} --property=RuntimePath --value\nshow-user ${userInfo().username} --property=Linger --value\n`,
     );
     expect(
       readFileSync(join(fixture.dataDir, "systemctl.log"), "utf8"),
@@ -1924,6 +1945,7 @@ fi
       expect(unit).toContain(
         `Environment="BB_APP_NPM_PREFIX=${realpathSync(fixture.dataDir)}/npm"`,
       );
+      expect(existsSync(join(fixture.dataDir, "loginctl.log"))).toBe(container);
       expect(unit).toContain("ManagedOOMPreference=avoid");
       expect(unit).toContain(
         `Environment="HOME=${fixture.homeDir.replaceAll("%", "%%")}"`,
@@ -1942,6 +1964,68 @@ fi
       );
     },
   );
+
+  it.each([
+    {
+      name: "enables lingering for a user unit",
+      linger: "no" as const,
+      enableExitCode: 0,
+      optOut: undefined,
+      enables: true,
+      stdout: "keeps running after you log out",
+      stderr: "",
+    },
+    {
+      name: "leaves lingering alone when it is already on",
+      linger: "yes" as const,
+      enableExitCode: 0,
+      optOut: undefined,
+      enables: false,
+      stdout: "keeps running after you log out",
+      stderr: "",
+    },
+    {
+      name: "prints the command to run when lingering cannot be enabled",
+      linger: "no" as const,
+      enableExitCode: 1,
+      optOut: undefined,
+      enables: true,
+      stdout: "Starts with your systemd user session.",
+      stderr: `sudo loginctl enable-linger ${userInfo().username}`,
+    },
+    {
+      name: "skips lingering with BB_INSTALL_NO_LINGER=1",
+      linger: "no" as const,
+      enableExitCode: 0,
+      optOut: "1",
+      enables: false,
+      stdout: "Linger was left off (BB_INSTALL_NO_LINGER=1)",
+      stderr: "",
+    },
+  ])("$name", (scenario) => {
+    const fixture = createFixture();
+    writeJoinedState(fixture);
+    writeServerInstallTools(fixture, 200);
+    writeRestartingSystemdUser(fixture);
+    writeLoginctl(fixture, scenario);
+
+    const result = runScript(BOOTSTRAP_ARGS, fixture, {
+      BB_INSTALL_NO_LINGER: scenario.optOut,
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(scenario.stdout);
+    expect(result.stderr).toContain(scenario.stderr);
+    const calls = readFileSync(
+      join(fixture.dataDir, "loginctl.log"),
+      "utf8",
+    );
+    expect(
+      calls.includes(
+        `--no-ask-password enable-linger ${userInfo().username}\n`,
+      ),
+    ).toBe(scenario.enables);
+  });
 
   it("replaces a matching legacy systemd unit with exactly one host service", () => {
     const fixture = createFixture();
